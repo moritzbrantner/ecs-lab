@@ -3,5 +3,20 @@
 version = 4
 
 [[package]]
+name = "ecs-reference"
+version = "0.1.0"
+dependencies = [
+ "ecs-workload",
+]
+
+[[package]]
 name = "ecs-runner"
+version = "0.1.0"
+dependencies = [
+ "ecs-reference",
+ "ecs-workload",
+]
+
+[[package]]
+name = "ecs-workload"
 version = "0.1.0"
