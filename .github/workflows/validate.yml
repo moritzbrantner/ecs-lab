@@ -1,0 +1,46 @@
+name: Validate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Prepare declared environment
+        run: bash scripts/codex-environment.sh setup
+
+      - name: Verify environment fingerprint
+        uses: moritzbrantner/coding-tooling@20afb614772346991b3e7ac60b5857ecab5472e3
+        with:
+          operation: environment-verify
+          install-mode: none
+
+      - name: Check repository conformance
+        uses: moritzbrantner/coding-tooling@20afb614772346991b3e7ac60b5857ecab5472e3
+        with:
+          operation: conformance
+          install-mode: none
+
+      - name: Check deterministic findings
+        uses: moritzbrantner/coding-tooling@20afb614772346991b3e7ac60b5857ecab5472e3
+        with:
+          operation: findings
+          install-mode: none
+
+      - name: Run fast validation tier
+        uses: moritzbrantner/coding-tooling@20afb614772346991b3e7ac60b5857ecab5472e3
+        with:
+          tier: fast
+          install-mode: none

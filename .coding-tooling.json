@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "profile": "repository-foundation-v1",
+  "tiers": {
+    "fast": ["format:check", "lint", "build", "test:unit"],
+    "standard": ["format:check", "lint", "build", "test:unit", "test:integration"],
+    "performance": ["benchmark:smoke"]
+  },
+  "requiredCapabilities": ["format:check", "lint", "build", "test:unit"],
+  "optionalCapabilities": ["test:integration", "benchmark:smoke"]
+}

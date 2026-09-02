@@ -1,0 +1,18 @@
+schema_version = 1
+
+[policy]
+track = "latest-stable"
+
+[system]
+apt = []
+
+[setup]
+commands = ["cargo fetch --locked"]
+
+[maintenance]
+commands = ["cargo fetch --locked"]
+
+[cache]
+paths = ["~/.cargo", "target"]
+
+[compatibility_holds]
