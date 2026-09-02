@@ -1,12 +1,4 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended"],
-  "dependencyDashboard": true,
-  "packageRules": [
-    {
-      "description": "Keep all dependency updates reviewable until repository gates are proven stable",
-      "matchUpdateTypes": ["major", "minor", "patch", "pin", "digest"],
-      "automerge": false
-    }
-  ]
+  "extends": ["github>moritzbrantner/coding-agent-conventions"]
 }
