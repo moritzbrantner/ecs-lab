@@ -1,9 +1,0 @@
-{
-  "schemaVersion": 1,
-  "ruleId": "BENCH-002",
-  "enforcement": {
-    "kind": "capability",
-    "capability": "benchmark",
-    "tiers": ["full"]
-  }
-}

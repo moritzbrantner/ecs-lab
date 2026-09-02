@@ -112,8 +112,6 @@ Read this section first. Open the linked managed source when a rule is relevant,
 - **GIT-002 — Separate implementation from publishing** — Implementation produces candidate changes; integration, pushing, merging, and publishing are separate steps. ([details](modules/git/conventions/git/README.md))
 - **GIT-003 — Use tiered local hooks without duplicating validation logic** — Pre-commit runs only very fast deterministic checks such as format checks, linting, schema/config validation, forbidden-pattern checks, and secret scanning. ([details](modules/git/conventions/git/README.md))
 - **GIT-004 — Pin CI action dependencies immutably** — Verification, security, release, and deployment workflows pin external GitHub Actions or reusable workflows to a full commit SHA rather than a mutable version tag. ([details](modules/git/conventions/git/README.md))
-- **BENCH-001 — Benchmark named representative scenarios** — Define a named workload, measured unit, optimization direction, sampling method, and environment fingerprint. ([details](modules/benchmarking/conventions/benchmarking/README.md))
-- **BENCH-002 — Compare candidates against versioned baselines** — Compare equivalent harness runs on equivalent infrastructure. ([details](modules/benchmarking/conventions/benchmarking/README.md))
 
 ## Installed modules
 
@@ -147,11 +145,6 @@ Read this section first. Open the linked managed source when a rule is relevant,
 
 - [modules/git/conventions/git/README.md](modules/git/conventions/git/README.md)
 - [modules/git/conventions/git/GIT-004.json](modules/git/conventions/git/GIT-004.json)
-
-### benchmarking
-
-- [modules/benchmarking/conventions/benchmarking/README.md](modules/benchmarking/conventions/benchmarking/README.md)
-- [modules/benchmarking/conventions/benchmarking/BENCH-002.json](modules/benchmarking/conventions/benchmarking/BENCH-002.json)
 
 ## Companion configuration assets
 
