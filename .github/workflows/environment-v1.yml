@@ -27,4 +27,4 @@ jobs:
   canary:
     permissions:
       contents: read
-    uses: moritzbrantner/reusable-workflows/.github/workflows/environment-v1-canary.yml@d6087ca25db3a4ef6be98deb062e0c9d413da167
+    uses: moritzbrantner/reusable-workflows/.github/workflows/environment-v1-canary.yml@f15e330ca3b79b7730bd642692abc48c9bb550de
