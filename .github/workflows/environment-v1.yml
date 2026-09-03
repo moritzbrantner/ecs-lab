@@ -1,0 +1,30 @@
+name: Environment v1
+
+on:
+  pull_request:
+    paths:
+      - ".repository-environment.toml"
+      - "scripts/codex-environment.sh"
+      - "rust-toolchain.toml"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/environment-v1.yml"
+  push:
+    branches: [main]
+    paths:
+      - ".repository-environment.toml"
+      - "scripts/codex-environment.sh"
+      - "rust-toolchain.toml"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/environment-v1.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  canary:
+    permissions:
+      contents: read
+    uses: moritzbrantner/reusable-workflows/.github/workflows/environment-v1-canary.yml@f15e330ca3b79b7730bd642692abc48c9bb550de
