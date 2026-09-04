@@ -1,0 +1,304 @@
+:root {
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  color-scheme: light dark;
+  line-height: 1.55;
+  font-synthesis: none;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(circle at 15% 0%, color-mix(in srgb, CanvasText 8%, transparent), transparent 32rem),
+    Canvas;
+  color: CanvasText;
+}
+
+a {
+  color: inherit;
+}
+
+code {
+  font-size: 0.92em;
+}
+
+.shell {
+  width: min(76rem, calc(100vw - 2rem));
+  margin: 0 auto;
+  padding: 4.5rem 0 6rem;
+}
+
+.hero,
+.section-copy {
+  max-width: 58rem;
+}
+
+.hero {
+  display: grid;
+  gap: 1.35rem;
+}
+
+.eyebrow {
+  margin: 0;
+  font-size: 0.74rem;
+  font-weight: 760;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  opacity: 0.66;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin-top: 0;
+}
+
+h1 {
+  margin-bottom: 0;
+  font-size: clamp(3.2rem, 10vw, 7.5rem);
+  line-height: 0.86;
+  letter-spacing: -0.075em;
+}
+
+h2 {
+  margin-bottom: 0.7rem;
+  font-size: clamp(1.8rem, 4vw, 2.8rem);
+  line-height: 1;
+  letter-spacing: -0.04em;
+}
+
+.lede {
+  max-width: 52rem;
+  margin-bottom: 0;
+  font-size: clamp(1.05rem, 2vw, 1.35rem);
+  opacity: 0.78;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.button {
+  display: inline-flex;
+  min-height: 2.8rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, CanvasText 22%, transparent);
+  border-radius: 999px;
+  padding: 0.65rem 1rem;
+  text-decoration: none;
+}
+
+.button.primary {
+  background: CanvasText;
+  color: Canvas;
+}
+
+.demo,
+.method,
+.questions {
+  margin-top: 5.5rem;
+}
+
+.section-copy > p:last-child,
+.method-grid p,
+.cards p,
+.runtime-status {
+  opacity: 0.72;
+}
+
+.demo-card {
+  display: grid;
+  gap: 1.4rem;
+  margin-top: 1.5rem;
+  border: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
+  border-radius: 1.25rem;
+  padding: clamp(1rem, 3vw, 1.5rem);
+  background: color-mix(in srgb, CanvasText 3%, Canvas);
+}
+
+.world {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 8;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, CanvasText 20%, transparent);
+  border-radius: 0.9rem;
+  background:
+    linear-gradient(color-mix(in srgb, CanvasText 6%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, CanvasText 6%, transparent) 1px, transparent 1px),
+    Canvas;
+  background-size: 10% 12.5%;
+}
+
+.axis {
+  position: absolute;
+  background: color-mix(in srgb, CanvasText 24%, transparent);
+}
+
+.axis-x {
+  right: 0;
+  bottom: 10%;
+  left: 0;
+  height: 1px;
+}
+
+.axis-y {
+  top: 0;
+  bottom: 0;
+  left: 10%;
+  width: 1px;
+}
+
+.entity {
+  position: absolute;
+  left: 10%;
+  bottom: 10%;
+  display: grid;
+  width: 2.6rem;
+  height: 2.6rem;
+  place-items: center;
+  border-radius: 0.75rem;
+  background: CanvasText;
+  color: Canvas;
+  font-weight: 800;
+  transform: translate(-50%, 50%);
+  transition:
+    left 140ms ease,
+    bottom 140ms ease;
+}
+
+.controls {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.controls label {
+  font-size: 0.9rem;
+}
+
+.controls input {
+  width: 100%;
+}
+
+.readout {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+  margin: 0;
+}
+
+.readout div {
+  border-top: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
+  padding-top: 0.8rem;
+}
+
+.readout dt {
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.62;
+}
+
+.readout dd {
+  margin: 0.2rem 0 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.runtime-status {
+  margin-bottom: 0;
+  font-size: 0.9rem;
+}
+
+.runtime-status[data-state="ready"] {
+  opacity: 0.9;
+}
+
+.runtime-status[data-state="error"] {
+  font-weight: 700;
+  opacity: 1;
+}
+
+.method-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+  padding: 0;
+  list-style: none;
+}
+
+.method-grid li,
+.cards article {
+  border-top: 1px solid color-mix(in srgb, CanvasText 22%, transparent);
+  padding-top: 1rem;
+}
+
+.method-grid span {
+  display: block;
+  margin-bottom: 1.4rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  opacity: 0.6;
+}
+
+.method-grid strong {
+  display: block;
+  margin-bottom: 0.4rem;
+}
+
+.method-grid p,
+.cards p {
+  margin-bottom: 0;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+@media (max-width: 58rem) {
+  .method-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .cards {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 38rem) {
+  .shell {
+    width: min(100% - 1.25rem, 76rem);
+    padding-top: 2.75rem;
+  }
+
+  .readout,
+  .method-grid,
+  .cards {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .entity {
+    transition: none;
+  }
+}
