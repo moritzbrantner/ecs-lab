@@ -24,6 +24,15 @@ name = "ecs-runner"
 version = "0.1.0"
 dependencies = [
  "ecs-reference",
+ "ecs-sparse-set",
+ "ecs-workload",
+]
+
+[[package]]
+name = "ecs-sparse-set"
+version = "0.1.0"
+dependencies = [
+ "ecs-reference",
  "ecs-workload",
 ]
 

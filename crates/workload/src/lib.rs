@@ -54,6 +54,40 @@ impl Workload {
     }
 
     #[must_use]
+    pub fn motion_scenario(seed: u32, entity_count: u32, rounds: u32) -> Self {
+        let mut generator = Generator::new(seed);
+        let mut operations = Vec::new();
+
+        for raw_id in 0..entity_count {
+            let entity = EntityId(raw_id);
+            operations.push(Operation::Spawn(entity));
+            operations.push(Operation::SetPosition(
+                entity,
+                Position::new(generator.position(), generator.position()),
+            ));
+            operations.push(Operation::SetVelocity(
+                entity,
+                Velocity::new(generator.velocity(), generator.velocity()),
+            ));
+        }
+
+        for _ in 0..rounds {
+            let ticks = i32::from(generator.next_u32().to_le_bytes()[0] % 5 + 1);
+            operations.push(Operation::Integrate { ticks });
+            if entity_count > 0 {
+                let entity = EntityId(generator.next_u32() % entity_count);
+                operations.push(Operation::RemoveVelocity(entity));
+                operations.push(Operation::SetVelocity(
+                    entity,
+                    Velocity::new(generator.velocity(), generator.velocity()),
+                ));
+            }
+        }
+
+        Self::new(operations)
+    }
+
+    #[must_use]
     pub fn operations(&self) -> &[Operation] {
         &self.operations
     }
@@ -102,6 +136,32 @@ impl fmt::Display for WorkloadError {
 
 impl std::error::Error for WorkloadError {}
 
+struct Generator {
+    state: u32,
+}
+
+impl Generator {
+    const fn new(seed: u32) -> Self {
+        Self { state: seed }
+    }
+
+    fn next_u32(&mut self) -> u32 {
+        self.state = self
+            .state
+            .wrapping_mul(1_664_525)
+            .wrapping_add(1_013_904_223);
+        self.state
+    }
+
+    fn position(&mut self) -> i64 {
+        i64::from(self.next_u32() % 2_001) - 1_000
+    }
+
+    fn velocity(&mut self) -> i32 {
+        i32::from(self.next_u32().to_le_bytes()[0] % 21) - 10
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{EntityId, Operation, Workload};
@@ -115,5 +175,29 @@ mod tests {
         let workload = Workload::new(operations.clone());
 
         assert_eq!(workload.operations(), operations);
+    }
+
+    #[test]
+    fn motion_scenario_is_seed_deterministic() {
+        assert_eq!(
+            Workload::motion_scenario(17, 32, 5),
+            Workload::motion_scenario(17, 32, 5)
+        );
+        assert_ne!(
+            Workload::motion_scenario(17, 32, 5),
+            Workload::motion_scenario(18, 32, 5)
+        );
+    }
+
+    #[test]
+    fn empty_motion_scenario_remains_valid() {
+        let workload = Workload::motion_scenario(1, 0, 4);
+        assert_eq!(workload.operations().len(), 4);
+        assert!(
+            workload
+                .operations()
+                .iter()
+                .all(|operation| matches!(operation, Operation::Integrate { .. }))
+        );
     }
 }
