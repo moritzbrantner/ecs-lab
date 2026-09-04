@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="ECS Lab compares entity-component-system storage and execution strategies against deterministic workloads and a reference model."
+    />
+    <title>ECS Lab — compare ECS designs against a reference model</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <p class="eyebrow">Entity-component-system laboratory · Rust → WebAssembly</p>
+        <h1>ECS Lab</h1>
+        <p class="lede">
+          Compare ECS storage and execution strategies without losing the semantic baseline. Every
+          candidate must agree with deterministic workloads and a deliberately simple reference world.
+        </p>
+        <nav class="actions" aria-label="Project links">
+          <a class="button primary" href="#reference-demo">Run the reference world</a>
+          <a class="button" href="https://github.com/moritzbrantner/ecs-lab">Source on GitHub</a>
+        </nav>
+      </header>
+
+      <section class="demo" id="reference-demo" aria-labelledby="demo-title">
+        <div class="section-copy">
+          <p class="eyebrow">Live semantic oracle</p>
+          <h2 id="demo-title">One entity, integrated by the Rust reference ECS</h2>
+          <p>
+            The browser does not calculate the position itself. Moving the tick slider calls the
+            compiled <code>ReferenceWorld</code> through WebAssembly, using the same spawn, component,
+            and integration operations exercised by native tests.
+          </p>
+        </div>
+
+        <div class="demo-card">
+          <div class="world" id="world" aria-label="Two-dimensional ECS reference world">
+            <div class="axis axis-x" aria-hidden="true"></div>
+            <div class="axis axis-y" aria-hidden="true"></div>
+            <div class="entity" id="entity" aria-label="Simulated entity">1</div>
+          </div>
+
+          <div class="controls">
+            <label for="ticks">Integration ticks: <strong id="ticks-label">5</strong></label>
+            <input id="ticks" type="range" min="0" max="20" value="5" step="1" />
+          </div>
+
+          <dl class="readout">
+            <div><dt>Start</dt><dd id="start-position">—</dd></div>
+            <div><dt>Velocity</dt><dd id="velocity">—</dd></div>
+            <div><dt>Result</dt><dd id="result-position">Loading Rust…</dd></div>
+          </dl>
+          <p class="runtime-status" id="runtime-status">Loading WebAssembly module…</p>
+        </div>
+      </section>
+
+      <section class="method" aria-labelledby="method-title">
+        <div class="section-copy">
+          <p class="eyebrow">Comparison method</p>
+          <h2 id="method-title">Optimize implementations, not semantics</h2>
+          <p>
+            The lab separates the question “what should this workload mean?” from “which storage
+            strategy executes it best?” so faster candidates can be checked mechanically.
+          </p>
+        </div>
+        <ol class="method-grid">
+          <li><span>01</span><strong>Workload</strong><p>Generate deterministic entity/component operations and seeds.</p></li>
+          <li><span>02</span><strong>Reference</strong><p>Replay them in the simple BTreeMap-backed semantic oracle.</p></li>
+          <li><span>03</span><strong>Candidate</strong><p>Replay the same operations in sparse-set, archetype, or future designs.</p></li>
+          <li><span>04</span><strong>Parity</strong><p>Compare snapshots before considering performance evidence.</p></li>
+          <li><span>05</span><strong>Measure</strong><p>Benchmark named scenarios with reproducible environment metadata.</p></li>
+        </ol>
+      </section>
+
+      <section class="questions" aria-labelledby="questions-title">
+        <div class="section-copy">
+          <p class="eyebrow">Questions worth measuring</p>
+          <h2 id="questions-title">What changes as the world gets real?</h2>
+        </div>
+        <div class="cards">
+          <article><h3>Iteration density</h3><p>When do packed component arrays beat simpler maps by enough to matter?</p></article>
+          <article><h3>Mutation cost</h3><p>What do frequent component add/remove operations do to each storage model?</p></article>
+          <article><h3>Query shape</h3><p>How do one-, two-, and many-component queries change the crossover points?</p></article>
+          <article><h3>Scheduling</h3><p>When does parallel execution help, and when does coordination erase the gain?</p></article>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

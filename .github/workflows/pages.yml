@@ -1,0 +1,34 @@
+name: Pages
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy-pages:
+    permissions:
+      actions: read
+      contents: read
+      pages: write
+      id-token: write
+      packages: read
+    uses: moritzbrantner/reusable-workflows/.github/workflows/deploy-pages.yml@3b15546083e66aeba487a2e653e3ffaacbfe7220
+    with:
+      node_version: ""
+      bun_version: ""
+      install_command: ""
+      build_command: bash scripts/build-pages.sh
+      artifact_path: pages-dist
+      cache_bun: false
+      cache_node: false
+      concurrency_group: ecs-lab-pages
+      cancel_in_progress: false
