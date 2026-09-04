@@ -4,13 +4,15 @@
   "requestedModules": [
     "rust",
     "environment",
-    "git"
+    "git",
+    "benchmarking"
   ],
   "resolvedModules": [
     "base",
     "rust",
     "environment",
-    "git"
+    "git",
+    "benchmarking"
   ],
   "files": {
     "modules/base/principles/README.md": "cf42738840df175d9968923006488c8fe2837cbce1530563a6df04c2d7cb6a20",
@@ -32,7 +34,9 @@
     "modules/environment/conventions/environment/ENV-003.json": "00cd5d367701829437017c6c3a31801f614f00d151e90fd3653ee54f3235ecd9",
     "modules/git/conventions/git/README.md": "cb0c94587017ac5f06ebcc07662a8a9d335e565e14c5fda60ac7c29e5fb479b5",
     "modules/git/conventions/git/GIT-004.json": "0521ce533d9055e07dfa2183c947aa2578ae5d0da77a9296454ab0bb0f3d822d",
+    "modules/benchmarking/conventions/benchmarking/README.md": "955311068f20e5510783a70097a23797325153fe01ff824eb4977ff6f8a5f96f",
+    "modules/benchmarking/conventions/benchmarking/BENCH-002.json": "f5813c38a52ae73694745a1d2d518ba9ac041e2fbf0d0a5551fb93de968b0ce0",
     "configurations.json": "569bf6db9f0a2c85726ccb231698002bb12727682fbfd96e93472591427b14f2",
-    "index.md": "e2027579c7324a86dca58ca127727aab35207f1528f17e1a26b66a32ee6f9160"
+    "index.md": "c54bbabaa5a4a1d8eb6f21fbfad567e68a59053e5de09eb6a3ba24124a3f2f84"
   }
 }
