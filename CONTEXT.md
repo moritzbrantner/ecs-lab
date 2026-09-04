@@ -18,6 +18,12 @@ Measure how different ECS storage strategies behave under identical deterministi
 
 **Benchmark scenario** — A named, versionable workload configuration with explicit entity count, operation mix/seed, measured unit, and environment identity.
 
-## Initial boundary
+**Physics workload** — A storage-independent transformation from an observable snapshot plus body configuration into ordinary ECS workload operations and descriptive contact evidence.
 
-The first horizon is entirely Rust and CPU-local. Rendering, networking, persistence, `rust-kernels`, Worldgen, and other repositories are outside the dependency graph.
+**Collision-kernel boundary** — Reusable collision decisions live in pinned `rust-kernels` crates. ECS Lab owns ECS-facing scheduling/integration/response experiments and does not depend on the Collision Lab application.
+
+## Current boundary
+
+The storage experiments remain Rust and CPU-local. Rendering, networking, persistence, Worldgen, and application-level dependencies remain outside the graph.
+
+Cross-repository reuse is allowed only where a task explicitly establishes a reusable-kernel boundary. The first such boundary is the AABB physics workload, which pins `geometry-kernels` and `spatial-kernels` from `rust-kernels` while preserving `collision-lab` as an independent teaching/visualization consumer.
