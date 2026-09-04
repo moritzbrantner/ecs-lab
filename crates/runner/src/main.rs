@@ -1,5 +1,6 @@
 use std::{hint::black_box, time::Instant};
 
+use ecs_physics_scenarios::FallingBoxesScenario;
 use ecs_reference::ReferenceWorld;
 use ecs_sparse_set::SparseWorld;
 use ecs_workload::{EntityId, Operation, Position, Velocity, Workload, WorldSnapshot};
@@ -42,6 +43,11 @@ fn run_demo() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn run_benchmarks(smoke: bool, fingerprint: &str) {
+    run_motion_benchmarks(smoke, fingerprint);
+    run_physics_benchmarks(smoke, fingerprint);
+}
+
+fn run_motion_benchmarks(smoke: bool, fingerprint: &str) {
     let (entity_count, rounds, repetitions) = if smoke {
         (1_000, 10, 2)
     } else {
@@ -79,6 +85,73 @@ fn run_benchmarks(smoke: bool, fingerprint: &str) {
             world.snapshot()
         },
     );
+}
+
+fn run_physics_benchmarks(smoke: bool, fingerprint: &str) {
+    let (dynamic_count, frames, repetitions) = if smoke {
+        (96, 12, 2)
+    } else {
+        (512, 40, 3)
+    };
+    let scenario = FallingBoxesScenario::new(dynamic_count);
+    let body_count = dynamic_count.saturating_add(1);
+
+    benchmark(
+        "falling-boxes",
+        "reference",
+        body_count,
+        frames,
+        repetitions,
+        fingerprint,
+        || reference_physics_snapshot(&scenario, frames),
+    );
+    benchmark(
+        "falling-boxes",
+        "sparse-set",
+        body_count,
+        frames,
+        repetitions,
+        fingerprint,
+        || sparse_physics_snapshot(&scenario, frames),
+    );
+}
+
+fn reference_physics_snapshot(scenario: &FallingBoxesScenario, frames: u32) -> WorldSnapshot {
+    let mut world = ReferenceWorld::new();
+    if world.replay(scenario.setup()).is_err() {
+        return WorldSnapshot::default();
+    }
+    for _ in 0..frames {
+        let physics = match scenario.step(&world.snapshot()) {
+            Ok(physics) => physics,
+            Err(_) => return WorldSnapshot::default(),
+        };
+        for operation in physics.operations() {
+            if world.apply(*operation).is_err() {
+                return WorldSnapshot::default();
+            }
+        }
+    }
+    world.snapshot()
+}
+
+fn sparse_physics_snapshot(scenario: &FallingBoxesScenario, frames: u32) -> WorldSnapshot {
+    let mut world = SparseWorld::new();
+    if world.replay(scenario.setup()).is_err() {
+        return WorldSnapshot::default();
+    }
+    for _ in 0..frames {
+        let physics = match scenario.step(&world.snapshot()) {
+            Ok(physics) => physics,
+            Err(_) => return WorldSnapshot::default(),
+        };
+        for operation in physics.operations() {
+            if world.apply(*operation).is_err() {
+                return WorldSnapshot::default();
+            }
+        }
+    }
+    world.snapshot()
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -5,15 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="ECS Lab compares entity-component-system storage and execution strategies against deterministic workloads and a reference model."
+      content="ECS Lab compares entity-component-system storage, deterministic physics workloads, and optional WebGPU compute against reference semantics."
     />
     <title>ECS Lab — compare ECS designs against a reference model</title>
     <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./webgpu.css" />
   </head>
   <body>
     <main class="shell">
       <header class="hero">
-        <p class="eyebrow">Entity-component-system laboratory · Rust → WebAssembly</p>
+        <p class="eyebrow">Entity-component-system laboratory · Rust → WebAssembly → optional WebGPU</p>
         <h1>ECS Lab</h1>
         <p class="lede">
           Compare ECS storage and execution strategies without losing the semantic baseline. Every
@@ -21,6 +22,7 @@
         </p>
         <nav class="actions" aria-label="Project links">
           <a class="button primary" href="#reference-demo">Run the reference world</a>
+          <a class="button" href="#webgpu-demo">Check WebGPU parity</a>
           <a class="button" href="https://github.com/moritzbrantner/ecs-lab">Source on GitHub</a>
         </nav>
       </header>
@@ -57,20 +59,54 @@
         </div>
       </section>
 
+      <section class="demo" id="webgpu-demo" aria-labelledby="webgpu-title">
+        <div class="section-copy">
+          <p class="eyebrow">Physics compute · optional accelerator</p>
+          <h2 id="webgpu-title">WebGPU must prove the same collision pairs before speed counts</h2>
+          <p>
+            Rust owns the falling-box scenario, advances it through the canonical physics workload,
+            and produces the CPU AABB pair bitset with the same reusable collision kernels used by
+            Collision Lab. WebGPU receives that exact frame. GPU timing is shown only after every
+            bitset word matches the Rust result.
+          </p>
+        </div>
+
+        <div class="demo-card webgpu-card">
+          <label class="toggle-control" for="webgpu-enabled">
+            <input id="webgpu-enabled" type="checkbox" />
+            <span><strong>Enable WebGPU verification</strong><small>Off by default; CPU semantics remain authoritative.</small></span>
+          </label>
+
+          <dl class="readout webgpu-readout">
+            <div><dt>Rust frame</dt><dd id="webgpu-bodies">Preparing…</dd></div>
+            <div><dt>CPU overlaps</dt><dd id="cpu-overlaps">—</dd></div>
+            <div><dt>GPU overlaps</dt><dd id="gpu-overlaps">—</dd></div>
+            <div><dt>Pair parity</dt><dd id="gpu-parity">Not run</dd></div>
+            <div><dt>GPU evidence</dt><dd id="gpu-timing">—</dd></div>
+          </dl>
+          <p class="runtime-status" id="webgpu-status">
+            Waiting for the Rust WebAssembly collision fixture…
+          </p>
+          <p class="hint">
+            Add <code>?webgpu=1</code> to the page URL to opt into the WebGPU check automatically.
+          </p>
+        </div>
+      </section>
+
       <section class="method" aria-labelledby="method-title">
         <div class="section-copy">
           <p class="eyebrow">Comparison method</p>
           <h2 id="method-title">Optimize implementations, not semantics</h2>
           <p>
-            The lab separates the question “what should this workload mean?” from “which storage
-            strategy executes it best?” so faster candidates can be checked mechanically.
+            The lab separates the question “what should this workload mean?” from “which storage or
+            compute strategy executes it best?” so faster candidates can be checked mechanically.
           </p>
         </div>
         <ol class="method-grid">
-          <li><span>01</span><strong>Workload</strong><p>Generate deterministic entity/component operations and seeds.</p></li>
+          <li><span>01</span><strong>Workload</strong><p>Generate deterministic entity/component and physics operations.</p></li>
           <li><span>02</span><strong>Reference</strong><p>Replay them in the simple BTreeMap-backed semantic oracle.</p></li>
-          <li><span>03</span><strong>Candidate</strong><p>Replay the same operations in sparse-set, archetype, or future designs.</p></li>
-          <li><span>04</span><strong>Parity</strong><p>Compare snapshots before considering performance evidence.</p></li>
+          <li><span>03</span><strong>Candidate</strong><p>Replay the same work in sparse-set, archetype, or future designs.</p></li>
+          <li><span>04</span><strong>Parity</strong><p>Compare snapshots or collision bitsets before considering performance.</p></li>
           <li><span>05</span><strong>Measure</strong><p>Benchmark named scenarios with reproducible environment metadata.</p></li>
         </ol>
       </section>
@@ -82,8 +118,8 @@
         </div>
         <div class="cards">
           <article><h3>Iteration density</h3><p>When do packed component arrays beat simpler maps by enough to matter?</p></article>
-          <article><h3>Mutation cost</h3><p>What do frequent component add/remove operations do to each storage model?</p></article>
-          <article><h3>Query shape</h3><p>How do one-, two-, and many-component queries change the crossover points?</p></article>
+          <article><h3>Physics workload</h3><p>How do storage choices behave under repeated gravity, contacts, and component writes?</p></article>
+          <article><h3>Broad phase</h3><p>When should naive all-pairs give way to spatial kernels or GPU candidate generation?</p></article>
           <article><h3>Scheduling</h3><p>When does parallel execution help, and when does coordination erase the gain?</p></article>
         </div>
       </section>
