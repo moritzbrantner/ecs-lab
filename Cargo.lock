@@ -3,6 +3,16 @@
 version = 4
 
 [[package]]
+name = "ecs-physics"
+version = "0.1.0"
+dependencies = [
+ "ecs-reference",
+ "ecs-workload",
+ "geometry-kernels",
+ "spatial-kernels",
+]
+
+[[package]]
 name = "ecs-reference"
 version = "0.1.0"
 dependencies = [
@@ -20,3 +30,16 @@ dependencies = [
 [[package]]
 name = "ecs-workload"
 version = "0.1.0"
+
+[[package]]
+name = "geometry-kernels"
+version = "0.1.0"
+source = "git+https://github.com/moritzbrantner/rust-kernels?rev=986bff4dc8d13a64b90fab3a9f7f02bb8d1aa35e#986bff4dc8d13a64b90fab3a9f7f02bb8d1aa35e"
+dependencies = [
+ "spatial-kernels",
+]
+
+[[package]]
+name = "spatial-kernels"
+version = "0.1.0"
+source = "git+https://github.com/moritzbrantner/rust-kernels?rev=986bff4dc8d13a64b90fab3a9f7f02bb8d1aa35e#986bff4dc8d13a64b90fab3a9f7f02bb8d1aa35e"
