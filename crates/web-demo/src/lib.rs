@@ -90,10 +90,7 @@ pub extern "C" fn webgpu_body_count() -> u32 {
     let Some(frame) = webgpu_frame() else {
         return 0;
     };
-    match u32::try_from(frame.bodies().len()) {
-        Ok(count) => count,
-        Err(_) => 0,
-    }
+    u32::try_from(frame.bodies().len()).unwrap_or_default()
 }
 
 #[unsafe(no_mangle)]
@@ -106,10 +103,7 @@ pub extern "C" fn webgpu_pair_word_count() -> u32 {
     let Some(frame) = webgpu_frame() else {
         return 0;
     };
-    match u32::try_from(frame.pair_words().len()) {
-        Ok(count) => count,
-        Err(_) => 0,
-    }
+    u32::try_from(frame.pair_words().len()).unwrap_or_default()
 }
 
 #[unsafe(no_mangle)]

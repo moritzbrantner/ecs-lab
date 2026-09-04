@@ -6,6 +6,7 @@ use ecs_sparse_set::SparseWorld;
 use ecs_workload::{EntityId, Operation, Position, Velocity, Workload, WorldSnapshot};
 
 const BENCHMARK_SEED: u32 = 0x5EED_CAFE;
+const FALLING_BOX_SEED: u32 = 0;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut arguments = std::env::args().skip(1);
@@ -60,6 +61,7 @@ fn run_motion_benchmarks(smoke: bool, fingerprint: &str) {
         "reference",
         entity_count,
         rounds,
+        BENCHMARK_SEED,
         repetitions,
         fingerprint,
         || {
@@ -75,6 +77,7 @@ fn run_motion_benchmarks(smoke: bool, fingerprint: &str) {
         "sparse-set",
         entity_count,
         rounds,
+        BENCHMARK_SEED,
         repetitions,
         fingerprint,
         || {
@@ -88,11 +91,7 @@ fn run_motion_benchmarks(smoke: bool, fingerprint: &str) {
 }
 
 fn run_physics_benchmarks(smoke: bool, fingerprint: &str) {
-    let (dynamic_count, frames, repetitions) = if smoke {
-        (96, 12, 2)
-    } else {
-        (512, 40, 3)
-    };
+    let (dynamic_count, frames, repetitions) = if smoke { (96, 12, 2) } else { (512, 40, 3) };
     let scenario = FallingBoxesScenario::new(dynamic_count);
     let body_count = dynamic_count.saturating_add(1);
 
@@ -101,6 +100,7 @@ fn run_physics_benchmarks(smoke: bool, fingerprint: &str) {
         "reference",
         body_count,
         frames,
+        FALLING_BOX_SEED,
         repetitions,
         fingerprint,
         || reference_physics_snapshot(&scenario, frames),
@@ -110,6 +110,7 @@ fn run_physics_benchmarks(smoke: bool, fingerprint: &str) {
         "sparse-set",
         body_count,
         frames,
+        FALLING_BOX_SEED,
         repetitions,
         fingerprint,
         || sparse_physics_snapshot(&scenario, frames),
@@ -122,9 +123,8 @@ fn reference_physics_snapshot(scenario: &FallingBoxesScenario, frames: u32) -> W
         return WorldSnapshot::default();
     }
     for _ in 0..frames {
-        let physics = match scenario.step(&world.snapshot()) {
-            Ok(physics) => physics,
-            Err(_) => return WorldSnapshot::default(),
+        let Ok(physics) = scenario.step(&world.snapshot()) else {
+            return WorldSnapshot::default();
         };
         for operation in physics.operations() {
             if world.apply(*operation).is_err() {
@@ -141,9 +141,8 @@ fn sparse_physics_snapshot(scenario: &FallingBoxesScenario, frames: u32) -> Worl
         return WorldSnapshot::default();
     }
     for _ in 0..frames {
-        let physics = match scenario.step(&world.snapshot()) {
-            Ok(physics) => physics,
-            Err(_) => return WorldSnapshot::default(),
+        let Ok(physics) = scenario.step(&world.snapshot()) else {
+            return WorldSnapshot::default();
         };
         for operation in physics.operations() {
             if world.apply(*operation).is_err() {
@@ -160,6 +159,7 @@ fn benchmark(
     implementation: &str,
     entity_count: u32,
     rounds: u32,
+    seed: u32,
     repetitions: u32,
     fingerprint: &str,
     mut run: impl FnMut() -> WorldSnapshot,
@@ -170,7 +170,7 @@ fn benchmark(
     }
     let elapsed = started.elapsed();
     println!(
-        "scenario={scenario} implementation={implementation} entities={entity_count} rounds={rounds} seed={BENCHMARK_SEED} repetitions={repetitions} elapsed_ns={} environment_fingerprint={fingerprint}",
+        "scenario={scenario} implementation={implementation} entities={entity_count} rounds={rounds} seed={seed} repetitions={repetitions} elapsed_ns={} environment_fingerprint={fingerprint}",
         elapsed.as_nanos()
     );
 }

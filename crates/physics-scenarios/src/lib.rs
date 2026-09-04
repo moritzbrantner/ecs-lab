@@ -2,7 +2,9 @@ use std::{collections::BTreeMap, fmt};
 
 use ecs_physics::{PhysicsBody, PhysicsConfig, PhysicsError, PhysicsStep, step};
 use ecs_reference::ReferenceWorld;
-use ecs_workload::{EntityId, EntitySnapshot, Operation, Position, Velocity, Workload, WorkloadError, WorldSnapshot};
+use ecs_workload::{
+    EntityId, Operation, Position, Velocity, Workload, WorkloadError, WorldSnapshot,
+};
 use geometry_kernels::aabb_aabb;
 use spatial_kernels::Aabb;
 
@@ -88,7 +90,9 @@ impl FallingBoxesScenario {
         world.replay(&self.setup).map_err(ScenarioError::Workload)?;
 
         for _ in 0..frames {
-            let physics = self.step(&world.snapshot()).map_err(ScenarioError::Physics)?;
+            let physics = self
+                .step(&world.snapshot())
+                .map_err(ScenarioError::Physics)?;
             apply_reference_operations(&mut world, physics.operations())?;
         }
 
@@ -125,7 +129,10 @@ pub struct BroadPhaseFrame {
 }
 
 impl BroadPhaseFrame {
-    fn from_snapshot(snapshot: &WorldSnapshot, bodies: &[PhysicsBody]) -> Result<Self, ScenarioError> {
+    fn from_snapshot(
+        snapshot: &WorldSnapshot,
+        bodies: &[PhysicsBody],
+    ) -> Result<Self, ScenarioError> {
         let entities = snapshot
             .entities()
             .iter()
@@ -203,7 +210,9 @@ impl fmt::Display for ScenarioError {
         match self {
             Self::Workload(error) => write!(formatter, "scenario workload failed: {error}"),
             Self::Physics(error) => write!(formatter, "scenario physics failed: {error}"),
-            Self::MissingEntity(entity) => write!(formatter, "scenario entity {} is missing", entity.0),
+            Self::MissingEntity(entity) => {
+                write!(formatter, "scenario entity {} is missing", entity.0)
+            }
             Self::MissingPosition(entity) => {
                 write!(formatter, "scenario entity {} has no position", entity.0)
             }
@@ -306,7 +315,11 @@ mod tests {
         assert_eq!(sparse.replay(scenario.setup()), Ok(()));
 
         for frame in 0..8 {
-            assert_eq!(sparse.snapshot(), reference.snapshot(), "before frame {frame}");
+            assert_eq!(
+                sparse.snapshot(),
+                reference.snapshot(),
+                "before frame {frame}"
+            );
             let reference_step = scenario.step(&reference.snapshot());
             let sparse_step = scenario.step(&sparse.snapshot());
             assert_eq!(sparse_step, reference_step, "physics step {frame}");
@@ -350,11 +363,9 @@ mod tests {
             Err(error) => panic!("unexpected physics error: {error}"),
         };
 
-        assert!(
-            physics
-                .operations()
-                .iter()
-                .all(|operation| matches!(operation, Operation::SetPosition(..) | Operation::SetVelocity(..)))
-        );
+        assert!(physics.operations().iter().all(|operation| matches!(
+            operation,
+            Operation::SetPosition(..) | Operation::SetVelocity(..)
+        )));
     }
 }
