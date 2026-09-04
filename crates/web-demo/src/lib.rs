@@ -167,7 +167,7 @@ mod tests {
         assert!(webgpu_cpu_overlap_count() > 0);
 
         let set_bits = (0..webgpu_pair_word_count())
-            .map(webgpu_pair_word)
+            .map(|index| webgpu_pair_word(index))
             .map(u32::count_ones)
             .sum::<u32>();
         assert_eq!(set_bits, webgpu_cpu_overlap_count());
