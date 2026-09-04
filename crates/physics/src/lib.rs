@@ -93,12 +93,18 @@ impl fmt::Display for PhysicsError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::DuplicateBody(entity) => write!(formatter, "duplicate physics body {}", entity.0),
-            Self::MissingEntity(entity) => write!(formatter, "physics body {} is not alive", entity.0),
+            Self::MissingEntity(entity) => {
+                write!(formatter, "physics body {} is not alive", entity.0)
+            }
             Self::MissingPosition(entity) => {
                 write!(formatter, "physics body {} has no position", entity.0)
             }
             Self::MissingVelocity(entity) => {
-                write!(formatter, "dynamic physics body {} has no velocity", entity.0)
+                write!(
+                    formatter,
+                    "dynamic physics body {} has no velocity",
+                    entity.0
+                )
             }
             Self::InvalidHalfExtents(entity) => write!(
                 formatter,
@@ -111,7 +117,10 @@ impl fmt::Display for PhysicsError {
                 entity.0
             ),
             Self::NonPositiveTicks(ticks) => {
-                write!(formatter, "physics step requires positive ticks, got {ticks}")
+                write!(
+                    formatter,
+                    "physics step requires positive ticks, got {ticks}"
+                )
             }
         }
     }
@@ -157,30 +166,30 @@ pub fn step(
         state.validate_geometry_range()?;
     }
 
-    let mut stats = PhysicsStepStats {
+    let mut step_stats = PhysicsStepStats {
         body_count: states.len(),
         ..PhysicsStepStats::default()
     };
 
     for left_index in 0..states.len() {
         for right_index in (left_index + 1)..states.len() {
-            stats.candidate_pairs = stats.candidate_pairs.saturating_add(1);
+            step_stats.candidate_pairs = step_stats.candidate_pairs.saturating_add(1);
             let (left_slice, right_slice) = states.split_at_mut(right_index);
             let left = &mut left_slice[left_index];
             let right = &mut right_slice[0];
             let outcome = resolve_pair(left, right)?;
             if outcome.contact {
-                stats.contacts = stats.contacts.saturating_add(1);
+                step_stats.contacts = step_stats.contacts.saturating_add(1);
             }
             if outcome.resolved {
-                stats.resolved_contacts = stats.resolved_contacts.saturating_add(1);
+                step_stats.resolved_contacts = step_stats.resolved_contacts.saturating_add(1);
             }
         }
     }
 
     Ok(PhysicsStep {
         operations: changed_operations(&states),
-        stats,
+        stats: step_stats,
     })
 }
 
@@ -356,8 +365,8 @@ fn resolve_pair(left: &mut BodyState, right: &mut BodyState) -> Result<PairOutco
     } else {
         -1_i64
     };
-    let relative_velocity = i64::from(right.axis_velocity(axis))
-        .saturating_sub(i64::from(left.axis_velocity(axis)));
+    let relative_velocity =
+        i64::from(right.axis_velocity(axis)).saturating_sub(i64::from(left.axis_velocity(axis)));
     let approaching = relative_velocity.saturating_mul(normal) < 0;
 
     let corrected = correct_penetration(left, right, axis, normal, penetration);
@@ -462,8 +471,8 @@ fn changed_operations(states: &[BodyState]) -> Vec<Operation> {
 
 fn axis_fits_exact_f32(position: i64, half_extent: i64) -> bool {
     (0..=MAX_EXACT_F32_INTEGER).contains(&half_extent)
-        && position >= -MAX_EXACT_F32_INTEGER + half_extent
-        && position <= MAX_EXACT_F32_INTEGER - half_extent
+        && ((-MAX_EXACT_F32_INTEGER + half_extent)..=(MAX_EXACT_F32_INTEGER - half_extent))
+            .contains(&position)
 }
 
 #[allow(clippy::cast_precision_loss)]
@@ -472,7 +481,7 @@ fn exact_i64_to_f32(value: i64) -> f32 {
 }
 
 fn average_i32(left: i32, right: i32) -> i32 {
-    let average = (i64::from(left) + i64::from(right)) / 2;
+    let average = i64::midpoint(i64::from(left), i64::from(right));
     match i32::try_from(average) {
         Ok(value) => value,
         Err(_) if average.is_negative() => i32::MIN,
