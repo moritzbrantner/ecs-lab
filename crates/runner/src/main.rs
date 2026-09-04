@@ -1,10 +1,12 @@
 use std::{hint::black_box, time::Instant};
 
+use ecs_physics_scenarios::FallingBoxesScenario;
 use ecs_reference::ReferenceWorld;
 use ecs_sparse_set::SparseWorld;
 use ecs_workload::{EntityId, Operation, Position, Velocity, Workload, WorldSnapshot};
 
 const BENCHMARK_SEED: u32 = 0x5EED_CAFE;
+const FALLING_BOX_SEED: u32 = 0;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut arguments = std::env::args().skip(1);
@@ -42,6 +44,11 @@ fn run_demo() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn run_benchmarks(smoke: bool, fingerprint: &str) {
+    run_motion_benchmarks(smoke, fingerprint);
+    run_physics_benchmarks(smoke, fingerprint);
+}
+
+fn run_motion_benchmarks(smoke: bool, fingerprint: &str) {
     let (entity_count, rounds, repetitions) = if smoke {
         (1_000, 10, 2)
     } else {
@@ -54,6 +61,7 @@ fn run_benchmarks(smoke: bool, fingerprint: &str) {
         "reference",
         entity_count,
         rounds,
+        BENCHMARK_SEED,
         repetitions,
         fingerprint,
         || {
@@ -69,6 +77,7 @@ fn run_benchmarks(smoke: bool, fingerprint: &str) {
         "sparse-set",
         entity_count,
         rounds,
+        BENCHMARK_SEED,
         repetitions,
         fingerprint,
         || {
@@ -81,12 +90,76 @@ fn run_benchmarks(smoke: bool, fingerprint: &str) {
     );
 }
 
+fn run_physics_benchmarks(smoke: bool, fingerprint: &str) {
+    let (dynamic_count, frames, repetitions) = if smoke { (96, 12, 2) } else { (512, 40, 3) };
+    let scenario = FallingBoxesScenario::new(dynamic_count);
+    let body_count = dynamic_count.saturating_add(1);
+
+    benchmark(
+        "falling-boxes",
+        "reference",
+        body_count,
+        frames,
+        FALLING_BOX_SEED,
+        repetitions,
+        fingerprint,
+        || reference_physics_snapshot(&scenario, frames),
+    );
+    benchmark(
+        "falling-boxes",
+        "sparse-set",
+        body_count,
+        frames,
+        FALLING_BOX_SEED,
+        repetitions,
+        fingerprint,
+        || sparse_physics_snapshot(&scenario, frames),
+    );
+}
+
+fn reference_physics_snapshot(scenario: &FallingBoxesScenario, frames: u32) -> WorldSnapshot {
+    let mut world = ReferenceWorld::new();
+    if world.replay(scenario.setup()).is_err() {
+        return WorldSnapshot::default();
+    }
+    for _ in 0..frames {
+        let Ok(physics) = scenario.step(&world.snapshot()) else {
+            return WorldSnapshot::default();
+        };
+        for operation in physics.operations() {
+            if world.apply(*operation).is_err() {
+                return WorldSnapshot::default();
+            }
+        }
+    }
+    world.snapshot()
+}
+
+fn sparse_physics_snapshot(scenario: &FallingBoxesScenario, frames: u32) -> WorldSnapshot {
+    let mut world = SparseWorld::new();
+    if world.replay(scenario.setup()).is_err() {
+        return WorldSnapshot::default();
+    }
+    for _ in 0..frames {
+        let Ok(physics) = scenario.step(&world.snapshot()) else {
+            return WorldSnapshot::default();
+        };
+        for operation in physics.operations() {
+            if world.apply(*operation).is_err() {
+                return WorldSnapshot::default();
+            }
+        }
+    }
+    world.snapshot()
+}
+
 #[allow(clippy::too_many_arguments)]
 fn benchmark(
     scenario: &str,
     implementation: &str,
     entity_count: u32,
     rounds: u32,
+    seed: u32,
     repetitions: u32,
     fingerprint: &str,
     mut run: impl FnMut() -> WorldSnapshot,
@@ -97,7 +170,7 @@ fn benchmark(
     }
     let elapsed = started.elapsed();
     println!(
-        "scenario={scenario} implementation={implementation} entities={entity_count} rounds={rounds} seed={BENCHMARK_SEED} repetitions={repetitions} elapsed_ns={} environment_fingerprint={fingerprint}",
+        "scenario={scenario} implementation={implementation} entities={entity_count} rounds={rounds} seed={seed} repetitions={repetitions} elapsed_ns={} environment_fingerprint={fingerprint}",
         elapsed.as_nanos()
     );
 }

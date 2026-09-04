@@ -5,11 +5,12 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 publish = false
-description = "WebAssembly adapter for the ECS Lab reference implementation"
+description = "WebAssembly adapter for ECS Lab reference and physics evidence"
 
 [lib]
 crate-type = ["cdylib"]
 
 [dependencies]
+ecs-physics-scenarios = { path = "../physics-scenarios" }
 ecs-reference = { path = "../reference" }
 ecs-workload = { path = "../workload" }
