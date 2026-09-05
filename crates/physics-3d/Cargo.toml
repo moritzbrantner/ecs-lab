@@ -1,0 +1,21 @@
+[package]
+name = "ecs-physics-3d"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Deterministic three-dimensional AABB physics and scenarios for ECS Lab"
+
+[dependencies]
+ecs-physics = { path = "../physics" }
+ecs-reference = { path = "../reference" }
+ecs-workload = { path = "../workload" }
+geometry-kernels = { git = "https://github.com/moritzbrantner/rust-kernels", rev = "986bff4dc8d13a64b90fab3a9f7f02bb8d1aa35e" }
+spatial-kernels = { git = "https://github.com/moritzbrantner/rust-kernels", rev = "986bff4dc8d13a64b90fab3a9f7f02bb8d1aa35e" }
+
+[dev-dependencies]
+ecs-sparse-set = { path = "../sparse-set" }
+
+[lints]
+workspace = true
