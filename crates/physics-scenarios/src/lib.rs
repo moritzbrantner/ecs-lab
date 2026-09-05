@@ -168,10 +168,7 @@ impl BouncingRoomScenario {
             BOUNCING_ROOM_FLOOR,
             Position::new(0, 0),
         ));
-        bodies.push(PhysicsBody::fixed(
-            BOUNCING_ROOM_FLOOR,
-            FLOOR_HALF_EXTENTS,
-        ));
+        bodies.push(PhysicsBody::fixed(BOUNCING_ROOM_FLOOR, FLOOR_HALF_EXTENTS));
 
         Self {
             setup: Workload::new(operations),
