@@ -256,7 +256,7 @@ pub fn step(
         state.validate_geometry_range()?;
     }
 
-    let mut stats = PhysicsStepStats {
+    let mut step_stats = PhysicsStepStats {
         body_count: states.len(),
         ..PhysicsStepStats::default()
     };
@@ -265,17 +265,17 @@ pub fn step(
 
     for left_index in 0..states.len() {
         for right_index in (left_index + 1)..states.len() {
-            stats.candidate_pairs = stats.candidate_pairs.saturating_add(1);
+            step_stats.candidate_pairs = step_stats.candidate_pairs.saturating_add(1);
             let (left_slice, right_slice) = states.split_at_mut(right_index);
             let left = &mut left_slice[left_index];
             let right = &mut right_slice[0];
             let outcome = resolve_pair(left, right)?;
             if let Some(contact) = outcome.contact {
                 contacts.push(contact);
-                stats.contacts = stats.contacts.saturating_add(1);
+                step_stats.contacts = step_stats.contacts.saturating_add(1);
             }
             if outcome.resolved {
-                stats.resolved_contacts = stats.resolved_contacts.saturating_add(1);
+                step_stats.resolved_contacts = step_stats.resolved_contacts.saturating_add(1);
             }
             if let Some(entity) = outcome.supported_entity {
                 supporting_entities.insert(entity);
@@ -285,7 +285,7 @@ pub fn step(
 
     Ok(PhysicsStep {
         operations: changed_operations(&states),
-        stats,
+        stats: step_stats,
         contacts,
         supporting_entities: supporting_entities.into_iter().collect(),
     })
@@ -507,8 +507,7 @@ fn resolve_pair(left: &mut BodyState, right: &mut BodyState) -> Result<PairOutco
     } else {
         false
     };
-    let friction_applied =
-        apply_contact_friction(left, right, axis.tangent(), friction_milli);
+    let friction_applied = apply_contact_friction(left, right, axis.tangent(), friction_milli);
 
     left.validate_geometry_range()?;
     right.validate_geometry_range()?;
@@ -591,8 +590,7 @@ fn correct_penetration(
         }
         (BodyKind::Dynamic, BodyKind::Dynamic) => {
             let total_mass = u64::from(left.mass_units) + u64::from(right.mass_units);
-            let left_share = i128::from(penetration)
-                .saturating_mul(i128::from(right.mass_units))
+            let left_share = i128::from(penetration).saturating_mul(i128::from(right.mass_units))
                 / i128::from(total_mass);
             let left_share = i64_from_i128(left_share);
             let right_share = penetration.saturating_sub(left_share);
@@ -652,9 +650,8 @@ fn apply_normal_response(
                 .saturating_mul(left_mass)
                 .saturating_mul(left_velocity)
                 .saturating_add(
-                    (right_mass.saturating_mul(scale)
-                        - restitution.saturating_mul(left_mass))
-                    .saturating_mul(right_velocity),
+                    (right_mass.saturating_mul(scale) - restitution.saturating_mul(left_mass))
+                        .saturating_mul(right_velocity),
                 );
 
             let left_changed =
@@ -924,8 +921,7 @@ mod tests {
         let physics = step(
             &snapshot,
             &[
-                PhysicsBody::dynamic(dynamic, [1, 1])
-                    .with_material(PhysicsMaterial::new(0, 500)),
+                PhysicsBody::dynamic(dynamic, [1, 1]).with_material(PhysicsMaterial::new(0, 500)),
                 PhysicsBody::fixed(floor, [20, 1]),
             ],
             NO_GRAVITY,
@@ -1056,6 +1052,29 @@ mod tests {
                 Operation::SetPosition(right, Position::new(1, 0)),
                 Operation::SetVelocity(right, Velocity::new(0, 0)),
             ]
+        );
+    }
+
+    #[test]
+    fn rejects_duplicate_body_configuration() {
+        let entity = EntityId(7);
+        let snapshot = WorldSnapshot::new(vec![EntitySnapshot {
+            id: entity,
+            position: Some(Position::new(0, 0)),
+            velocity: Some(Velocity::new(0, 0)),
+        }]);
+
+        assert_eq!(
+            step(
+                &snapshot,
+                &[
+                    PhysicsBody::dynamic(entity, [1, 1]),
+                    PhysicsBody::dynamic(entity, [1, 1]),
+                ],
+                NO_GRAVITY,
+                1,
+            ),
+            Err(PhysicsError::DuplicateBody(entity))
         );
     }
 
