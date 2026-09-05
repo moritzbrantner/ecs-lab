@@ -598,19 +598,13 @@ fn correct_penetration(
     }
 }
 
-fn dynamic_penetration_shares(
-    penetration: i64,
-    left_mass: u32,
-    right_mass: u32,
-) -> (i64, i64) {
+fn dynamic_penetration_shares(penetration: i64, left_mass: u32, right_mass: u32) -> (i64, i64) {
     let total_mass = u64::from(left_mass) + u64::from(right_mass);
     let denominator = i128::from(total_mass);
-    let mut left_share = i64_from_i128(
-        i128::from(penetration).saturating_mul(i128::from(right_mass)) / denominator,
-    );
-    let mut right_share = i64_from_i128(
-        i128::from(penetration).saturating_mul(i128::from(left_mass)) / denominator,
-    );
+    let mut left_share =
+        i64_from_i128(i128::from(penetration).saturating_mul(i128::from(right_mass)) / denominator);
+    let mut right_share =
+        i64_from_i128(i128::from(penetration).saturating_mul(i128::from(left_mass)) / denominator);
     let remainder = penetration.saturating_sub(left_share.saturating_add(right_share));
 
     if remainder > 0 {
