@@ -17,9 +17,9 @@
         <p class="eyebrow">Entity-component-system laboratory · Rust → WebAssembly → optional WebGPU</p>
         <h1>ECS Lab</h1>
         <p class="lede">
-          Build a small world, add entities, change their components, and inspect what the ECS actually
-          does. Rust remains the semantic baseline; WebGPU is an optional compute path that must match
-          the Rust broad phase exactly.
+          Build a small world, add entities, change their components and physics materials, and inspect
+          what the ECS actually does. Rust remains the semantic baseline; WebGPU is an optional compute
+          path that must match the Rust broad phase exactly.
         </p>
         <nav class="actions" aria-label="Project links">
           <a class="button primary" href="#world-lab">Open the world lab</a>
@@ -29,12 +29,13 @@
 
       <section class="demo" id="world-lab" aria-labelledby="world-lab-title">
         <div class="section-copy">
-          <p class="eyebrow">Interactive ECS workbench</p>
-          <h2 id="world-lab-title">Add entities and change the components that move them</h2>
+          <p class="eyebrow">Interactive ECS + physics workbench</p>
+          <h2 id="world-lab-title">Change mass, bounciness, friction, and motion in one Rust-owned world</h2>
           <p>
-            Every displayed position is evaluated by the compiled Rust <code>ReferenceWorld</code>.
-            Collider pairs are checked by the Rust physics path first, then the same AABBs can be sent
-            through WebGPU for exact bitset parity.
+            Every displayed frame is evaluated by the compiled Rust <code>ReferenceWorld</code> and
+            deterministic physics solver. Restitution and friction affect collision response in Rust;
+            the browser only supplies inputs and visualizes the resulting state. The final AABBs can
+            still be sent through WebGPU for exact pair-bitset parity.
           </p>
         </div>
 
@@ -48,11 +49,11 @@
               <button class="compact-button" id="add-entity" type="button">+ Add entity</button>
             </div>
             <div class="entity-list" id="entity-list"></div>
-            <button class="text-button" id="reset-world" type="button">Reset example world</button>
+            <button class="text-button" id="reset-world" type="button">Reset material example</button>
           </aside>
 
           <div class="viewport-panel">
-            <div class="world" id="world" aria-label="Interactive two-dimensional ECS world">
+            <div class="world" id="world" aria-label="Interactive two-dimensional ECS physics world">
               <div class="axis axis-x" aria-hidden="true"></div>
               <div class="axis axis-y" aria-hidden="true"></div>
             </div>
@@ -60,9 +61,9 @@
             <div class="transport">
               <button class="compact-button" id="step-tick" type="button">Step +1</button>
               <label class="tick-control" for="ticks">
-                <span>Integration ticks</span>
+                <span>Physics steps</span>
                 <strong id="ticks-label">4</strong>
-                <input id="ticks" type="range" min="0" max="6" value="4" step="1" />
+                <input id="ticks" type="range" min="0" max="8" value="4" step="1" />
               </label>
             </div>
 
@@ -92,8 +93,8 @@
 
             <fieldset class="component-editor">
               <legend>Velocity</legend>
-              <label>X / tick <input data-field="vx" type="number" min="-3" max="3" step="1" /></label>
-              <label>Y / tick <input data-field="vy" type="number" min="-3" max="3" step="1" /></label>
+              <label>X / step <input data-field="vx" type="number" min="-4" max="4" step="1" /></label>
+              <label>Y / step <input data-field="vy" type="number" min="-4" max="4" step="1" /></label>
             </fieldset>
 
             <fieldset class="component-editor single-field">
@@ -101,6 +102,24 @@
               <label>Half extent <input data-field="half" type="number" min="1" max="5" step="1" /></label>
             </fieldset>
 
+            <fieldset class="component-editor single-field">
+              <legend>Rigid body</legend>
+              <label>Mass units <input data-field="mass" type="number" min="1" max="10" step="1" /></label>
+            </fieldset>
+
+            <fieldset class="component-editor">
+              <legend>Material</legend>
+              <label>
+                Restitution
+                <input data-field="restitution" type="number" min="0" max="1000" step="100" />
+              </label>
+              <label>
+                Friction
+                <input data-field="friction" type="number" min="0" max="1000" step="100" />
+              </label>
+            </fieldset>
+
+            <p class="inspector-note">Material coefficients use deterministic thousandths: 0–1000.</p>
             <p class="inspector-note" id="selected-frame-position">Frame position: —</p>
           </aside>
         </div>
@@ -137,7 +156,7 @@
         </div>
         <div class="cards">
           <article><h3>Iteration density</h3><p>When do packed component arrays beat simpler maps by enough to matter?</p></article>
-          <article><h3>Physics workload</h3><p>How do storage choices behave under repeated gravity, contacts, and component writes?</p></article>
+          <article><h3>Physics workload</h3><p>How do storage choices behave under repeated gravity, contacts, materials, and component writes?</p></article>
           <article><h3>Broad phase</h3><p>When should naive all-pairs give way to spatial kernels or GPU candidate generation?</p></article>
           <article><h3>Scheduling</h3><p>When does parallel execution help, and when does coordination erase the gain?</p></article>
         </div>

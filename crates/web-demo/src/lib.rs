@@ -1,6 +1,6 @@
 use std::sync::{Mutex, OnceLock};
 
-use ecs_physics::{PhysicsBody, PhysicsConfig, step};
+use ecs_physics::{PhysicsBody, PhysicsConfig, PhysicsMaterial, step};
 use ecs_physics_scenarios::{BroadPhaseFrame, FallingBoxesScenario, ScenarioError};
 use ecs_reference::ReferenceWorld;
 use ecs_workload::{EntityId, Operation, Position, Velocity};
@@ -13,6 +13,9 @@ const VELOCITY: Velocity = Velocity::new(3, 2);
 const MAX_INTERACTIVE_ENTITIES: usize = 64;
 const WEBGPU_DYNAMIC_BODIES: u32 = 96;
 const WEBGPU_FRAME_STEPS: u32 = 6;
+const INTERACTIVE_PHYSICS: PhysicsConfig = PhysicsConfig {
+    gravity: Velocity::new(0, 0),
+};
 
 static INTERACTIVE_STATE: OnceLock<Mutex<InteractiveState>> = OnceLock::new();
 static WEBGPU_FRAME: OnceLock<Result<BroadPhaseFrame, ScenarioError>> = OnceLock::new();
@@ -23,6 +26,8 @@ struct InteractiveEntity {
     start: Position,
     velocity: Velocity,
     half_extent: i32,
+    mass_units: u32,
+    material: PhysicsMaterial,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -113,7 +118,12 @@ fn build_interactive_frame(
     revision: u64,
     ticks: i32,
 ) -> Option<InteractiveFrame> {
+    if ticks < 0 {
+        return None;
+    }
+
     let mut world = ReferenceWorld::new();
+    let mut bodies = Vec::with_capacity(entities.len());
     for entity in entities {
         for operation in [
             Operation::Spawn(entity.id),
@@ -122,8 +132,19 @@ fn build_interactive_frame(
         ] {
             world.apply(operation).ok()?;
         }
+        bodies.push(
+            PhysicsBody::dynamic(entity.id, [entity.half_extent, entity.half_extent])
+                .with_mass(entity.mass_units)
+                .with_material(entity.material),
+        );
     }
-    world.apply(Operation::Integrate { ticks }).ok()?;
+
+    for _ in 0..ticks {
+        let physics = step(&world.snapshot(), &bodies, INTERACTIVE_PHYSICS, 1).ok()?;
+        for operation in physics.operations() {
+            world.apply(*operation).ok()?;
+        }
+    }
 
     let snapshot = world.snapshot();
     let frame_entities = entities
@@ -262,12 +283,24 @@ pub extern "C" fn interactive_push_entity(
     velocity_x: i32,
     velocity_y: i32,
     half_extent: i32,
+    mass_units: u32,
+    restitution_milli: u32,
+    friction_milli: u32,
 ) -> u32 {
+    let Ok(restitution_milli) = u16::try_from(restitution_milli) else {
+        return 0;
+    };
+    let Ok(friction_milli) = u16::try_from(friction_milli) else {
+        return 0;
+    };
     let Ok(mut state) = interactive_state().lock() else {
         return 0;
     };
     if state.entities.len() >= MAX_INTERACTIVE_ENTITIES
         || half_extent < 0
+        || mass_units == 0
+        || restitution_milli > 1_000
+        || friction_milli > 1_000
         || state.entities.iter().any(|entity| entity.id.0 == entity_id)
     {
         return 0;
@@ -278,6 +311,8 @@ pub extern "C" fn interactive_push_entity(
         start: Position::new(i64::from(start_x), i64::from(start_y)),
         velocity: Velocity::new(velocity_x, velocity_y),
         half_extent,
+        mass_units,
+        material: PhysicsMaterial::new(restitution_milli, friction_milli),
     });
     state.invalidate();
     1
@@ -399,6 +434,7 @@ pub extern "C" fn webgpu_aabb_value(body_index: u32, lane: u32) -> f32 {
 
 #[cfg(test)]
 mod tests {
+    use ecs_physics::PhysicsMaterial;
     use ecs_workload::{EntityId, Position, Velocity};
 
     use super::{
@@ -407,6 +443,22 @@ mod tests {
         webgpu_cpu_overlap_count, webgpu_dynamic_body_count, webgpu_frame_steps, webgpu_pair_word,
         webgpu_pair_word_count,
     };
+
+    fn interactive_entity(
+        id: u32,
+        x: i64,
+        velocity_x: i32,
+        restitution_milli: u16,
+    ) -> InteractiveEntity {
+        InteractiveEntity {
+            id: EntityId(id),
+            start: Position::new(x, 0),
+            velocity: Velocity::new(velocity_x, 0),
+            half_extent: 2,
+            mass_units: 1,
+            material: PhysicsMaterial::new(restitution_milli, 0),
+        }
+    }
 
     #[test]
     fn exported_fixture_uses_reference_world_integration() {
@@ -417,20 +469,10 @@ mod tests {
     }
 
     #[test]
-    fn interactive_frame_uses_reference_integration_and_rust_pair_words() {
+    fn interactive_frame_uses_rust_material_physics_and_pair_words() {
         let entities = [
-            InteractiveEntity {
-                id: EntityId(10),
-                start: Position::new(-4, 0),
-                velocity: Velocity::new(1, 0),
-                half_extent: 2,
-            },
-            InteractiveEntity {
-                id: EntityId(20),
-                start: Position::new(4, 0),
-                velocity: Velocity::new(-1, 0),
-                half_extent: 2,
-            },
+            interactive_entity(10, -4, 1, 1_000),
+            interactive_entity(20, 4, -1, 1_000),
         ];
 
         let Some(frame) = build_interactive_frame(&entities, 7, 2) else {
@@ -440,6 +482,35 @@ mod tests {
         assert_eq!(frame.entities[0].position, Position::new(-2, 0));
         assert_eq!(frame.entities[1].position, Position::new(2, 0));
         assert_eq!(frame.pair_words, [1]);
+
+        let Some(after_bounce) = build_interactive_frame(&entities, 7, 3) else {
+            panic!("bouncy interactive frame should be valid");
+        };
+        assert_eq!(after_bounce.entities[0].position, Position::new(-3, 0));
+        assert_eq!(after_bounce.entities[1].position, Position::new(3, 0));
+    }
+
+    #[test]
+    fn restitution_changes_the_interactive_path() {
+        let bouncy = [
+            interactive_entity(10, -4, 1, 1_000),
+            interactive_entity(20, 4, -1, 1_000),
+        ];
+        let inelastic = [
+            interactive_entity(10, -4, 1, 0),
+            interactive_entity(20, 4, -1, 0),
+        ];
+
+        let Some(bouncy_frame) = build_interactive_frame(&bouncy, 1, 3) else {
+            panic!("bouncy frame should be valid");
+        };
+        let Some(inelastic_frame) = build_interactive_frame(&inelastic, 1, 3) else {
+            panic!("inelastic frame should be valid");
+        };
+
+        assert_ne!(bouncy_frame.entities, inelastic_frame.entities);
+        assert_eq!(inelastic_frame.entities[0].position, Position::new(-2, 0));
+        assert_eq!(inelastic_frame.entities[1].position, Position::new(2, 0));
     }
 
     #[test]

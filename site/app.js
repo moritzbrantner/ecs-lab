@@ -3,9 +3,9 @@ import { runWebGpuAabbPairs } from "./webgpu.js";
 const WORLD = Object.freeze({ minX: -48, maxX: 48, minY: -28, maxY: 28 });
 const MAX_ENTITIES = 24;
 const INITIAL_ENTITIES = Object.freeze([
-  { id: 1, x: -20, y: -8, vx: 3, vy: 2, half: 3 },
-  { id: 2, x: 0, y: 8, vx: -2, vy: -1, half: 4 },
-  { id: 3, x: 20, y: -6, vx: -3, vy: 1, half: 3 },
+  { id: 1, x: -12, y: 0, vx: 3, vy: 1, half: 4, mass: 1, restitution: 1000, friction: 0 },
+  { id: 2, x: 12, y: 0, vx: -3, vy: -1, half: 4, mass: 3, restitution: 0, friction: 1000 },
+  { id: 3, x: 0, y: 14, vx: 0, vy: -2, half: 3, mass: 2, restitution: 500, friction: 500 },
 ]);
 
 const addEntityButton = document.querySelector("#add-entity");
@@ -98,6 +98,9 @@ function syncRustWorld() {
         entity.vx,
         entity.vy,
         entity.half,
+        entity.mass,
+        entity.restitution,
+        entity.friction,
       ),
     );
     if (accepted !== 1) {
@@ -180,7 +183,7 @@ function renderEntityList() {
     button.dataset.selected = String(entity.id === selectedId);
     button.innerHTML = `
       <span class="entity-row-title">Entity ${entity.id}</span>
-      <span class="entity-row-components">Position · Velocity · Collider</span>
+      <span class="entity-row-components">Position · Velocity · Collider · Mass · Material</span>
     `;
     button.addEventListener("click", () => {
       selectedId = entity.id;
@@ -255,14 +258,14 @@ function renderWorld(frame, contacts) {
 
   const selectedFrame = frame.find((entity) => entity.id === selectedId);
   selectedFramePosition.textContent = selectedFrame
-    ? `Frame position after ${ticks()} ticks: (${selectedFrame.frameX}, ${selectedFrame.frameY})`
+    ? `Frame position after ${ticks()} physics steps: (${selectedFrame.frameX}, ${selectedFrame.frameY})`
     : "Frame position: —";
 }
 
 function renderCollisionStatus(evidence) {
   if (evidence.contactPairs.length === 0) {
     collisionStatus.dataset.state = "ready";
-    collisionStatus.textContent = "Rust broad phase: no collider pairs overlap in this frame.";
+    collisionStatus.textContent = "Rust broad phase: no collider pairs overlap in this final frame.";
     return;
   }
 
@@ -272,7 +275,7 @@ function renderCollisionStatus(evidence) {
     .join(", ");
   const suffix = evidence.contactPairs.length > 3 ? ", …" : "";
   collisionStatus.dataset.state = "verified";
-  collisionStatus.textContent = `Rust broad phase: overlapping entities are highlighted (${firstPairs}${suffix}).`;
+  collisionStatus.textContent = `Rust broad phase: final-frame overlapping entities are highlighted (${firstPairs}${suffix}).`;
 }
 
 function renderWorldOnly() {
@@ -290,7 +293,7 @@ function markWebGpuStale() {
     return;
   }
   webgpuStatus.dataset.state = "ready";
-  webgpuStatus.textContent = "World changed; release the control to verify the new frame with WebGPU.";
+  webgpuStatus.textContent = "World changed; release the control to verify the new Rust frame with WebGPU.";
 }
 
 function render({ verifyGpu = false } = {}) {
@@ -319,7 +322,8 @@ function render({ verifyGpu = false } = {}) {
 async function verifyWebGpu(frame, rustWords, renderRevision) {
   const token = ++gpuRunToken;
   webgpuStatus.dataset.state = "running";
-  webgpuStatus.textContent = "WebGPU is recomputing this frame; timing stays hidden until parity succeeds.";
+  webgpuStatus.textContent =
+    "WebGPU is recomputing the final AABB frame; timing stays hidden until parity succeeds.";
 
   try {
     const measurement = await runWebGpuAabbPairs(packedAabbs(frame), frame.length);
@@ -389,6 +393,9 @@ function newEntity(id) {
     vx: velocities[slot % velocities.length],
     vy: velocities[(slot + 1) % velocities.length],
     half: 2 + (slot % 3),
+    mass: 1 + (slot % 3),
+    restitution: (slot % 3) * 500,
+    friction: ((slot + 1) % 3) * 500,
   };
 }
 
@@ -458,21 +465,22 @@ try {
     "interactive_pair_word",
   ];
   if (!requiredWasmFunctions(wasmExports, required)) {
-    throw new Error("WebAssembly module does not expose the interactive ECS demo functions.");
+    throw new Error("WebAssembly module does not expose the interactive ECS physics functions.");
   }
 
   runtimeStatus.dataset.state = "ready";
   runtimeStatus.textContent =
-    "Rust WebAssembly ready: ReferenceWorld owns the interactive frame and Rust physics owns the exact pair bitset.";
+    "Rust WebAssembly ready: ReferenceWorld + Rust physics own motion, mass/material response, and the exact final-frame pair bitset.";
 
   if (!("gpu" in navigator)) {
     webgpuToggle.disabled = true;
     webgpuStatus.dataset.state = "ready";
     webgpuStatus.textContent =
-      "WebGPU is unavailable in this browser; the interactive Rust path remains fully usable.";
+      "WebGPU is unavailable in this browser; the interactive Rust physics path remains fully usable.";
   } else {
     webgpuStatus.dataset.state = "ready";
-    webgpuStatus.textContent = "WebGPU is available. Enable it to verify the current world against Rust.";
+    webgpuStatus.textContent =
+      "WebGPU is available. Enable it to verify the current post-physics AABB frame against Rust.";
   }
 
   render();
