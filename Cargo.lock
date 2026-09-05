@@ -53,6 +53,7 @@ dependencies = [
 name = "ecs-web-demo"
 version = "0.1.0"
 dependencies = [
+ "ecs-physics",
  "ecs-physics-scenarios",
  "ecs-reference",
  "ecs-workload",
