@@ -7,12 +7,18 @@ pub struct EntityId(pub u32);
 pub struct Position {
     pub x: i64,
     pub y: i64,
+    pub z: i64,
 }
 
 impl Position {
     #[must_use]
     pub const fn new(x: i64, y: i64) -> Self {
-        Self { x, y }
+        Self { x, y, z: 0 }
+    }
+
+    #[must_use]
+    pub const fn new3(x: i64, y: i64, z: i64) -> Self {
+        Self { x, y, z }
     }
 }
 
@@ -20,12 +26,18 @@ impl Position {
 pub struct Velocity {
     pub x: i32,
     pub y: i32,
+    pub z: i32,
 }
 
 impl Velocity {
     #[must_use]
     pub const fn new(x: i32, y: i32) -> Self {
-        Self { x, y }
+        Self { x, y, z: 0 }
+    }
+
+    #[must_use]
+    pub const fn new3(x: i32, y: i32, z: i32) -> Self {
+        Self { x, y, z }
     }
 }
 
@@ -164,7 +176,7 @@ impl Generator {
 
 #[cfg(test)]
 mod tests {
-    use super::{EntityId, Operation, Workload};
+    use super::{EntityId, Operation, Position, Velocity, Workload};
 
     #[test]
     fn workload_preserves_operation_order() {
@@ -175,6 +187,12 @@ mod tests {
         let workload = Workload::new(operations.clone());
 
         assert_eq!(workload.operations(), operations);
+    }
+
+    #[test]
+    fn two_axis_constructors_preserve_the_legacy_z_zero_plane() {
+        assert_eq!(Position::new(2, 3), Position::new3(2, 3, 0));
+        assert_eq!(Velocity::new(4, 5), Velocity::new3(4, 5, 0));
     }
 
     #[test]

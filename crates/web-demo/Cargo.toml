@@ -12,6 +12,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 ecs-physics = { path = "../physics" }
+ecs-physics-3d = { path = "../physics-3d" }
 ecs-physics-scenarios = { path = "../physics-scenarios" }
 ecs-reference = { path = "../reference" }
 ecs-workload = { path = "../workload" }

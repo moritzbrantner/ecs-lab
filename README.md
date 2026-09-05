@@ -8,21 +8,23 @@ A focused Rust laboratory for comparing entity-component-system storage models w
 
 The storage horizon covers a reference model, a sparse-set world, and later archetype/table experiments. Cross-repository reuse is deliberately narrow: ECS Lab may pin reusable kernel crates from `rust-kernels`, but it does not depend on application repositories such as `collision-lab`.
 
-## Physics workload
+## Physics workloads
 
-`ecs-physics` adds a deterministic 2D AABB physics step over the observable snapshot contract. It applies integer gravity and integration, delegates AABB contact decisions to the same reusable `rust-kernels` geometry seam used by Collision Lab, resolves contacts in stable entity-id order, and emits ordinary ECS workload operations.
+`ecs-workload::Position` and `Velocity` are three-axis ECS components. Their existing two-argument constructors remain source-compatible and place values on the `z = 0` plane; `new3(...)` opts into depth. Both `ReferenceWorld` and `SparseWorld` integrate X/Y/Z identically.
 
-`ecs-physics-scenarios` owns named experiment fixtures around that core. The first `falling-boxes` scenario is replayed through both `ReferenceWorld` and `SparseWorld`, has a benchmark profile, and can produce an exact Rust/CPU AABB pair bitset for browser compute experiments.
+`ecs-physics` remains the deterministic 2D compatibility/reference solver used by the existing benchmark and invariant foundation. `ecs-physics-3d` is the true 3D solver used by the dedicated physics demo. It resolves three-axis AABB contacts in stable entity-id order, applies gravity and mass/restitution response on the selected normal axis, applies friction across both tangent axes, and still emits ordinary ECS `SetPosition` / `SetVelocity` operations.
+
+The 3D crate owns `BouncingRoom3dScenario`: three contrasting dynamic bodies move through depth inside six fixed AABB slabs (floor, ceiling, ±X and ±Z walls). The scenario can be replayed through both storage implementations and produces exact Rust 3D AABB pair evidence.
 
 ## Interactive Pages demo and WebGPU
 
-The Pages workbench lets you add entities, select them, and edit Position, Velocity, and Collider components. JavaScript owns only interaction state and visualization: the browser synchronizes those experiment inputs into WebAssembly, `ReferenceWorld` evaluates the frame, and the Rust physics path produces the canonical interactive collision-pair bitset.
+The main Pages workbench remains useful for small editable ECS/material experiments. JavaScript owns only interaction state and visualization: the browser synchronizes experiment inputs into WebAssembly and Rust produces the canonical frame.
 
-A dedicated physics playground is published at [moritzbrantner.github.io/ecs-lab/physics/](https://moritzbrantner.github.io/ecs-lab/physics/). It runs the named `BouncingRoomScenario` with gravity, a fixed floor, and deliberately different masses, restitution, and friction so material response can be inspected frame by frame in the browser.
+The dedicated physics playground at [moritzbrantner.github.io/ecs-lab/physics/](https://moritzbrantner.github.io/ecs-lab/physics/) now runs the true `BouncingRoom3dScenario`. Rust/Wasm supplies X/Y/Z positions, 3D collider extents, material metadata, and exact collision-pair words. The browser interpolates only between consecutive authoritative Rust frames for smoother motion.
 
-WebGPU is optional. When enabled, the browser sends the current Rust-evaluated frame's AABBs through the all-pairs compute shader adapted from Collision Lab's proven WebGPU collision path. The GPU result is accepted only when its pair bitset matches the Rust CPU evidence word-for-word. Browsers without WebGPU continue on the Rust path without changing behavior.
+WebGPU has two deliberately separate roles in the 3D demo. A raw browser WebGPU render pipeline draws the cutaway room when an adapter is available, with a Canvas 3D fallback otherwise. Separately, the existing WebGPU all-pairs compute path receives the exact Rust-produced 3D AABBs and is accepted only when its pair bitset matches Rust word-for-word. Neither GPU path owns physics response.
 
-The deterministic `falling-boxes` WebGPU fixture remains available as benchmark evidence and regression coverage. See `docs/experiments/physics.md` for the solver, benchmark, and compute ownership contract.
+The deterministic `falling-boxes` fixture remains available as 2D benchmark/regression evidence. See `docs/experiments/physics.md` for the solver, compatibility, and compute ownership contracts.
 
 ## Development
 

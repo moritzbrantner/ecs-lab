@@ -116,6 +116,9 @@ impl ReferenceWorld {
             position.y = position
                 .y
                 .saturating_add(i64::from(velocity.y).saturating_mul(ticks));
+            position.z = position
+                .z
+                .saturating_add(i64::from(velocity.z).saturating_mul(ticks));
         }
     }
 }
@@ -148,6 +151,23 @@ mod tests {
                 position: Some(Position::new(25, 18)),
                 velocity: Some(Velocity::new(3, 4)),
             }])
+        );
+    }
+
+    #[test]
+    fn integration_advances_all_three_axes() {
+        let entity = EntityId(3);
+        let workload = Workload::new(vec![
+            Operation::Spawn(entity),
+            Operation::SetPosition(entity, Position::new3(1, 2, 3)),
+            Operation::SetVelocity(entity, Velocity::new3(2, -1, 4)),
+            Operation::Integrate { ticks: 3 },
+        ]);
+        let mut world = ReferenceWorld::new();
+        assert_eq!(world.replay(&workload), Ok(()));
+        assert_eq!(
+            world.snapshot().entities()[0].position,
+            Some(Position::new3(7, -1, 15))
         );
     }
 
