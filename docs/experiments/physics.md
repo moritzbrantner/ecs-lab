@@ -50,13 +50,13 @@ This is a controlled deterministic 3D contact model for ECS experiments, not a c
 
 ## Bouncing room 3D scenario
 
-`BouncingRoom3dScenario` is the canonical 3D browser fixture. Three dynamic boxes have deliberately different mass/material behavior and non-zero Z velocity. They move inside six fixed AABB slabs:
+`BouncingRoom3dScenario` is the canonical 3D browser fixture. It now contains 48 dynamic boxes arranged across three depth layers and four height rows. Their footprints, mass, restitution, friction, and X/Y/Z velocities vary deterministically so the same scene acts as both a much denser visualization and a stronger contact workload. They move inside six fixed AABB slabs:
 
 - floor and ceiling;
 - left and right X walls;
 - back and front Z walls.
 
-Gravity acts along negative Y. The scenario therefore demonstrates depth motion and Z-axis collisions as physics behavior rather than as a rendering trick.
+Gravity acts along negative Y. The scenario therefore demonstrates depth motion, body-body interaction, material variation, and Z-axis collisions as physics behavior rather than as a rendering trick.
 
 The scenario can replay through both `ReferenceWorld` and `SparseWorld`. Differential tests require the storage snapshots to remain identical while the same `PhysicsStep3d` operations are applied. Focused tests also exercise a direct Z-axis collision and repeatable 3D broad-phase evidence.
 
@@ -66,9 +66,11 @@ The dedicated `/physics/` Pages demo reads authoritative X/Y/Z positions, 3D hal
 
 Smooth motion is presentation-only. The browser preloads discrete deterministic Rust frames and interpolates displayed positions between consecutive frames. At each integer physics step, the displayed state snaps exactly to the Rust result; JavaScript never integrates velocity or resolves contacts.
 
+Camera state is also presentation-only. Pointer drag orbits, Shift-drag/right-drag pans, the wheel changes camera radius, and double-click resets the view. Those controls change only the view/projection inputs used by the renderer and never write ECS or physics state.
+
 WebGPU has two independent roles:
 
-- **3D renderer** — a raw browser WebGPU render pipeline draws instanced boxes with depth testing and an orbit/elevation camera. If no usable WebGPU renderer exists, a projected Canvas wireframe keeps the same Rust simulation visible.
+- **3D renderer** — a raw browser WebGPU render pipeline draws instanced boxes with depth testing and the mouse-controlled camera. If no usable WebGPU renderer exists, a projected Canvas wireframe keeps the same Rust simulation visible.
 - **collision evidence** — the existing all-pairs compute shader receives the exact Rust-produced min/max XYZ AABBs. Its triangular pair bitset is accepted only after word-for-word equality with the Rust broad-phase evidence.
 
 Neither GPU path feeds impulses, gravity, friction, or ECS mutation back into the solver.
@@ -95,7 +97,7 @@ Existing 2D benchmark fixtures remain the current performance baseline:
 - sparse and dense material-step solver fixtures;
 - long-running 2D bouncing-room replay.
 
-Timing remains descriptive rather than a correctness threshold. The new 3D path should receive its own benchmark fixtures only after the functional 3D contract is green and stable; benchmark expansion must not block the semantic conversion of the browser demo.
+Timing remains descriptive rather than a correctness threshold. The denser 3D browser fixture gives the solver and GPU parity path more realistic pressure, but dedicated 3D benchmark fixtures should still be added separately so browser presentation cost is not confused with solver performance.
 
 ## Later 3D horizons
 
