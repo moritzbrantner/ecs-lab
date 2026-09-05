@@ -1,47 +1,8 @@
 import { runWebGpuAabbPairs } from "../webgpu.js";
 
-const WORLD = Object.freeze({ minX: -32, maxX: 32, minY: -16, maxY: 16 });
+const WORLD = Object.freeze({ minX: -32, maxX: 32, minY: -4, maxY: 20 });
 const FRAME_INTERVAL_MS = 420;
-
-const PRESETS = Object.freeze({
-  elastic: {
-    copy:
-      "Equal-mass, fully elastic bodies exchange momentum. The browser does not approximate the collision response; every displayed position comes back from the compiled Rust module.",
-    legend: "A and B: mass 1 · restitution 1000 · friction 0",
-    entities: [
-      { id: 1, label: "A", x: -14, y: 0, vx: 4, vy: 0, half: 3, mass: 1, restitution: 1000, friction: 0 },
-      { id: 2, label: "B", x: 14, y: 0, vx: -4, vy: 0, half: 3, mass: 1, restitution: 1000, friction: 0 },
-    ],
-  },
-  mass: {
-    copy:
-      "A light fast body meets a heavier body. Rust applies the deterministic mass-weighted impulse and returns the resulting positions for each step.",
-    legend: "A: mass 1 · B: mass 4 · both restitution 1000 · friction 0",
-    entities: [
-      { id: 1, label: "A", x: -18, y: 0, vx: 5, vy: 0, half: 3, mass: 1, restitution: 1000, friction: 0 },
-      { id: 2, label: "B", x: 8, y: 0, vx: 0, vy: 0, half: 4, mass: 4, restitution: 1000, friction: 0 },
-    ],
-  },
-  friction: {
-    copy:
-      "A glancing contact makes tangential velocity visible. High friction is resolved inside the Rust material solver rather than by browser animation code.",
-    legend: "A: mass 1 · B: mass 3 · restitution 200 · friction 1000",
-    entities: [
-      { id: 1, label: "A", x: -12, y: -8, vx: 4, vy: 3, half: 3, mass: 1, restitution: 200, friction: 1000 },
-      { id: 2, label: "B", x: 0, y: 0, vx: 0, vy: 0, half: 4, mass: 3, restitution: 200, friction: 1000 },
-    ],
-  },
-  mixed: {
-    copy:
-      "Three bodies with deliberately different materials converge on the same area. Stable Rust ordering keeps the experiment deterministic even when several contacts compete.",
-    legend: "A: bouncy · B: medium material, mass 3 · C: inelastic with maximum friction",
-    entities: [
-      { id: 1, label: "A", x: -18, y: 6, vx: 5, vy: -1, half: 3, mass: 1, restitution: 1000, friction: 0 },
-      { id: 2, label: "B", x: 0, y: 0, vx: 0, vy: 0, half: 4, mass: 3, restitution: 500, friction: 500 },
-      { id: 3, label: "C", x: 18, y: -6, vx: -5, vy: 1, half: 3, mass: 2, restitution: 0, friction: 1000 },
-    ],
-  },
-});
+const BODY_NAMES = Object.freeze({ 0: "A", 1: "B", 2: "C" });
 
 const stage = document.querySelector("#physics-stage");
 const frameInput = document.querySelector("#frame");
@@ -53,58 +14,46 @@ const webgpuEnabled = document.querySelector("#webgpu-enabled");
 const runtimeStatus = document.querySelector("#runtime-status");
 const collisionStatus = document.querySelector("#collision-status");
 const webgpuStatus = document.querySelector("#webgpu-status");
-const scenarioCopy = document.querySelector("#scenario-copy");
-const scenarioLegend = document.querySelector("#scenario-legend");
-const presetButtons = [...document.querySelectorAll("[data-preset]")];
 
 let wasmExports = null;
-let selectedPreset = "elastic";
 let runTimer = null;
 let renderRevision = 0;
-
-function selectedScenario() {
-  return PRESETS[selectedPreset];
-}
 
 function currentStep() {
   return Number.parseInt(frameInput.value, 10);
 }
 
-function syncScenario() {
-  if (wasmExports.interactive_clear() !== 1) {
-    throw new Error("Rust rejected the physics-world reset.");
+function bodyLabel(entity) {
+  if (entity.fixed) {
+    return "Floor";
   }
-
-  for (const entity of selectedScenario().entities) {
-    const accepted = wasmExports.interactive_push_entity(
-      entity.id,
-      entity.x,
-      entity.y,
-      entity.vx,
-      entity.vy,
-      entity.half,
-      entity.mass,
-      entity.restitution,
-      entity.friction,
-    );
-    if (accepted !== 1) {
-      throw new Error(`Rust rejected physics input for body ${entity.label}.`);
-    }
-  }
+  return BODY_NAMES[entity.id] ?? `Entity ${entity.id}`;
 }
 
 function readRustFrame(step) {
-  syncScenario();
-  const entities = selectedScenario().entities.map((entity, bodyIndex) => ({
-    ...entity,
-    frameX: wasmExports.interactive_position_x(bodyIndex, step),
-    frameY: wasmExports.interactive_position_y(bodyIndex, step),
+  const bodyCount = wasmExports.physics_demo_body_count(step);
+  if (!Number.isInteger(bodyCount) || bodyCount <= 0 || bodyCount > 64) {
+    throw new Error(`Rust returned an invalid physics-demo body count: ${bodyCount}`);
+  }
+
+  const entities = Array.from({ length: bodyCount }, (_, bodyIndex) => ({
+    id: wasmExports.physics_demo_entity_id(bodyIndex, step) >>> 0,
+    frameX: wasmExports.physics_demo_position_x(bodyIndex, step),
+    frameY: wasmExports.physics_demo_position_y(bodyIndex, step),
+    halfX: wasmExports.physics_demo_half_extent_x(bodyIndex, step),
+    halfY: wasmExports.physics_demo_half_extent_y(bodyIndex, step),
+    fixed: wasmExports.physics_demo_is_fixed(bodyIndex, step) === 1,
+    mass: wasmExports.physics_demo_mass_units(bodyIndex, step),
+    restitution: wasmExports.physics_demo_restitution_milli(bodyIndex, step),
+    friction: wasmExports.physics_demo_friction_milli(bodyIndex, step),
   }));
-  const wordCount = wasmExports.interactive_pair_word_count(step);
+
+  const wordCount = wasmExports.physics_demo_pair_word_count(step);
   const pairWords = new Uint32Array(wordCount);
   for (let index = 0; index < wordCount; index += 1) {
-    pairWords[index] = wasmExports.interactive_pair_word(index, step) >>> 0;
+    pairWords[index] = wasmExports.physics_demo_pair_word(index, step) >>> 0;
   }
+
   return { entities, pairWords, step };
 }
 
@@ -120,7 +69,7 @@ function pairContacts(entities, pairWords) {
       if ((word & mask) !== 0) {
         bodyIndexes.add(left);
         bodyIndexes.add(right);
-        labels.push(`${entities[left].label} ↔ ${entities[right].label}`);
+        labels.push(`${bodyLabel(entities[left])} ↔ ${bodyLabel(entities[right])}`);
       }
       pair += 1;
     }
@@ -137,15 +86,19 @@ function drawFrame(frame) {
   const spanY = WORLD.maxY - WORLD.minY;
   frame.entities.forEach((entity, bodyIndex) => {
     const body = document.createElement("div");
+    const label = bodyLabel(entity);
     body.className = "physics-body";
-    body.textContent = entity.label;
+    body.textContent = entity.fixed ? "" : label;
     body.dataset.contact = contacts.bodyIndexes.has(bodyIndex) ? "true" : "false";
-    body.title = `${entity.label}: position (${entity.frameX}, ${entity.frameY}), mass ${entity.mass}, restitution ${entity.restitution}, friction ${entity.friction}`;
+    body.dataset.fixed = entity.fixed ? "true" : "false";
+    body.title = entity.fixed
+      ? "Fixed floor"
+      : `${label}: position (${entity.frameX}, ${entity.frameY}), mass ${entity.mass}, restitution ${entity.restitution}, friction ${entity.friction}`;
 
-    const width = ((entity.half * 2) / spanX) * 100;
-    const height = ((entity.half * 2) / spanY) * 100;
-    const left = ((entity.frameX - entity.half - WORLD.minX) / spanX) * 100;
-    const bottom = ((entity.frameY - entity.half - WORLD.minY) / spanY) * 100;
+    const width = ((entity.halfX * 2) / spanX) * 100;
+    const height = ((entity.halfY * 2) / spanY) * 100;
+    const left = ((entity.frameX - entity.halfX - WORLD.minX) / spanX) * 100;
+    const bottom = ((entity.frameY - entity.halfY - WORLD.minY) / spanY) * 100;
     body.style.width = `${width}%`;
     body.style.height = `${height}%`;
     body.style.left = `${left}%`;
@@ -164,12 +117,12 @@ function packAabbs(entities) {
   const values = new Float32Array(entities.length * 8);
   entities.forEach((entity, index) => {
     const offset = index * 8;
-    values[offset] = entity.frameX - entity.half;
-    values[offset + 1] = entity.frameY - entity.half;
+    values[offset] = entity.frameX - entity.halfX;
+    values[offset + 1] = entity.frameY - entity.halfY;
     values[offset + 2] = -0.5;
     values[offset + 3] = 0;
-    values[offset + 4] = entity.frameX + entity.half;
-    values[offset + 5] = entity.frameY + entity.half;
+    values[offset + 4] = entity.frameX + entity.halfX;
+    values[offset + 5] = entity.frameY + entity.halfY;
     values[offset + 6] = 0.5;
     values[offset + 7] = 0;
   });
@@ -224,8 +177,10 @@ async function render({ verifyGpu = false } = {}) {
   try {
     const frame = readRustFrame(step);
     drawFrame(frame);
-    if (verifyGpu || webgpuEnabled.checked) {
+    if (verifyGpu) {
       await verifyWebGpu(frame, revision);
+    } else if (webgpuEnabled.checked) {
+      webgpuStatus.textContent = "WebGPU is armed; verification runs when the current step settles.";
     } else {
       webgpuStatus.textContent = "WebGPU verification is off. Rust remains the active physics path.";
     }
@@ -266,23 +221,7 @@ function startRun() {
   }, FRAME_INTERVAL_MS);
 }
 
-function choosePreset(name) {
-  stopRun();
-  selectedPreset = name;
-  const scenario = selectedScenario();
-  scenarioCopy.textContent = scenario.copy;
-  scenarioLegend.textContent = scenario.legend;
-  presetButtons.forEach((button) => {
-    button.classList.toggle("is-active", button.dataset.preset === name);
-  });
-  frameInput.value = frameInput.min;
-  void render({ verifyGpu: true });
-}
-
 function bindControls() {
-  presetButtons.forEach((button) => {
-    button.addEventListener("click", () => choosePreset(button.dataset.preset));
-  });
   frameInput.addEventListener("input", () => {
     stopRun();
     void render();
@@ -310,12 +249,19 @@ async function loadWasm() {
   const bytes = await response.arrayBuffer();
   const { instance } = await WebAssembly.instantiate(bytes, {});
   const requiredExports = [
-    "interactive_clear",
-    "interactive_push_entity",
-    "interactive_position_x",
-    "interactive_position_y",
-    "interactive_pair_word_count",
-    "interactive_pair_word",
+    "physics_demo_max_steps",
+    "physics_demo_body_count",
+    "physics_demo_entity_id",
+    "physics_demo_position_x",
+    "physics_demo_position_y",
+    "physics_demo_half_extent_x",
+    "physics_demo_half_extent_y",
+    "physics_demo_is_fixed",
+    "physics_demo_mass_units",
+    "physics_demo_restitution_milli",
+    "physics_demo_friction_milli",
+    "physics_demo_pair_word_count",
+    "physics_demo_pair_word",
   ];
   for (const name of requiredExports) {
     if (typeof instance.exports[name] !== "function") {
@@ -329,8 +275,13 @@ async function main() {
   bindControls();
   try {
     wasmExports = await loadWasm();
+    const maxSteps = wasmExports.physics_demo_max_steps();
+    if (!Number.isInteger(maxSteps) || maxSteps <= 0) {
+      throw new Error("Rust returned an invalid physics-demo frame horizon");
+    }
+    frameInput.max = String(maxSteps);
     runtimeStatus.textContent =
-      "Rust/Wasm ready. Rust owns integration, collision response, mass, restitution, friction, and the canonical pair bitset.";
+      "Rust/Wasm ready. BouncingRoomScenario owns gravity, integration, fixed-body response, mass, restitution, friction, and canonical pair evidence.";
 
     if (!("gpu" in navigator)) {
       webgpuEnabled.disabled = true;
@@ -351,9 +302,6 @@ async function main() {
     stepButton.disabled = true;
     runButton.disabled = true;
     webgpuEnabled.disabled = true;
-    presetButtons.forEach((button) => {
-      button.disabled = true;
-    });
   }
 }
 
