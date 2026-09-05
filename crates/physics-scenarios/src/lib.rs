@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, fmt};
 
-use ecs_physics::{PhysicsBody, PhysicsConfig, PhysicsError, PhysicsStep, step};
+use ecs_physics::{PhysicsBody, PhysicsConfig, PhysicsError, PhysicsMaterial, PhysicsStep, step};
 use ecs_reference::ReferenceWorld;
 use ecs_workload::{
     EntityId, Operation, Position, Velocity, Workload, WorkloadError, WorldSnapshot,
@@ -11,6 +11,8 @@ use spatial_kernels::Aabb;
 const FALLING_BOX_COLUMNS: u32 = 16;
 const BOX_HALF_EXTENTS: [i32; 2] = [1, 1];
 const FLOOR_HALF_EXTENTS: [i32; 2] = [26, 1];
+const BOUNCING_ROOM_DYNAMIC_COUNT: u32 = 3;
+const BOUNCING_ROOM_FLOOR: EntityId = EntityId(BOUNCING_ROOM_DYNAMIC_COUNT);
 const MAX_EXACT_F32_INTEGER: i64 = 16_777_216;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -86,17 +88,7 @@ impl FallingBoxesScenario {
     ///
     /// Returns [`ScenarioError`] if setup, physics, or generated ECS operations fail.
     pub fn reference_after(&self, frames: u32) -> Result<WorldSnapshot, ScenarioError> {
-        let mut world = ReferenceWorld::new();
-        world.replay(&self.setup).map_err(ScenarioError::Workload)?;
-
-        for _ in 0..frames {
-            let physics = self
-                .step(&world.snapshot())
-                .map_err(ScenarioError::Physics)?;
-            apply_reference_operations(&mut world, physics.operations())?;
-        }
-
-        Ok(world.snapshot())
+        reference_after(&self.setup, frames, |snapshot| self.step(snapshot))
     }
 
     /// Builds exact CPU broad-phase evidence from the Rust-owned falling-box state.
@@ -111,6 +103,112 @@ impl FallingBoxesScenario {
     pub fn broad_phase_frame_after(&self, frames: u32) -> Result<BroadPhaseFrame, ScenarioError> {
         let snapshot = self.reference_after(frames)?;
         BroadPhaseFrame::from_snapshot(&snapshot, &self.bodies)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BouncingRoomScenario {
+    setup: Workload,
+    bodies: Vec<PhysicsBody>,
+}
+
+impl Default for BouncingRoomScenario {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl BouncingRoomScenario {
+    /// Creates a small material fixture with three intentionally different dynamic bodies.
+    ///
+    /// Entity 0 is fully bouncy and frictionless, entity 1 has medium restitution/friction, and
+    /// entity 2 is fully inelastic with maximum contact friction. The fixed floor keeps the
+    /// comparison focused on deterministic material response rather than scenario-specific logic.
+    #[must_use]
+    pub fn new() -> Self {
+        let definitions = [
+            (
+                EntityId(0),
+                Position::new(-12, 8),
+                Velocity::new(3, -2),
+                PhysicsMaterial::new(1_000, 0),
+                1,
+            ),
+            (
+                EntityId(1),
+                Position::new(0, 10),
+                Velocity::new(3, -2),
+                PhysicsMaterial::new(500, 500),
+                2,
+            ),
+            (
+                EntityId(2),
+                Position::new(12, 6),
+                Velocity::new(4, -2),
+                PhysicsMaterial::new(0, 1_000),
+                3,
+            ),
+        ];
+
+        let mut operations = Vec::new();
+        let mut bodies = Vec::new();
+        for (entity, position, velocity, material, mass_units) in definitions {
+            operations.push(Operation::Spawn(entity));
+            operations.push(Operation::SetPosition(entity, position));
+            operations.push(Operation::SetVelocity(entity, velocity));
+            bodies.push(
+                PhysicsBody::dynamic(entity, BOX_HALF_EXTENTS)
+                    .with_mass(mass_units)
+                    .with_material(material),
+            );
+        }
+
+        operations.push(Operation::Spawn(BOUNCING_ROOM_FLOOR));
+        operations.push(Operation::SetPosition(
+            BOUNCING_ROOM_FLOOR,
+            Position::new(0, 0),
+        ));
+        bodies.push(PhysicsBody::fixed(BOUNCING_ROOM_FLOOR, FLOOR_HALF_EXTENTS));
+
+        Self {
+            setup: Workload::new(operations),
+            bodies,
+        }
+    }
+
+    #[must_use]
+    pub fn setup(&self) -> &Workload {
+        &self.setup
+    }
+
+    #[must_use]
+    pub fn bodies(&self) -> &[PhysicsBody] {
+        &self.bodies
+    }
+
+    #[must_use]
+    pub const fn physics_config(&self) -> PhysicsConfig {
+        PhysicsConfig {
+            gravity: Velocity::new(0, -1),
+        }
+    }
+
+    /// Produces one canonical material-physics step.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PhysicsError`] when the supplied snapshot does not satisfy the physics contract.
+    pub fn step(&self, snapshot: &WorldSnapshot) -> Result<PhysicsStep, PhysicsError> {
+        step(snapshot, &self.bodies, self.physics_config(), 1)
+    }
+
+    /// Runs the material fixture through the reference ECS.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ScenarioError`] if setup, physics, or generated ECS operations fail.
+    pub fn reference_after(&self, frames: u32) -> Result<WorldSnapshot, ScenarioError> {
+        reference_after(&self.setup, frames, |snapshot| self.step(snapshot))
     }
 }
 
@@ -227,6 +325,25 @@ impl fmt::Display for ScenarioError {
 
 impl std::error::Error for ScenarioError {}
 
+fn reference_after<F>(
+    setup: &Workload,
+    frames: u32,
+    mut next_step: F,
+) -> Result<WorldSnapshot, ScenarioError>
+where
+    F: FnMut(&WorldSnapshot) -> Result<PhysicsStep, PhysicsError>,
+{
+    let mut world = ReferenceWorld::new();
+    world.replay(setup).map_err(ScenarioError::Workload)?;
+
+    for _ in 0..frames {
+        let physics = next_step(&world.snapshot()).map_err(ScenarioError::Physics)?;
+        apply_reference_operations(&mut world, physics.operations())?;
+    }
+
+    Ok(world.snapshot())
+}
+
 fn apply_reference_operations(
     world: &mut ReferenceWorld,
     operations: &[Operation],
@@ -275,13 +392,18 @@ fn pair_index(left: usize, right: usize, count: usize) -> usize {
 mod tests {
     use ecs_reference::ReferenceWorld;
     use ecs_sparse_set::SparseWorld;
-    use ecs_workload::{Operation, Position, WorldSnapshot};
+    use ecs_workload::{EntityId, Operation, Position, WorldSnapshot};
 
-    use super::{FallingBoxesScenario, ScenarioError};
+    use super::{BouncingRoomScenario, FallingBoxesScenario, ScenarioError};
 
     #[test]
     fn falling_boxes_recipe_is_deterministic() {
         assert_eq!(FallingBoxesScenario::new(64), FallingBoxesScenario::new(64));
+    }
+
+    #[test]
+    fn bouncing_room_recipe_is_deterministic() {
+        assert_eq!(BouncingRoomScenario::new(), BouncingRoomScenario::new());
     }
 
     #[test]
@@ -334,6 +456,65 @@ mod tests {
         }
 
         assert_eq!(sparse.snapshot(), reference.snapshot());
+    }
+
+    #[test]
+    fn bouncing_room_physics_matches_sparse_set_storage() {
+        let scenario = BouncingRoomScenario::new();
+        let mut reference = ReferenceWorld::new();
+        let mut sparse = SparseWorld::new();
+        assert_eq!(reference.replay(scenario.setup()), Ok(()));
+        assert_eq!(sparse.replay(scenario.setup()), Ok(()));
+
+        for frame in 0..12 {
+            assert_eq!(
+                sparse.snapshot(),
+                reference.snapshot(),
+                "before material frame {frame}"
+            );
+            let reference_step = scenario.step(&reference.snapshot());
+            let sparse_step = scenario.step(&sparse.snapshot());
+            assert_eq!(sparse_step, reference_step, "material physics step {frame}");
+            let physics = match reference_step {
+                Ok(physics) => physics,
+                Err(error) => panic!("unexpected physics error: {error}"),
+            };
+            for operation in physics.operations() {
+                assert_eq!(reference.apply(*operation), Ok(()));
+                assert_eq!(sparse.apply(*operation), Ok(()));
+            }
+        }
+
+        assert_eq!(sparse.snapshot(), reference.snapshot());
+    }
+
+    #[test]
+    fn bouncing_room_exposes_distinct_material_behavior() {
+        let scenario = BouncingRoomScenario::new();
+        let snapshot = match scenario.reference_after(3) {
+            Ok(snapshot) => snapshot,
+            Err(error) => panic!("unexpected scenario error: {error}"),
+        };
+        let bouncy = snapshot
+            .entities()
+            .iter()
+            .find(|entity| entity.id == EntityId(0))
+            .expect("bouncy entity should exist");
+        let sticky = snapshot
+            .entities()
+            .iter()
+            .find(|entity| entity.id == EntityId(2))
+            .expect("sticky entity should exist");
+
+        assert!(
+            bouncy.velocity.is_some_and(|velocity| velocity.y > 0),
+            "fully bouncy body should be moving upward after its floor impact"
+        );
+        assert_eq!(
+            sticky.velocity.map(|velocity| velocity.x),
+            Some(0),
+            "maximum contact friction should remove the sticky body's tangent motion"
+        );
     }
 
     #[test]
