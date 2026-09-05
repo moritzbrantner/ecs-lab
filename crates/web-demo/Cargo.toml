@@ -11,6 +11,7 @@ description = "WebAssembly adapter for ECS Lab reference and physics evidence"
 crate-type = ["cdylib"]
 
 [dependencies]
+ecs-physics = { path = "../physics" }
 ecs-physics-scenarios = { path = "../physics-scenarios" }
 ecs-reference = { path = "../reference" }
 ecs-workload = { path = "../workload" }
