@@ -131,7 +131,10 @@ fn ensure_frame(state: &mut PhysicsDemoState, steps: u32) -> Option<&PhysicsDemo
 fn frame_entity(body_index: u32, steps: u32) -> Option<PhysicsDemoEntity> {
     let index = usize::try_from(body_index).ok()?;
     let mut state = demo_state().lock().ok()?;
-    ensure_frame(&mut state, steps)?.entities.get(index).copied()
+    ensure_frame(&mut state, steps)?
+        .entities
+        .get(index)
+        .copied()
 }
 
 #[unsafe(no_mangle)]
