@@ -131,6 +131,51 @@
         </div>
       </section>
 
+      <section class="method" aria-labelledby="physics-performance-title">
+        <div class="section-copy">
+          <p class="eyebrow">Physics performance</p>
+          <h2 id="physics-performance-title">Make the common path cheaper without changing the answer</h2>
+          <p>
+            ECS Lab treats an optimization as valid only when it removes unnecessary work while
+            preserving the same deterministic Rust result. The current solver deliberately keeps its
+            pair order and collision authority, then optimizes the work performed inside that loop.
+          </p>
+
+          <h3>Cache derived AABBs</h3>
+          <p>
+            ECS positions stay as exact integers, while the reusable geometry kernel consumes
+            floating-point AABBs. The solver now converts and builds that derived geometry once after a
+            body moves, then reuses it across pair checks. It rebuilds the cache only after positional
+            collision correction actually changes a body. This avoids repeating the same conversion
+            and range work for every pair involving that body.
+          </p>
+
+          <h3>Reject separated integer axes first</h3>
+          <p>
+            If two boxes are separated on X, they cannot collide, so the pair can return immediately.
+            Only X survivors check Y, and only pairs that survive both exact integer checks reach
+            <code>geometry-kernels</code>. A zero overlap is never rejected, which means touching pairs
+            still use the canonical collision-kernel semantics.
+          </p>
+
+          <h3>Write only actual ECS changes</h3>
+          <p>
+            Physics already emits <code>SetPosition</code> and <code>SetVelocity</code> only when a dynamic
+            body changed. Collision inspection therefore does not automatically become storage churn,
+            and fixed bodies remain mutation-free.
+          </p>
+
+          <h3>Why not jump straight to a broad phase?</h3>
+          <p>
+            Pair response can correct positions as the deterministic loop runs. A candidate set built
+            once before that response could miss a contact created by an earlier correction. Sweep and
+            grid broad phases are still the next scaling tool, but they must first prove that their
+            candidate set is conservative for the solver's actual update model. Faster is useful only
+            after parity holds.
+          </p>
+        </div>
+      </section>
+
       <section class="method" aria-labelledby="method-title">
         <div class="section-copy">
           <p class="eyebrow">Comparison method</p>
