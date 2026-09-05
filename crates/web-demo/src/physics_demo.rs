@@ -3,7 +3,7 @@ use std::sync::{Mutex, OnceLock};
 use ecs_physics::BodyKind;
 use ecs_physics_3d::{BouncingRoom3dScenario, BroadPhaseBody3d, BroadPhaseFrame3d};
 
-const PHYSICS_DEMO_MAX_STEPS: u32 = 24;
+const PHYSICS_DEMO_MAX_STEPS: u32 = 64;
 
 static PHYSICS_DEMO_STATE: OnceLock<Mutex<PhysicsDemoState>> = OnceLock::new();
 
@@ -172,10 +172,10 @@ mod tests {
 
     #[test]
     fn browser_demo_exposes_the_true_three_dimensional_room() {
-        assert_eq!(physics_demo_max_steps(), 24);
-        assert_eq!(physics_demo_body_count(0), 9);
-        assert_eq!(physics_demo_is_fixed(3, 0), 1);
-        assert!(physics_demo_half_extent_z(3, 0) > 1);
+        assert_eq!(physics_demo_max_steps(), 64);
+        assert_eq!(physics_demo_body_count(0), 54);
+        assert_eq!(physics_demo_is_fixed(48, 0), 1);
+        assert!(physics_demo_half_extent_z(48, 0) > 1);
 
         let initial_z = physics_demo_position_z(0, 0);
         let next_z = physics_demo_position_z(0, 1);

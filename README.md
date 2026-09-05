@@ -14,13 +14,15 @@ The storage horizon covers a reference model, a sparse-set world, and later arch
 
 `ecs-physics` remains the deterministic 2D compatibility/reference solver used by the existing benchmark and invariant foundation. `ecs-physics-3d` is the true 3D solver used by the dedicated physics demo. It resolves three-axis AABB contacts in stable entity-id order, applies gravity and mass/restitution response on the selected normal axis, applies friction across both tangent axes, and still emits ordinary ECS `SetPosition` / `SetVelocity` operations.
 
-The 3D crate owns `BouncingRoom3dScenario`: three contrasting dynamic bodies move through depth inside six fixed AABB slabs (floor, ceiling, ±X and ±Z walls). The scenario can be replayed through both storage implementations and produces exact Rust 3D AABB pair evidence.
+The 3D crate owns `BouncingRoom3dScenario`: 48 dynamic bodies with varied box footprints, masses, materials, and three-axis velocities move inside six fixed AABB slabs (floor, ceiling, ±X and ±Z walls). The scenario can be replayed through both storage implementations and produces exact Rust 3D AABB pair evidence.
 
 ## Interactive Pages demo and WebGPU
 
 The main Pages workbench remains useful for small editable ECS/material experiments. JavaScript owns only interaction state and visualization: the browser synchronizes experiment inputs into WebAssembly and Rust produces the canonical frame.
 
-The dedicated physics playground at [moritzbrantner.github.io/ecs-lab/physics/](https://moritzbrantner.github.io/ecs-lab/physics/) now runs the true `BouncingRoom3dScenario`. Rust/Wasm supplies X/Y/Z positions, 3D collider extents, material metadata, and exact collision-pair words. The browser interpolates only between consecutive authoritative Rust frames for smoother motion.
+The dedicated physics playground at [moritzbrantner.github.io/ecs-lab/physics/](https://moritzbrantner.github.io/ecs-lab/physics/) runs the dense `BouncingRoom3dScenario`. Rust/Wasm supplies X/Y/Z positions, 3D collider extents, material metadata, and exact collision-pair words. The browser interpolates only between consecutive authoritative Rust frames for smoother motion.
+
+The camera is presentation state only. Drag inside the scene to orbit, Shift-drag or right-drag to pan, use the mouse wheel to zoom, and double-click or use the in-stage reset control to restore the canonical view. Camera input never feeds the physics solver.
 
 WebGPU has two deliberately separate roles in the 3D demo. A raw browser WebGPU render pipeline draws the cutaway room when an adapter is available, with a Canvas 3D fallback otherwise. Separately, the existing WebGPU all-pairs compute path receives the exact Rust-produced 3D AABBs and is accepted only when its pair bitset matches Rust word-for-word. Neither GPU path owns physics response.
 
