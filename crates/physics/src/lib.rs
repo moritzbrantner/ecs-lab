@@ -1,10 +1,14 @@
-use std::{collections::BTreeMap, fmt};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt,
+};
 
 use ecs_workload::{EntityId, EntitySnapshot, Operation, Position, Velocity, WorldSnapshot};
 use geometry_kernels::aabb_aabb;
 use spatial_kernels::Aabb;
 
 const MAX_EXACT_F32_INTEGER: i64 = 16_777_216;
+pub const MATERIAL_SCALE: u16 = 1_000;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BodyKind {
@@ -12,11 +16,29 @@ pub enum BodyKind {
     Dynamic,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct PhysicsMaterial {
+    pub restitution_milli: u16,
+    pub friction_milli: u16,
+}
+
+impl PhysicsMaterial {
+    #[must_use]
+    pub const fn new(restitution_milli: u16, friction_milli: u16) -> Self {
+        Self {
+            restitution_milli,
+            friction_milli,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PhysicsBody {
     pub entity: EntityId,
     pub kind: BodyKind,
     pub half_extents: [i32; 2],
+    pub mass_units: u32,
+    pub material: PhysicsMaterial,
 }
 
 impl PhysicsBody {
@@ -26,6 +48,8 @@ impl PhysicsBody {
             entity,
             kind: BodyKind::Dynamic,
             half_extents,
+            mass_units: 1,
+            material: PhysicsMaterial::new(0, 0),
         }
     }
 
@@ -35,7 +59,21 @@ impl PhysicsBody {
             entity,
             kind: BodyKind::Fixed,
             half_extents,
+            mass_units: 0,
+            material: PhysicsMaterial::new(0, 0),
         }
+    }
+
+    #[must_use]
+    pub const fn with_mass(mut self, mass_units: u32) -> Self {
+        self.mass_units = mass_units;
+        self
+    }
+
+    #[must_use]
+    pub const fn with_material(mut self, material: PhysicsMaterial) -> Self {
+        self.material = material;
+        self
     }
 }
 
@@ -52,6 +90,20 @@ impl Default for PhysicsConfig {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ContactNormal {
+    pub x: i8,
+    pub y: i8,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PhysicsContact {
+    pub left: EntityId,
+    pub right: EntityId,
+    pub normal: ContactNormal,
+    pub penetration: i64,
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct PhysicsStepStats {
     pub body_count: usize,
@@ -64,6 +116,8 @@ pub struct PhysicsStepStats {
 pub struct PhysicsStep {
     operations: Vec<Operation>,
     stats: PhysicsStepStats,
+    contacts: Vec<PhysicsContact>,
+    supporting_entities: Vec<EntityId>,
 }
 
 impl PhysicsStep {
@@ -76,6 +130,21 @@ impl PhysicsStep {
     pub const fn stats(&self) -> PhysicsStepStats {
         self.stats
     }
+
+    #[must_use]
+    pub fn contacts(&self) -> &[PhysicsContact] {
+        &self.contacts
+    }
+
+    #[must_use]
+    pub fn supporting_entities(&self) -> &[EntityId] {
+        &self.supporting_entities
+    }
+
+    #[must_use]
+    pub fn is_supported(&self, entity: EntityId) -> bool {
+        self.supporting_entities.binary_search(&entity).is_ok()
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -85,6 +154,9 @@ pub enum PhysicsError {
     MissingPosition(EntityId),
     MissingVelocity(EntityId),
     InvalidHalfExtents(EntityId),
+    ZeroMass(EntityId),
+    RestitutionOutOfRange(EntityId, u16),
+    FrictionOutOfRange(EntityId, u16),
     CoordinateOutOfRange(EntityId),
     NonPositiveTicks(i32),
 }
@@ -111,6 +183,19 @@ impl fmt::Display for PhysicsError {
                 "physics body {} has negative AABB half extents",
                 entity.0
             ),
+            Self::ZeroMass(entity) => {
+                write!(formatter, "dynamic physics body {} has zero mass", entity.0)
+            }
+            Self::RestitutionOutOfRange(entity, value) => write!(
+                formatter,
+                "physics body {} has restitution {value}, expected 0..={MATERIAL_SCALE}",
+                entity.0
+            ),
+            Self::FrictionOutOfRange(entity, value) => write!(
+                formatter,
+                "physics body {} has friction {value}, expected 0..={MATERIAL_SCALE}",
+                entity.0
+            ),
             Self::CoordinateOutOfRange(entity) => write!(
                 formatter,
                 "physics body {} exceeds the exact f32 collision range",
@@ -132,9 +217,14 @@ impl std::error::Error for PhysicsError {}
 ///
 /// Dynamic bodies use semi-implicit Euler integration. Every body pair is then visited in
 /// ascending entity-id order. `geometry-kernels` owns the AABB overlap decision; this crate owns
-/// the intentionally simple equal-mass, fully inelastic response and positional correction.
-/// Returned operations are ordinary ECS workload operations, so storage candidates can consume the
-/// same result without implementing a physics-specific trait.
+/// deterministic positional correction plus integer mass, restitution, and contact-friction
+/// response. Returned operations are ordinary ECS workload operations, so storage candidates can
+/// consume the same result without implementing a physics-specific trait.
+///
+/// Material coefficients use thousandths: `0` is none and [`MATERIAL_SCALE`] is the full value.
+/// Restitution combines by taking the higher coefficient, while friction takes the higher
+/// coefficient. The defaults preserve the previous equal-mass, fully inelastic, frictionless
+/// response.
 ///
 /// # Errors
 ///
@@ -170,6 +260,8 @@ pub fn step(
         body_count: states.len(),
         ..PhysicsStepStats::default()
     };
+    let mut contacts = Vec::new();
+    let mut supporting_entities = BTreeSet::new();
 
     for left_index in 0..states.len() {
         for right_index in (left_index + 1)..states.len() {
@@ -178,11 +270,15 @@ pub fn step(
             let left = &mut left_slice[left_index];
             let right = &mut right_slice[0];
             let outcome = resolve_pair(left, right)?;
-            if outcome.contact {
+            if let Some(contact) = outcome.contact {
+                contacts.push(contact);
                 step_stats.contacts = step_stats.contacts.saturating_add(1);
             }
             if outcome.resolved {
                 step_stats.resolved_contacts = step_stats.resolved_contacts.saturating_add(1);
+            }
+            if let Some(entity) = outcome.supported_entity {
+                supporting_entities.insert(entity);
             }
         }
     }
@@ -190,6 +286,8 @@ pub fn step(
     Ok(PhysicsStep {
         operations: changed_operations(&states),
         stats: step_stats,
+        contacts,
+        supporting_entities: supporting_entities.into_iter().collect(),
     })
 }
 
@@ -215,6 +313,8 @@ struct BodyState {
     entity: EntityId,
     kind: BodyKind,
     half_extents: [i64; 2],
+    mass_units: u32,
+    material: PhysicsMaterial,
     position: Position,
     velocity: Velocity,
     original_position: Position,
@@ -229,6 +329,22 @@ impl BodyState {
         if body.half_extents.iter().any(|extent| *extent < 0) {
             return Err(PhysicsError::InvalidHalfExtents(body.entity));
         }
+        if body.kind == BodyKind::Dynamic && body.mass_units == 0 {
+            return Err(PhysicsError::ZeroMass(body.entity));
+        }
+        if body.material.restitution_milli > MATERIAL_SCALE {
+            return Err(PhysicsError::RestitutionOutOfRange(
+                body.entity,
+                body.material.restitution_milli,
+            ));
+        }
+        if body.material.friction_milli > MATERIAL_SCALE {
+            return Err(PhysicsError::FrictionOutOfRange(
+                body.entity,
+                body.material.friction_milli,
+            ));
+        }
+
         let entity = snapshots
             .get(&body.entity)
             .ok_or(PhysicsError::MissingEntity(body.entity))?;
@@ -248,6 +364,8 @@ impl BodyState {
                 i64::from(body.half_extents[0]),
                 i64::from(body.half_extents[1]),
             ],
+            mass_units: body.mass_units,
+            material: body.material,
             position,
             velocity,
             original_position: position,
@@ -327,24 +445,36 @@ impl BodyState {
         }
     }
 
-    const fn set_axis_velocity(&mut self, axis: Axis, value: i32) {
+    fn set_axis_velocity(&mut self, axis: Axis, value: i32) -> bool {
+        let previous = self.axis_velocity(axis);
         match axis {
             Axis::X => self.velocity.x = value,
             Axis::Y => self.velocity.y = value,
         }
+        previous != value
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Axis {
     X,
     Y,
 }
 
+impl Axis {
+    const fn tangent(self) -> Self {
+        match self {
+            Self::X => Self::Y,
+            Self::Y => Self::X,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 struct PairOutcome {
-    contact: bool,
+    contact: Option<PhysicsContact>,
     resolved: bool,
+    supported_entity: Option<EntityId>,
 }
 
 fn resolve_pair(left: &mut BodyState, right: &mut BodyState) -> Result<PairOutcome, PhysicsError> {
@@ -369,20 +499,55 @@ fn resolve_pair(left: &mut BodyState, right: &mut BodyState) -> Result<PairOutco
         i64::from(right.axis_velocity(axis)).saturating_sub(i64::from(left.axis_velocity(axis)));
     let approaching = relative_velocity.saturating_mul(normal) < 0;
 
+    let restitution_milli = combined_restitution(left, right);
+    let friction_milli = combined_friction(left, right);
     let corrected = correct_penetration(left, right, axis, normal, penetration);
-    let impulsed = if approaching {
-        apply_inelastic_impulse(left, right, axis)
+    let normal_impulsed = if approaching {
+        apply_normal_response(left, right, axis, restitution_milli)
     } else {
         false
     };
+    let friction_applied = apply_contact_friction(left, right, axis.tangent(), friction_milli);
 
     left.validate_geometry_range()?;
     right.validate_geometry_range()?;
 
     Ok(PairOutcome {
-        contact: true,
-        resolved: corrected || impulsed,
+        contact: Some(PhysicsContact {
+            left: left.entity,
+            right: right.entity,
+            normal: contact_normal(axis, normal),
+            penetration,
+        }),
+        resolved: corrected || normal_impulsed || friction_applied,
+        supported_entity: supported_entity(left, right, axis, normal),
     })
+}
+
+fn contact_normal(axis: Axis, normal: i64) -> ContactNormal {
+    let component = if normal >= 0 { 1 } else { -1 };
+    match axis {
+        Axis::X => ContactNormal { x: component, y: 0 },
+        Axis::Y => ContactNormal { x: 0, y: component },
+    }
+}
+
+fn supported_entity(
+    left: &BodyState,
+    right: &BodyState,
+    axis: Axis,
+    normal: i64,
+) -> Option<EntityId> {
+    if axis != Axis::Y {
+        return None;
+    }
+    if normal < 0 && left.kind == BodyKind::Dynamic {
+        return Some(left.entity);
+    }
+    if normal > 0 && right.kind == BodyKind::Dynamic {
+        return Some(right.entity);
+    }
+    None
 }
 
 fn integer_axis_overlap(left: &BodyState, right: &BodyState, axis: Axis) -> i64 {
@@ -424,8 +589,8 @@ fn correct_penetration(
             true
         }
         (BodyKind::Dynamic, BodyKind::Dynamic) => {
-            let left_share = penetration / 2;
-            let right_share = penetration - left_share;
+            let (left_share, right_share) =
+                dynamic_penetration_shares(penetration, left.mass_units, right.mass_units);
             left.offset_axis(axis, -normal.saturating_mul(left_share));
             right.offset_axis(axis, normal.saturating_mul(right_share));
             true
@@ -433,23 +598,162 @@ fn correct_penetration(
     }
 }
 
-fn apply_inelastic_impulse(left: &mut BodyState, right: &mut BodyState, axis: Axis) -> bool {
+fn dynamic_penetration_shares(penetration: i64, left_mass: u32, right_mass: u32) -> (i64, i64) {
+    let total_mass = u64::from(left_mass) + u64::from(right_mass);
+    let denominator = i128::from(total_mass);
+    let mut left_share =
+        i64_from_i128(i128::from(penetration).saturating_mul(i128::from(right_mass)) / denominator);
+    let mut right_share =
+        i64_from_i128(i128::from(penetration).saturating_mul(i128::from(left_mass)) / denominator);
+    let remainder = penetration.saturating_sub(left_share.saturating_add(right_share));
+
+    if remainder > 0 {
+        if right_mass > left_mass {
+            left_share = left_share.saturating_add(remainder);
+        } else {
+            right_share = right_share.saturating_add(remainder);
+        }
+    }
+
+    (left_share, right_share)
+}
+
+fn combined_restitution(left: &BodyState, right: &BodyState) -> u16 {
+    left.material
+        .restitution_milli
+        .max(right.material.restitution_milli)
+}
+
+fn combined_friction(left: &BodyState, right: &BodyState) -> u16 {
+    left.material
+        .friction_milli
+        .max(right.material.friction_milli)
+}
+
+fn apply_normal_response(
+    left: &mut BodyState,
+    right: &mut BodyState,
+    axis: Axis,
+    restitution_milli: u16,
+) -> bool {
     match (left.kind, right.kind) {
         (BodyKind::Fixed, BodyKind::Fixed) => false,
         (BodyKind::Dynamic, BodyKind::Fixed) => {
-            left.set_axis_velocity(axis, 0);
-            true
+            let next = scaled_i32(-i64::from(left.axis_velocity(axis)), restitution_milli);
+            left.set_axis_velocity(axis, next)
         }
         (BodyKind::Fixed, BodyKind::Dynamic) => {
-            right.set_axis_velocity(axis, 0);
-            true
+            let next = scaled_i32(-i64::from(right.axis_velocity(axis)), restitution_milli);
+            right.set_axis_velocity(axis, next)
         }
         (BodyKind::Dynamic, BodyKind::Dynamic) => {
-            let average = average_i32(left.axis_velocity(axis), right.axis_velocity(axis));
-            left.set_axis_velocity(axis, average);
-            right.set_axis_velocity(axis, average);
-            true
+            let scale = i128::from(MATERIAL_SCALE);
+            let restitution = i128::from(restitution_milli);
+            let left_mass = i128::from(left.mass_units);
+            let right_mass = i128::from(right.mass_units);
+            let left_velocity = i128::from(left.axis_velocity(axis));
+            let right_velocity = i128::from(right.axis_velocity(axis));
+            let denominator = (left_mass + right_mass).saturating_mul(scale);
+
+            let left_numerator = (left_mass.saturating_mul(scale)
+                - restitution.saturating_mul(right_mass))
+            .saturating_mul(left_velocity)
+            .saturating_add(
+                (scale + restitution)
+                    .saturating_mul(right_mass)
+                    .saturating_mul(right_velocity),
+            );
+            let right_numerator = (scale + restitution)
+                .saturating_mul(left_mass)
+                .saturating_mul(left_velocity)
+                .saturating_add(
+                    (right_mass.saturating_mul(scale) - restitution.saturating_mul(left_mass))
+                        .saturating_mul(right_velocity),
+                );
+
+            let left_changed =
+                left.set_axis_velocity(axis, rational_i32(left_numerator, denominator));
+            let right_changed =
+                right.set_axis_velocity(axis, rational_i32(right_numerator, denominator));
+            left_changed || right_changed
         }
+    }
+}
+
+fn apply_contact_friction(
+    left: &mut BodyState,
+    right: &mut BodyState,
+    tangent: Axis,
+    friction_milli: u16,
+) -> bool {
+    if friction_milli == 0 {
+        return false;
+    }
+
+    match (left.kind, right.kind) {
+        (BodyKind::Fixed, BodyKind::Fixed) => false,
+        (BodyKind::Dynamic, BodyKind::Fixed) => {
+            let retained = MATERIAL_SCALE.saturating_sub(friction_milli);
+            let next = scaled_i32(i64::from(left.axis_velocity(tangent)), retained);
+            left.set_axis_velocity(tangent, next)
+        }
+        (BodyKind::Fixed, BodyKind::Dynamic) => {
+            let retained = MATERIAL_SCALE.saturating_sub(friction_milli);
+            let next = scaled_i32(i64::from(right.axis_velocity(tangent)), retained);
+            right.set_axis_velocity(tangent, next)
+        }
+        (BodyKind::Dynamic, BodyKind::Dynamic) => {
+            let scale = i128::from(MATERIAL_SCALE);
+            let friction = i128::from(friction_milli);
+            let retained = scale - friction;
+            let left_mass = i128::from(left.mass_units);
+            let right_mass = i128::from(right.mass_units);
+            let total_mass = left_mass + right_mass;
+            let left_velocity = i128::from(left.axis_velocity(tangent));
+            let right_velocity = i128::from(right.axis_velocity(tangent));
+            let momentum = left_mass
+                .saturating_mul(left_velocity)
+                .saturating_add(right_mass.saturating_mul(right_velocity));
+            let denominator = scale.saturating_mul(total_mass);
+
+            let left_numerator = left_velocity
+                .saturating_mul(retained)
+                .saturating_mul(total_mass)
+                .saturating_add(friction.saturating_mul(momentum));
+            let right_numerator = right_velocity
+                .saturating_mul(retained)
+                .saturating_mul(total_mass)
+                .saturating_add(friction.saturating_mul(momentum));
+
+            let left_changed =
+                left.set_axis_velocity(tangent, rational_i32(left_numerator, denominator));
+            let right_changed =
+                right.set_axis_velocity(tangent, rational_i32(right_numerator, denominator));
+            left_changed || right_changed
+        }
+    }
+}
+
+fn scaled_i32(value: i64, coefficient_milli: u16) -> i32 {
+    let numerator = i128::from(value).saturating_mul(i128::from(coefficient_milli));
+    rational_i32(numerator, i128::from(MATERIAL_SCALE))
+}
+
+fn rational_i32(numerator: i128, denominator: i128) -> i32 {
+    debug_assert!(denominator > 0);
+    let value = numerator / denominator;
+    match i32::try_from(value) {
+        Ok(value) => value,
+        Err(_) if value.is_negative() => i32::MIN,
+        Err(_) => i32::MAX,
+    }
+}
+
+fn i64_from_i128(value: i128) -> i64 {
+    match i64::try_from(value) {
+        Ok(value) => value,
+        Err(_) if value.is_negative() => i64::MIN,
+        Err(_) => i64::MAX,
     }
 }
 
@@ -480,15 +784,6 @@ fn exact_i64_to_f32(value: i64) -> f32 {
     value as f32
 }
 
-fn average_i32(left: i32, right: i32) -> i32 {
-    let average = i64::midpoint(i64::from(left), i64::from(right));
-    match i32::try_from(average) {
-        Ok(value) => value,
-        Err(_) if average.is_negative() => i32::MIN,
-        Err(_) => i32::MAX,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use ecs_reference::ReferenceWorld;
@@ -496,7 +791,10 @@ mod tests {
         EntityId, EntitySnapshot, Operation, Position, Velocity, Workload, WorldSnapshot,
     };
 
-    use super::{PhysicsBody, PhysicsConfig, PhysicsError, PhysicsStepStats, step};
+    use super::{
+        ContactNormal, PhysicsBody, PhysicsConfig, PhysicsError, PhysicsMaterial, PhysicsStepStats,
+        step,
+    };
 
     const NO_GRAVITY: PhysicsConfig = PhysicsConfig {
         gravity: Velocity::new(0, 0),
@@ -511,17 +809,14 @@ mod tests {
             velocity: Some(Velocity::new(2, 0)),
         }]);
 
-        let result = step(
+        let physics = step(
             &snapshot,
             &[PhysicsBody::dynamic(entity, [1, 1])],
             PhysicsConfig::default(),
             1,
-        );
+        )
+        .expect("single-body physics should succeed");
 
-        let physics = match result {
-            Ok(physics) => physics,
-            Err(error) => panic!("unexpected physics error: {error}"),
-        };
         assert_eq!(
             physics.operations(),
             [
@@ -538,10 +833,12 @@ mod tests {
                 resolved_contacts: 0,
             }
         );
+        assert!(physics.contacts().is_empty());
+        assert!(physics.supporting_entities().is_empty());
     }
 
     #[test]
-    fn resolves_dynamic_body_against_fixed_wall() {
+    fn default_material_preserves_inelastic_wall_response() {
         let dynamic = EntityId(1);
         let wall = EntityId(2);
         let snapshot = WorldSnapshot::new(vec![
@@ -557,7 +854,7 @@ mod tests {
             },
         ]);
 
-        let result = step(
+        let physics = step(
             &snapshot,
             &[
                 PhysicsBody::dynamic(dynamic, [1, 1]),
@@ -565,11 +862,8 @@ mod tests {
             ],
             NO_GRAVITY,
             1,
-        );
-        let physics = match result {
-            Ok(physics) => physics,
-            Err(error) => panic!("unexpected physics error: {error}"),
-        };
+        )
+        .expect("wall collision should succeed");
 
         assert_eq!(
             physics.operations(),
@@ -584,39 +878,194 @@ mod tests {
     }
 
     #[test]
-    fn touching_uses_geometry_kernel_contact_semantics() {
+    fn restitution_bounces_dynamic_body_from_ordinary_fixed_floor() {
         let dynamic = EntityId(1);
-        let wall = EntityId(2);
+        let floor = EntityId(2);
+        let bouncy = PhysicsMaterial::new(1_000, 0);
         let snapshot = WorldSnapshot::new(vec![
             EntitySnapshot {
                 id: dynamic,
-                position: Some(Position::new(0, 0)),
-                velocity: Some(Velocity::new(0, 0)),
+                position: Some(Position::new(0, 3)),
+                velocity: Some(Velocity::new(0, -2)),
             },
             EntitySnapshot {
-                id: wall,
-                position: Some(Position::new(2, 0)),
+                id: floor,
+                position: Some(Position::new(0, 0)),
                 velocity: None,
             },
         ]);
 
-        let result = step(
+        let physics = step(
             &snapshot,
             &[
-                PhysicsBody::dynamic(dynamic, [1, 1]),
-                PhysicsBody::fixed(wall, [1, 1]),
+                PhysicsBody::dynamic(dynamic, [1, 1]).with_material(bouncy),
+                PhysicsBody::fixed(floor, [8, 1]),
             ],
             NO_GRAVITY,
             1,
+        )
+        .expect("bouncy floor collision should succeed");
+
+        assert_eq!(
+            physics.operations(),
+            [
+                Operation::SetPosition(dynamic, Position::new(0, 2)),
+                Operation::SetVelocity(dynamic, Velocity::new(0, 2)),
+            ]
         );
-        let physics = match result {
-            Ok(physics) => physics,
-            Err(error) => panic!("unexpected physics error: {error}"),
-        };
+        assert!(physics.is_supported(dynamic));
+        assert_eq!(physics.contacts()[0].normal, ContactNormal { x: 0, y: -1 });
+        assert_eq!(physics.contacts()[0].penetration, 1);
+    }
+
+    #[test]
+    fn friction_damps_tangent_velocity_and_marks_support() {
+        let dynamic = EntityId(1);
+        let floor = EntityId(2);
+        let snapshot = WorldSnapshot::new(vec![
+            EntitySnapshot {
+                id: dynamic,
+                position: Some(Position::new(0, 3)),
+                velocity: Some(Velocity::new(10, -2)),
+            },
+            EntitySnapshot {
+                id: floor,
+                position: Some(Position::new(0, 0)),
+                velocity: None,
+            },
+        ]);
+
+        let physics = step(
+            &snapshot,
+            &[
+                PhysicsBody::dynamic(dynamic, [1, 1]).with_material(PhysicsMaterial::new(0, 500)),
+                PhysicsBody::fixed(floor, [20, 1]),
+            ],
+            NO_GRAVITY,
+            1,
+        )
+        .expect("friction contact should succeed");
+
+        assert_eq!(
+            physics.operations(),
+            [
+                Operation::SetPosition(dynamic, Position::new(10, 2)),
+                Operation::SetVelocity(dynamic, Velocity::new(5, 0)),
+            ]
+        );
+        assert_eq!(physics.supporting_entities(), [dynamic]);
+    }
+
+    #[test]
+    fn mass_changes_dynamic_collision_response() {
+        let light = EntityId(1);
+        let heavy = EntityId(2);
+        let perfectly_bouncy = PhysicsMaterial::new(1_000, 0);
+        let snapshot = WorldSnapshot::new(vec![
+            EntitySnapshot {
+                id: light,
+                position: Some(Position::new(-6, 0)),
+                velocity: Some(Velocity::new(4, 0)),
+            },
+            EntitySnapshot {
+                id: heavy,
+                position: Some(Position::new(0, 0)),
+                velocity: Some(Velocity::new(0, 0)),
+            },
+        ]);
+
+        let physics = step(
+            &snapshot,
+            &[
+                PhysicsBody::dynamic(light, [1, 1])
+                    .with_mass(1)
+                    .with_material(perfectly_bouncy),
+                PhysicsBody::dynamic(heavy, [1, 1])
+                    .with_mass(3)
+                    .with_material(perfectly_bouncy),
+            ],
+            NO_GRAVITY,
+            1,
+        )
+        .expect("mass-weighted collision should succeed");
+
+        assert_eq!(
+            physics.operations(),
+            [
+                Operation::SetPosition(light, Position::new(-2, 0)),
+                Operation::SetVelocity(light, Velocity::new(-2, 0)),
+                Operation::SetVelocity(heavy, Velocity::new(2, 0)),
+            ]
+        );
+    }
+
+    #[test]
+    fn mass_weights_penetration_correction_toward_lighter_body() {
+        let light = EntityId(1);
+        let heavy = EntityId(2);
+        let snapshot = WorldSnapshot::new(vec![
+            EntitySnapshot {
+                id: light,
+                position: Some(Position::new(0, 0)),
+                velocity: Some(Velocity::new(0, 0)),
+            },
+            EntitySnapshot {
+                id: heavy,
+                position: Some(Position::new(1, 0)),
+                velocity: Some(Velocity::new(0, 0)),
+            },
+        ]);
+
+        let physics = step(
+            &snapshot,
+            &[
+                PhysicsBody::dynamic(light, [1, 1]).with_mass(1),
+                PhysicsBody::dynamic(heavy, [1, 1]).with_mass(3),
+            ],
+            NO_GRAVITY,
+            1,
+        )
+        .expect("mass-weighted penetration correction should succeed");
+
+        assert_eq!(
+            physics.operations(),
+            [Operation::SetPosition(light, Position::new(-1, 0))]
+        );
+    }
+
+    #[test]
+    fn touching_uses_geometry_kernel_contact_semantics() {
+        let dynamic = EntityId(1);
+        let floor = EntityId(2);
+        let snapshot = WorldSnapshot::new(vec![
+            EntitySnapshot {
+                id: dynamic,
+                position: Some(Position::new(0, 2)),
+                velocity: Some(Velocity::new(0, 0)),
+            },
+            EntitySnapshot {
+                id: floor,
+                position: Some(Position::new(0, 0)),
+                velocity: None,
+            },
+        ]);
+
+        let physics = step(
+            &snapshot,
+            &[
+                PhysicsBody::dynamic(dynamic, [1, 1]),
+                PhysicsBody::fixed(floor, [8, 1]),
+            ],
+            NO_GRAVITY,
+            1,
+        )
+        .expect("touching contact should succeed");
 
         assert!(physics.operations().is_empty());
         assert_eq!(physics.stats().contacts, 1);
         assert_eq!(physics.stats().resolved_contacts, 0);
+        assert_eq!(physics.contacts()[0].penetration, 0);
+        assert!(physics.is_supported(dynamic));
     }
 
     #[test]
@@ -645,10 +1094,7 @@ mod tests {
         let reverse_result = step(&snapshot, &reverse, NO_GRAVITY, 1);
 
         assert_eq!(forward_result, reverse_result);
-        let physics = match forward_result {
-            Ok(physics) => physics,
-            Err(error) => panic!("unexpected physics error: {error}"),
-        };
+        let physics = forward_result.expect("equal-mass collision should succeed");
         assert_eq!(
             physics.operations(),
             [
@@ -684,6 +1130,46 @@ mod tests {
     }
 
     #[test]
+    fn rejects_invalid_mass_and_material_coefficients() {
+        let entity = EntityId(7);
+        let snapshot = WorldSnapshot::new(vec![EntitySnapshot {
+            id: entity,
+            position: Some(Position::new(0, 0)),
+            velocity: Some(Velocity::new(0, 0)),
+        }]);
+
+        assert_eq!(
+            step(
+                &snapshot,
+                &[PhysicsBody::dynamic(entity, [1, 1]).with_mass(0)],
+                NO_GRAVITY,
+                1,
+            ),
+            Err(PhysicsError::ZeroMass(entity))
+        );
+        assert_eq!(
+            step(
+                &snapshot,
+                &[PhysicsBody::dynamic(entity, [1, 1])
+                    .with_material(PhysicsMaterial::new(1_001, 0))],
+                NO_GRAVITY,
+                1,
+            ),
+            Err(PhysicsError::RestitutionOutOfRange(entity, 1_001))
+        );
+        assert_eq!(
+            step(
+                &snapshot,
+                &[PhysicsBody::dynamic(entity, [1, 1])
+                    .with_material(PhysicsMaterial::new(0, 1_001))],
+                NO_GRAVITY,
+                1,
+            ),
+            Err(PhysicsError::FrictionOutOfRange(entity, 1_001))
+        );
+    }
+
+    #[test]
     fn generated_operations_replay_through_reference_ecs() {
         let dynamic = EntityId(1);
         let wall = EntityId(2);
@@ -697,7 +1183,7 @@ mod tests {
         let mut world = ReferenceWorld::new();
         assert_eq!(world.replay(&workload), Ok(()));
 
-        let physics = match step(
+        let physics = step(
             &world.snapshot(),
             &[
                 PhysicsBody::dynamic(dynamic, [1, 1]),
@@ -705,10 +1191,8 @@ mod tests {
             ],
             NO_GRAVITY,
             1,
-        ) {
-            Ok(physics) => physics,
-            Err(error) => panic!("unexpected physics error: {error}"),
-        };
+        )
+        .expect("generated operations should be valid");
         for operation in physics.operations() {
             assert_eq!(world.apply(*operation), Ok(()));
         }
