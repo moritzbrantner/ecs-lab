@@ -45,5 +45,11 @@ jobs:
           tier: fast
           install-mode: none
 
+      - name: Check Pages JavaScript syntax
+        run: |
+          node --input-type=module --check < site/app.js
+          node --input-type=module --check < site/webgpu.js
+          node --input-type=module --check < site/physics/app.js
+
       - name: Exercise benchmark fixtures
         run: bash scripts/benchmark.sh smoke
