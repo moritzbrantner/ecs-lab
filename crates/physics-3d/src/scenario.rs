@@ -237,9 +237,7 @@ impl BouncingRoom3dScenario {
                 .step(&world.snapshot())
                 .map_err(ScenarioError3d::Physics)?;
             for operation in physics.operations() {
-                world
-                    .apply(*operation)
-                    .map_err(ScenarioError3d::Workload)?;
+                world.apply(*operation).map_err(ScenarioError3d::Workload)?;
             }
         }
         Ok(world.snapshot())
