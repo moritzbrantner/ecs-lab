@@ -222,7 +222,7 @@ impl std::error::Error for PhysicsError {}
 /// consume the same result without implementing a physics-specific trait.
 ///
 /// Material coefficients use thousandths: `0` is none and [`MATERIAL_SCALE`] is the full value.
-/// Restitution combines by taking the lower coefficient, while friction takes the higher
+/// Restitution combines by taking the higher coefficient, while friction takes the higher
 /// coefficient. The defaults preserve the previous equal-mass, fully inelastic, frictionless
 /// response.
 ///
@@ -589,11 +589,8 @@ fn correct_penetration(
             true
         }
         (BodyKind::Dynamic, BodyKind::Dynamic) => {
-            let total_mass = u64::from(left.mass_units) + u64::from(right.mass_units);
-            let left_share = i128::from(penetration).saturating_mul(i128::from(right.mass_units))
-                / i128::from(total_mass);
-            let left_share = i64_from_i128(left_share);
-            let right_share = penetration.saturating_sub(left_share);
+            let (left_share, right_share) =
+                dynamic_penetration_shares(penetration, left.mass_units, right.mass_units);
             left.offset_axis(axis, -normal.saturating_mul(left_share));
             right.offset_axis(axis, normal.saturating_mul(right_share));
             true
@@ -601,10 +598,36 @@ fn correct_penetration(
     }
 }
 
+fn dynamic_penetration_shares(
+    penetration: i64,
+    left_mass: u32,
+    right_mass: u32,
+) -> (i64, i64) {
+    let total_mass = u64::from(left_mass) + u64::from(right_mass);
+    let denominator = i128::from(total_mass);
+    let mut left_share = i64_from_i128(
+        i128::from(penetration).saturating_mul(i128::from(right_mass)) / denominator,
+    );
+    let mut right_share = i64_from_i128(
+        i128::from(penetration).saturating_mul(i128::from(left_mass)) / denominator,
+    );
+    let remainder = penetration.saturating_sub(left_share.saturating_add(right_share));
+
+    if remainder > 0 {
+        if right_mass > left_mass {
+            left_share = left_share.saturating_add(remainder);
+        } else {
+            right_share = right_share.saturating_add(remainder);
+        }
+    }
+
+    (left_share, right_share)
+}
+
 fn combined_restitution(left: &BodyState, right: &BodyState) -> u16 {
     left.material
         .restitution_milli
-        .min(right.material.restitution_milli)
+        .max(right.material.restitution_milli)
 }
 
 fn combined_friction(left: &BodyState, right: &BodyState) -> u16 {
@@ -861,7 +884,7 @@ mod tests {
     }
 
     #[test]
-    fn restitution_bounces_dynamic_body_from_fixed_floor() {
+    fn restitution_bounces_dynamic_body_from_ordinary_fixed_floor() {
         let dynamic = EntityId(1);
         let floor = EntityId(2);
         let bouncy = PhysicsMaterial::new(1_000, 0);
@@ -882,7 +905,7 @@ mod tests {
             &snapshot,
             &[
                 PhysicsBody::dynamic(dynamic, [1, 1]).with_material(bouncy),
-                PhysicsBody::fixed(floor, [8, 1]).with_material(bouncy),
+                PhysicsBody::fixed(floor, [8, 1]),
             ],
             NO_GRAVITY,
             1,
@@ -979,6 +1002,40 @@ mod tests {
                 Operation::SetVelocity(light, Velocity::new(-2, 0)),
                 Operation::SetVelocity(heavy, Velocity::new(2, 0)),
             ]
+        );
+    }
+
+    #[test]
+    fn mass_weights_penetration_correction_toward_lighter_body() {
+        let light = EntityId(1);
+        let heavy = EntityId(2);
+        let snapshot = WorldSnapshot::new(vec![
+            EntitySnapshot {
+                id: light,
+                position: Some(Position::new(0, 0)),
+                velocity: Some(Velocity::new(0, 0)),
+            },
+            EntitySnapshot {
+                id: heavy,
+                position: Some(Position::new(1, 0)),
+                velocity: Some(Velocity::new(0, 0)),
+            },
+        ]);
+
+        let physics = step(
+            &snapshot,
+            &[
+                PhysicsBody::dynamic(light, [1, 1]).with_mass(1),
+                PhysicsBody::dynamic(heavy, [1, 1]).with_mass(3),
+            ],
+            NO_GRAVITY,
+            1,
+        )
+        .expect("mass-weighted penetration correction should succeed");
+
+        assert_eq!(
+            physics.operations(),
+            [Operation::SetPosition(light, Position::new(-1, 0))]
         );
     }
 
