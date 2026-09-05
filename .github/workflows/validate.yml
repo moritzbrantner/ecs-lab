@@ -27,9 +27,6 @@ jobs:
           operation: environment-verify
           install-mode: none
 
-      - name: Diagnose Rust convention failure
-        run: cargo clippy --all-features -- -D clippy::unwrap_used -D clippy::expect_used || true
-
       - name: Check repository conformance
         uses: moritzbrantner/coding-tooling@20afb614772346991b3e7ac60b5857ecab5472e3
         with:
