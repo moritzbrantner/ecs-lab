@@ -121,11 +121,7 @@ fn sparse_motion_snapshot(workload: &Workload) -> WorldSnapshot {
 }
 
 fn run_falling_box_benchmarks(smoke: bool, fingerprint: &str) {
-    let (dynamic_count, frames, repetitions) = if smoke {
-        (96, 12, 2)
-    } else {
-        (512, 40, 3)
-    };
+    let (dynamic_count, frames, repetitions) = if smoke { (96, 12, 2) } else { (512, 40, 3) };
     let scenario = FallingBoxesScenario::new(dynamic_count);
     let body_count = dynamic_count.saturating_add(1);
     let reference_expected = reference_falling_box_snapshot(&scenario, frames);
@@ -157,10 +153,7 @@ fn run_falling_box_benchmarks(smoke: bool, fingerprint: &str) {
     );
 }
 
-fn reference_falling_box_snapshot(
-    scenario: &FallingBoxesScenario,
-    frames: u32,
-) -> WorldSnapshot {
+fn reference_falling_box_snapshot(scenario: &FallingBoxesScenario, frames: u32) -> WorldSnapshot {
     let mut world = ReferenceWorld::new();
     must(
         world.replay(scenario.setup()),
@@ -203,11 +196,7 @@ fn sparse_falling_box_snapshot(scenario: &FallingBoxesScenario, frames: u32) -> 
 }
 
 fn run_material_step_benchmarks(smoke: bool, fingerprint: &str) {
-    let (sparse_count, dense_count, repetitions) = if smoke {
-        (96, 64, 3)
-    } else {
-        (512, 192, 5)
-    };
+    let (sparse_count, dense_count, repetitions) = if smoke { (96, 64, 3) } else { (512, 192, 5) };
     let (sparse_snapshot, sparse_bodies) = material_step_fixture(sparse_count, 8);
     let (dense_snapshot, dense_bodies) = material_step_fixture(dense_count, 1);
 
@@ -347,10 +336,7 @@ fn run_bouncing_room_benchmarks(smoke: bool, fingerprint: &str) {
     );
 }
 
-fn reference_bouncing_room_snapshot(
-    scenario: &BouncingRoomScenario,
-    frames: u32,
-) -> WorldSnapshot {
+fn reference_bouncing_room_snapshot(scenario: &BouncingRoomScenario, frames: u32) -> WorldSnapshot {
     let mut world = ReferenceWorld::new();
     must(
         world.replay(scenario.setup()),
