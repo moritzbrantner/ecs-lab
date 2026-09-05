@@ -1,140 +1,109 @@
-# AABB physics workload
+# Deterministic physics workloads
 
 ## Purpose
 
-Use a small physics loop as a realistic deterministic ECS workload without turning `ecs-lab` into a game engine or physics framework.
+Use physics as a realistic deterministic ECS workload without turning `ecs-lab` into a general-purpose game engine. The repository now has two deliberately separate solver surfaces:
 
-The core remains deliberately 2D and AABB-only. The current solver:
+- `ecs-physics`: the existing 2D AABB solver retained as the compatibility, regression, and benchmark foundation;
+- `ecs-physics-3d`: the true three-dimensional AABB solver used by the dedicated browser physics world.
 
-1. applies integer gravity to dynamic bodies;
-2. advances velocity and position with semi-implicit Euler integration;
-3. visits body pairs in ascending `EntityId` order;
-4. delegates AABB contact decisions to `geometry-kernels::aabb_aabb`;
-5. applies deterministic minimum-axis positional correction;
-6. applies integer mass, restitution, and contact-friction response;
-7. exposes ordered contact normals, penetration, and supporting-body evidence; and
-8. returns ordinary `ecs-workload::Operation` values for state mutation.
+Both consume observable ECS snapshots and return ordinary `ecs-workload::Operation` mutations rather than owning storage.
 
-This keeps the physics result storage-independent. Both the reference ECS and sparse-set candidate consume the same generated operations without a physics-specific storage trait.
+## Three-axis ECS state
 
-## Cross-repository boundary
+`ecs-workload::Position` and `Velocity` carry X, Y, and Z. The existing two-argument constructors remain source-compatible and set Z to zero, while `Position::new3(...)` and `Velocity::new3(...)` construct explicit three-dimensional values.
 
-Collision Lab consumes reusable collision mechanisms from `rust-kernels`. ECS Lab follows that same ownership boundary rather than depending on the `collision-lab` application crate.
+`ReferenceWorld` and `SparseWorld` both integrate all three axes. This keeps storage parity as the same fundamental contract whether a workload stays on the legacy Z=0 plane or moves through depth.
 
-The current pin is:
+## Cross-repository collision boundary
+
+Reusable AABB decisions continue to live in pinned `rust-kernels` crates rather than in application/lab repositories:
 
 - `geometry-kernels` / `spatial-kernels`
 - `rust-kernels` revision `986bff4dc8d13a64b90fab3a9f7f02bb8d1aa35e`
 
-The pin matches the collision-kernel revision used by Collision Lab for its analytical AABB/OBB teaching paths.
+`geometry-kernels::aabb_aabb` already operates on three-dimensional `spatial_kernels::Aabb` values. ECS Lab owns integration, deterministic pair ordering, material response, positional correction, scenarios, and browser adaptation around that reusable overlap decision.
 
-## Deterministic material contract
+## Legacy 2D solver
 
-`PhysicsBody::dynamic` still defaults to mass `1`, restitution `0`, and friction `0`. `PhysicsBody::fixed` remains immovable. Those defaults preserve the original equal-mass, fully inelastic, frictionless behavior for existing workloads.
+`ecs-physics` remains intentionally stable. Existing constructors, deterministic pair ordering, mass/restitution/friction behavior, contact/support evidence, regression matrices, `falling-boxes`, `BouncingRoomScenario`, and benchmark fixtures continue to operate on the Z=0 plane.
 
-Material coefficients are integer thousandths:
+Keeping this surface intact gives the new 3D path a proven reference boundary and avoids converting performance evidence merely to make the demo look three-dimensional.
 
-- `0` means no restitution/friction;
-- `1000` means full restitution/friction;
-- values outside `0..=1000` are rejected before simulation.
+## True 3D solver
 
-Contact restitution uses the higher of the two body coefficients so a bouncy body can bounce against an ordinary non-bouncy surface. Contact friction currently uses the higher coefficient. Dynamic-vs-dynamic normal response uses the ordinary one-dimensional mass/restitution equation evaluated with integer rational arithmetic; division truncation is explicit and deterministic. Dynamic-vs-fixed response reflects the normal velocity by restitution. Tangential contact friction deterministically damps velocity toward the contact pair's mass-weighted common tangential velocity.
+`ecs-physics-3d` extends the same deterministic response model to three axes:
 
-Dynamic bodies must have positive integer `mass_units`. Mass also controls dynamic-vs-dynamic positional correction: the lighter body receives the larger correction share. When integer division leaves a one-unit remainder, that remainder is assigned to the lighter body; equal masses retain the stable entity-order bias of the original solver. Fixed-body mass is ignored.
+1. dynamic bodies receive integer X/Y/Z gravity;
+2. semi-implicit integration advances all three velocity and position components;
+3. body pairs are visited in ascending `EntityId` order;
+4. the reusable geometry kernel decides exact 3D AABB overlap/touching;
+5. penetration is measured on X, Y, and Z and resolved along the minimum-overlap axis with stable X→Y→Z tie ordering;
+6. normal response uses deterministic integer mass/restitution arithmetic;
+7. friction is applied along both tangent axes of the selected contact normal;
+8. vertical support evidence remains a Y-axis concept; and
+9. only ordinary `SetPosition` / `SetVelocity` ECS operations mutate state.
 
-This is a controlled deterministic contact model for ECS experiments, not a claim of production-grade rigid-body fidelity.
+The same material scale is reused: `0..=1000` thousandths for restitution and friction. Dynamic bodies require positive integer mass units; fixed bodies remain immovable.
 
-## Contact and support evidence
+This is a controlled deterministic 3D contact model for ECS experiments, not a claim of production rigid-body fidelity. The first 3D slice remains AABB-only and does not add rotation, angular velocity, torque, OBBs, meshes, or iterative manifolds.
 
-Each `PhysicsStep` exposes its ordered `PhysicsContact` values in the same stable pair order used by the solver. A contact records:
+## Bouncing room 3D scenario
 
-- left and right entity ids;
-- an axis-aligned normal pointing from the left body toward the right body; and
-- integer penetration, where touching is `0` because touching is part of the reusable geometry-kernel contact contract.
+`BouncingRoom3dScenario` is the canonical 3D browser fixture. Three dynamic boxes have deliberately different mass/material behavior and non-zero Z velocity. They move inside six fixed AABB slabs:
 
-The step also exposes a sorted set of supported dynamic entities. A dynamic body is supported when a vertical contact places the other body below it. This evidence is intentionally solver output rather than a `Grounded` ECS component: later character-controller experiments can consume it without teaching the collision solver what a character or jump is.
+- floor and ceiling;
+- left and right X walls;
+- back and front Z walls.
+
+Gravity acts along negative Y. The scenario therefore demonstrates depth motion and Z-axis collisions as physics behavior rather than as a rendering trick.
+
+The scenario can replay through both `ReferenceWorld` and `SparseWorld`. Differential tests require the storage snapshots to remain identical while the same `PhysicsStep3d` operations are applied. Focused tests also exercise a direct Z-axis collision and repeatable 3D broad-phase evidence.
+
+## Browser and WebGPU ownership
+
+The dedicated `/physics/` Pages demo reads authoritative X/Y/Z positions, 3D half extents, body/material metadata, and canonical pair words from the Wasm adapter over `BouncingRoom3dScenario`.
+
+Smooth motion is presentation-only. The browser preloads discrete deterministic Rust frames and interpolates displayed positions between consecutive frames. At each integer physics step, the displayed state snaps exactly to the Rust result; JavaScript never integrates velocity or resolves contacts.
+
+WebGPU has two independent roles:
+
+- **3D renderer** — a raw browser WebGPU render pipeline draws instanced boxes with depth testing and an orbit/elevation camera. If no usable WebGPU renderer exists, a projected Canvas wireframe keeps the same Rust simulation visible.
+- **collision evidence** — the existing all-pairs compute shader receives the exact Rust-produced min/max XYZ AABBs. Its triangular pair bitset is accepted only after word-for-word equality with the Rust broad-phase evidence.
+
+Neither GPU path feeds impulses, gravity, friction, or ECS mutation back into the solver.
 
 ## Determinism contract
 
-- Body configuration order does not affect the result; bodies are sorted by entity id.
-- Pair resolution is single-pass and ordered, so solver order is explicit rather than scheduler-dependent.
-- ECS positions and velocities remain integer values.
-- Mass and material coefficients are integer values with explicit rational division semantics.
-- Geometry conversion is allowed only while AABB bounds remain exactly representable as `f32` integers.
-- Touching counts as contact because that is the reusable geometry-kernel contract.
-- Fixed bodies never receive generated component operations.
-- Contact and support evidence is derived only from the canonical Rust solver path.
+For both solver surfaces:
 
-## Falling-box scenario
+- body configuration order cannot change canonical pair order;
+- ECS positions, velocities, masses, and material coefficients remain integer-valued;
+- conversion to the reusable f32 AABB kernel is allowed only while every bound is exactly representable;
+- touching remains part of the reusable AABB contact contract;
+- fixed bodies never receive generated component writes;
+- browser rendering and WebGPU evidence cannot become simulation authority.
 
-`ecs-physics-scenarios` owns the named `falling-boxes` fixture rather than adding scenario policy to the solver crate. It creates a deterministic 16-column field of dynamic boxes above one fixed floor and exposes the setup workload, body configuration, and one-step physics operation.
+For the 3D solver specifically, all three axes participate in collision decisions, and both tangent axes participate in contact friction.
 
-The defaults mean this existing scenario retains the original inelastic/frictionless response while the material/contact foundation is introduced.
+## Performance evidence
 
-A differential test replays the setup and every generated physics step through `ReferenceWorld` and `SparseWorld`. Their observable snapshots and generated `PhysicsStep` values must remain identical frame by frame.
+Existing 2D benchmark fixtures remain the current performance baseline:
 
-The benchmark runner measures both storage implementations under the same named physics scenario:
+- motion replay;
+- falling boxes through reference and sparse-set storage;
+- sparse and dense material-step solver fixtures;
+- long-running 2D bouncing-room replay.
 
-- smoke: 96 dynamic boxes + floor, 12 frames, 2 repetitions;
-- full: 512 dynamic boxes + floor, 40 frames, 3 repetitions.
+Timing remains descriptive rather than a correctness threshold. The new 3D path should receive its own benchmark fixtures only after the functional 3D contract is green and stable; benchmark expansion must not block the semantic conversion of the browser demo.
 
-As with the existing `motion` benchmark, elapsed time is descriptive evidence rather than a merge threshold and is useful for comparison only with a verified environment fingerprint.
+## Later 3D horizons
 
-## Bouncing-room material scenario
+Keep these as separate reviewable slices after true 3D AABB semantics are stable:
 
-`BouncingRoomScenario` adds a deliberately small material fixture above one fixed floor. Three dynamic bodies use contrasting mass, restitution, and friction configurations: a light fully bouncy/frictionless body, a medium mixed-material body, and a heavier fully inelastic/high-friction body.
-
-The scenario keeps material behavior outside storage policy. The same setup and every generated `PhysicsStep` are replayed through `ReferenceWorld` and `SparseWorld`; their snapshots and step evidence must remain identical frame by frame. Focused regression evidence also verifies that the bouncy body rebounds after floor impact while the maximum-friction inelastic body loses its tangential motion.
-
-The interactive Pages workbench uses the same Rust physics path rather than reimplementing response in JavaScript. Each editable dynamic entity can set:
-
-- mass units;
-- restitution from `0` to `1000`;
-- friction from `0` to `1000`;
-- position, velocity, and AABB half extent.
-
-JavaScript transports those inputs into WebAssembly and draws the resulting positions. Rust rebuilds the `ReferenceWorld`, advances deterministic physics steps, and returns the canonical final frame. The workbench currently uses zero gravity so side-by-side material collisions remain easy to inspect; the named `bouncing-room` scenario retains gravity and a floor as the canonical falling/bouncing fixture.
-
-No new benchmark was added for this small material scenario because it would not yet provide useful storage evidence beyond the existing falling-box benchmark. Performance remains descriptive, and solver iterations are still deferred until a measured scenario demonstrates a stability need.
-
-## Optional WebGPU compute
-
-The scenario crate can advance the Rust reference world to a named frame and then produce a canonical AABB list plus triangular collision-pair bitset using `geometry-kernels::aabb_aabb`.
-
-The Pages demo exposes one cached 96-box, six-frame fixture through WebAssembly. When WebGPU is enabled, JavaScript packs those Rust-returned AABBs into the same eight-float layout used by Collision Lab's naive WebGPU path and runs an all-pairs WGSL compute shader. The GPU writes the triangular pair set into an atomic `u32` bitset.
-
-The browser then compares every GPU bitset word with the Rust/CPU bitset. Only an exact match makes the GPU timing eligible for display. A mismatch, unavailable adapter, shader failure, or disabled WebGPU leaves Rust/CPU authoritative and suppresses performance evidence.
-
-This remains a compute-evidence seam, not a second physics solver. Contact response, material behavior, contact/support evidence, and ECS mutations remain on the deterministic Rust path. In the interactive material workbench WebGPU receives only the Rust-evaluated final AABBs and verifies their pair bitset; it never participates in contact response.
-
-## Evidence
-
-`PhysicsStepStats` exposes body count, naive candidate-pair count, contacts, and resolved contacts. `PhysicsStep` additionally exposes ordered contacts and supported entities. `BroadPhaseFrame` separately exposes the post-physics AABB set, exact overlap count, and canonical pair words used for CPU↔WebGPU parity.
-
-The material/contact foundation retains regression coverage for:
-
-- legacy default response;
-- restitution against ordinary fixed geometry;
-- contact friction;
-- mass-weighted dynamic response and penetration correction;
-- touching/contact normal and support semantics;
-- duplicate/malformed body configuration rejection;
-- ordinary ECS-operation replay;
-- `bouncing-room` replay parity across both ECS storage implementations; and
-- Rust-owned interactive material response through the Wasm boundary.
-
-## Epic #10 completion boundary
-
-Epic #10's intended implementation is split into two reviewable slices: the deterministic solver/material/contact foundation and the stacked `bouncing-room` + interactive material demonstration. The epic is ready for integration once both slices are green on their exact heads and the stacked slice remains clean after rebasing onto `main` following the foundation merge.
-
-Do not pull character-controller behavior into this boundary. Ground/support evidence exists specifically so Epic #11 can implement jumping and movement above the solver rather than adding character semantics to collision response.
-
-## Later horizon
-
-Keep later roadmap slices separate:
-
-- character controller and jumping consume support evidence without entering the core solver;
-- broad-phase and collider-family expansion must preserve exact canonical narrow-phase evidence;
-- destruction consumes contact/impact evidence as ECS lifecycle policy;
-- liquid interaction remains separate from rigid contact semantics;
-- advanced fluid state should use solver-owned packed buffers rather than ordinary ECS entities per particle/cell.
+- conservative scalable broad-phase candidates with exact pair parity;
+- character movement/jumping consuming support evidence;
+- circles/spheres and then oriented boxes;
+- angular state, rotations, and torque;
+- destruction consuming impact evidence;
+- liquids/fluids as a distinct solver-owned state model rather than ordinary rigid-body entities.
