@@ -1,5 +1,5 @@
 .physics-shell {
-  max-width: 1180px;
+  max-width: 1320px;
 }
 
 .physics-hero {
@@ -22,11 +22,23 @@
 
 .physics-stage {
   position: relative;
-  min-height: 520px;
+  min-height: 600px;
   overflow: hidden;
   border: 1px solid color-mix(in srgb, CanvasText 28%, transparent);
   border-radius: 0.8rem;
   background: Canvas;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.physics-stage:focus-visible {
+  outline: 2px solid Highlight;
+  outline-offset: 3px;
+}
+
+.physics-stage.camera-dragging {
+  cursor: grabbing;
 }
 
 .physics-stage canvas {
@@ -35,6 +47,50 @@
   display: block;
   width: 100%;
   height: 100%;
+  pointer-events: none;
+}
+
+.camera-hud {
+  position: absolute;
+  top: 0.75rem;
+  left: 0.75rem;
+  z-index: 3;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  max-width: calc(100% - 9rem);
+  pointer-events: none;
+}
+
+.camera-hud span,
+.camera-reset,
+.renderer-status {
+  border: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, Canvas 84%, transparent);
+  backdrop-filter: blur(8px);
+  font-size: 0.72rem;
+}
+
+.camera-hud span {
+  padding: 0.3rem 0.55rem;
+  opacity: 0.76;
+}
+
+.camera-reset {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  z-index: 4;
+  min-height: 2rem;
+  padding: 0.3rem 0.65rem;
+  color: CanvasText;
+  cursor: pointer;
+}
+
+.camera-reset:hover,
+.camera-reset:focus-visible {
+  background: color-mix(in srgb, Canvas 70%, CanvasText 12%);
 }
 
 .renderer-status {
@@ -43,10 +99,7 @@
   bottom: 0.65rem;
   z-index: 2;
   margin: 0;
-  border-radius: 999px;
   padding: 0.3rem 0.55rem;
-  background: color-mix(in srgb, Canvas 86%, transparent);
-  font-size: 0.72rem;
   opacity: 0.78;
   pointer-events: none;
 }
@@ -75,31 +128,6 @@
   width: 100%;
 }
 
-.camera-controls {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
-  gap: 0.8rem;
-  align-items: end;
-  border-top: 1px solid color-mix(in srgb, CanvasText 14%, transparent);
-  padding-top: 0.9rem;
-}
-
-.camera-controls label {
-  display: grid;
-  gap: 0.35rem;
-  min-width: 0;
-  font-size: 0.78rem;
-  opacity: 0.8;
-}
-
-.camera-controls input {
-  width: 100%;
-}
-
-.camera-controls .text-button {
-  align-self: center;
-}
-
 .scenario-legend {
   margin: 0;
   color: color-mix(in srgb, CanvasText 76%, transparent);
@@ -125,7 +153,22 @@
 
 @media (max-width: 760px) {
   .physics-stage {
-    min-height: 390px;
+    min-height: 440px;
+  }
+
+  .camera-hud {
+    right: 0.75rem;
+    max-width: none;
+  }
+
+  .camera-hud span:nth-child(2) {
+    display: none;
+  }
+
+  .camera-reset {
+    top: auto;
+    right: 0.75rem;
+    bottom: 2.6rem;
   }
 
   .physics-transport {
@@ -139,14 +182,6 @@
   .frame-control {
     grid-column: 1 / -1;
     grid-template-columns: auto auto 1fr;
-  }
-
-  .camera-controls {
-    grid-template-columns: 1fr;
-  }
-
-  .camera-controls .text-button {
-    justify-self: start;
   }
 }
 
