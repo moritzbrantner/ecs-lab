@@ -176,6 +176,9 @@ impl SparseWorld {
             position.y = position
                 .y
                 .saturating_add(i64::from(velocity.y).saturating_mul(ticks));
+            position.z = position
+                .z
+                .saturating_add(i64::from(velocity.z).saturating_mul(ticks));
         }
     }
 }
@@ -216,6 +219,22 @@ mod tests {
                 .and_then(|entity| entity.position),
             Some(Position::new(6, 0))
         );
+    }
+
+    #[test]
+    fn sparse_set_integrates_z_and_matches_reference() {
+        let entity = EntityId(7);
+        let workload = Workload::new(vec![
+            Operation::Spawn(entity),
+            Operation::SetPosition(entity, Position::new3(1, 2, 3)),
+            Operation::SetVelocity(entity, Velocity::new3(2, -1, 4)),
+            Operation::Integrate { ticks: 3 },
+        ]);
+        let mut reference = ReferenceWorld::new();
+        let mut sparse = SparseWorld::new();
+        assert_eq!(reference.replay(&workload), Ok(()));
+        assert_eq!(sparse.replay(&workload), Ok(()));
+        assert_eq!(sparse.snapshot(), reference.snapshot());
     }
 
     #[test]
