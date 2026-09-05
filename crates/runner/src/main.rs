@@ -1,4 +1,4 @@
-use std::{hint::black_box, time::Instant};
+use std::{fmt::Display, hint::black_box, time::Instant};
 
 use ecs_physics::{PhysicsBody, PhysicsConfig, PhysicsMaterial, step};
 use ecs_physics_scenarios::{BouncingRoomScenario, FallingBoxesScenario};
@@ -31,6 +31,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ => run_demo()?,
     }
     Ok(())
+}
+
+fn must<T, E: Display>(result: Result<T, E>, context: &str) -> T {
+    match result {
+        Ok(value) => value,
+        Err(error) => panic!("{context}: {error}"),
+    }
 }
 
 fn benchmark_fingerprint(argument: Option<String>) -> String {
@@ -97,22 +104,28 @@ fn run_motion_benchmarks(smoke: bool, fingerprint: &str) {
 
 fn reference_motion_snapshot(workload: &Workload) -> WorldSnapshot {
     let mut world = ReferenceWorld::new();
-    world
-        .replay(workload)
-        .expect("validated reference motion benchmark replay must succeed");
+    must(
+        world.replay(workload),
+        "validated reference motion benchmark replay must succeed",
+    );
     world.snapshot()
 }
 
 fn sparse_motion_snapshot(workload: &Workload) -> WorldSnapshot {
     let mut world = SparseWorld::new();
-    world
-        .replay(workload)
-        .expect("validated sparse motion benchmark replay must succeed");
+    must(
+        world.replay(workload),
+        "validated sparse motion benchmark replay must succeed",
+    );
     world.snapshot()
 }
 
 fn run_falling_box_benchmarks(smoke: bool, fingerprint: &str) {
-    let (dynamic_count, frames, repetitions) = if smoke { (96, 12, 2) } else { (512, 40, 3) };
+    let (dynamic_count, frames, repetitions) = if smoke {
+        (96, 12, 2)
+    } else {
+        (512, 40, 3)
+    };
     let scenario = FallingBoxesScenario::new(dynamic_count);
     let body_count = dynamic_count.saturating_add(1);
     let reference_expected = reference_falling_box_snapshot(&scenario, frames);
@@ -149,17 +162,20 @@ fn reference_falling_box_snapshot(
     frames: u32,
 ) -> WorldSnapshot {
     let mut world = ReferenceWorld::new();
-    world
-        .replay(scenario.setup())
-        .expect("validated reference falling-box setup must replay");
+    must(
+        world.replay(scenario.setup()),
+        "validated reference falling-box setup must replay",
+    );
     for _ in 0..frames {
-        let physics = scenario
-            .step(&world.snapshot())
-            .expect("validated reference falling-box physics step must succeed");
+        let physics = must(
+            scenario.step(&world.snapshot()),
+            "validated reference falling-box physics step must succeed",
+        );
         for operation in physics.operations() {
-            world
-                .apply(*operation)
-                .expect("reference storage must accept generated physics operation");
+            must(
+                world.apply(*operation),
+                "reference storage must accept generated physics operation",
+            );
         }
     }
     world.snapshot()
@@ -167,17 +183,20 @@ fn reference_falling_box_snapshot(
 
 fn sparse_falling_box_snapshot(scenario: &FallingBoxesScenario, frames: u32) -> WorldSnapshot {
     let mut world = SparseWorld::new();
-    world
-        .replay(scenario.setup())
-        .expect("validated sparse falling-box setup must replay");
+    must(
+        world.replay(scenario.setup()),
+        "validated sparse falling-box setup must replay",
+    );
     for _ in 0..frames {
-        let physics = scenario
-            .step(&world.snapshot())
-            .expect("validated sparse falling-box physics step must succeed");
+        let physics = must(
+            scenario.step(&world.snapshot()),
+            "validated sparse falling-box physics step must succeed",
+        );
         for operation in physics.operations() {
-            world
-                .apply(*operation)
-                .expect("sparse storage must accept generated physics operation");
+            must(
+                world.apply(*operation),
+                "sparse storage must accept generated physics operation",
+            );
         }
     }
     world.snapshot()
@@ -192,15 +211,19 @@ fn run_material_step_benchmarks(smoke: bool, fingerprint: &str) {
     let (sparse_snapshot, sparse_bodies) = material_step_fixture(sparse_count, 8);
     let (dense_snapshot, dense_bodies) = material_step_fixture(dense_count, 1);
 
-    let sparse_preflight = step(&sparse_snapshot, &sparse_bodies, NO_GRAVITY, 1)
-        .expect("sparse material benchmark preflight must succeed");
+    let sparse_preflight = must(
+        step(&sparse_snapshot, &sparse_bodies, NO_GRAVITY, 1),
+        "sparse material benchmark preflight must succeed",
+    );
     assert_eq!(
         sparse_preflight.stats().contacts,
         0,
         "sparse material benchmark must isolate candidate-pair traversal"
     );
-    let dense_preflight = step(&dense_snapshot, &dense_bodies, NO_GRAVITY, 1)
-        .expect("dense material benchmark preflight must succeed");
+    let dense_preflight = must(
+        step(&dense_snapshot, &dense_bodies, NO_GRAVITY, 1),
+        "dense material benchmark preflight must succeed",
+    );
     assert!(
         dense_preflight.stats().contacts > 0,
         "dense material benchmark must exercise contact/material response"
@@ -215,13 +238,15 @@ fn run_material_step_benchmarks(smoke: bool, fingerprint: &str) {
         repetitions,
         fingerprint,
         || {
-            step(
-                black_box(&sparse_snapshot),
-                black_box(&sparse_bodies),
-                NO_GRAVITY,
-                1,
+            must(
+                step(
+                    black_box(&sparse_snapshot),
+                    black_box(&sparse_bodies),
+                    NO_GRAVITY,
+                    1,
+                ),
+                "validated sparse material benchmark step must succeed",
             )
-            .expect("validated sparse material benchmark step must succeed")
         },
     );
     benchmark(
@@ -233,13 +258,15 @@ fn run_material_step_benchmarks(smoke: bool, fingerprint: &str) {
         repetitions,
         fingerprint,
         || {
-            step(
-                black_box(&dense_snapshot),
-                black_box(&dense_bodies),
-                NO_GRAVITY,
-                1,
+            must(
+                step(
+                    black_box(&dense_snapshot),
+                    black_box(&dense_bodies),
+                    NO_GRAVITY,
+                    1,
+                ),
+                "validated dense material benchmark step must succeed",
             )
-            .expect("validated dense material benchmark step must succeed")
         },
     );
 }
@@ -252,13 +279,22 @@ fn material_step_fixture(body_count: u32, spacing: i64) -> (WorldSnapshot, Vec<P
         let entity = EntityId(raw_id);
         let column = i64::from(raw_id % MATERIAL_COLUMNS);
         let row = i64::from(raw_id / MATERIAL_COLUMNS);
-        let velocity_x = i32::try_from(raw_id % 5).expect("benchmark residue fits i32") - 2;
-        let velocity_y =
-            i32::try_from((raw_id / 5) % 5).expect("benchmark residue fits i32") - 2;
-        let restitution =
-            u16::try_from((raw_id % 5) * 250).expect("benchmark restitution fits u16");
-        let friction = u16::try_from(((raw_id + 2) % 5) * 250)
-            .expect("benchmark friction fits u16");
+        let velocity_x = must(
+            i32::try_from(raw_id % 5),
+            "benchmark velocity residue must fit i32",
+        ) - 2;
+        let velocity_y = must(
+            i32::try_from((raw_id / 5) % 5),
+            "benchmark velocity residue must fit i32",
+        ) - 2;
+        let restitution = must(
+            u16::try_from((raw_id % 5) * 250),
+            "benchmark restitution must fit u16",
+        );
+        let friction = must(
+            u16::try_from(((raw_id + 2) % 5) * 250),
+            "benchmark friction must fit u16",
+        );
 
         entities.push(EntitySnapshot {
             id: entity,
@@ -278,7 +314,10 @@ fn material_step_fixture(body_count: u32, spacing: i64) -> (WorldSnapshot, Vec<P
 fn run_bouncing_room_benchmarks(smoke: bool, fingerprint: &str) {
     let (frames, repetitions) = if smoke { (128, 3) } else { (4_096, 5) };
     let scenario = BouncingRoomScenario::new();
-    let body_count = u32::try_from(scenario.bodies().len()).expect("scenario body count fits u32");
+    let body_count = must(
+        u32::try_from(scenario.bodies().len()),
+        "scenario body count must fit u32",
+    );
     let reference_expected = reference_bouncing_room_snapshot(&scenario, frames);
     let sparse_expected = sparse_bouncing_room_snapshot(&scenario, frames);
     assert_eq!(
@@ -313,17 +352,20 @@ fn reference_bouncing_room_snapshot(
     frames: u32,
 ) -> WorldSnapshot {
     let mut world = ReferenceWorld::new();
-    world
-        .replay(scenario.setup())
-        .expect("validated reference bouncing-room setup must replay");
+    must(
+        world.replay(scenario.setup()),
+        "validated reference bouncing-room setup must replay",
+    );
     for _ in 0..frames {
-        let physics = scenario
-            .step(&world.snapshot())
-            .expect("validated reference bouncing-room physics step must succeed");
+        let physics = must(
+            scenario.step(&world.snapshot()),
+            "validated reference bouncing-room physics step must succeed",
+        );
         for operation in physics.operations() {
-            world
-                .apply(*operation)
-                .expect("reference storage must accept bouncing-room operation");
+            must(
+                world.apply(*operation),
+                "reference storage must accept bouncing-room operation",
+            );
         }
     }
     world.snapshot()
@@ -331,17 +373,20 @@ fn reference_bouncing_room_snapshot(
 
 fn sparse_bouncing_room_snapshot(scenario: &BouncingRoomScenario, frames: u32) -> WorldSnapshot {
     let mut world = SparseWorld::new();
-    world
-        .replay(scenario.setup())
-        .expect("validated sparse bouncing-room setup must replay");
+    must(
+        world.replay(scenario.setup()),
+        "validated sparse bouncing-room setup must replay",
+    );
     for _ in 0..frames {
-        let physics = scenario
-            .step(&world.snapshot())
-            .expect("validated sparse bouncing-room physics step must succeed");
+        let physics = must(
+            scenario.step(&world.snapshot()),
+            "validated sparse bouncing-room physics step must succeed",
+        );
         for operation in physics.operations() {
-            world
-                .apply(*operation)
-                .expect("sparse storage must accept bouncing-room operation");
+            must(
+                world.apply(*operation),
+                "sparse storage must accept bouncing-room operation",
+            );
         }
     }
     world.snapshot()
