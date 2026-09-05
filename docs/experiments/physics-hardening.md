@@ -21,6 +21,18 @@ The scenario suite separately runs the named material and falling-box scenarios 
 
 ## Performance evidence
 
-Benchmarks remain descriptive evidence, never correctness thresholds. A benchmark fixture must first prove that its reference and candidate results match. Environment fingerprints remain part of every timing record so results from different machines or toolchains are not silently compared as equivalent.
+Benchmarks remain descriptive evidence, never correctness thresholds. Every storage benchmark computes both implementations before timing and aborts if their snapshots differ. Benchmark helpers also fail closed on setup, physics, or ECS-application errors rather than substituting an empty/default snapshot.
 
-Dense-contact and sparse-contact solver fixtures should be kept separate: candidate-pair traversal and actual contact/material response are different costs. End-to-end scenario benchmarks should continue to include both reference and sparse storage so storage effects are not confused with solver effects.
+The runner keeps separate workloads for different costs:
+
+- `motion`: baseline ECS replay in `ReferenceWorld` and `SparseWorld`;
+- `falling-boxes`: larger end-to-end gravity/contact replay in both storage implementations;
+- `material-step-sparse`: Rust solver candidate-pair traversal with deliberately separated bodies and zero contacts;
+- `material-step-dense`: Rust solver traversal with overlapping bodies and varied mass/restitution/friction so contact/material response is exercised;
+- `bouncing-room`: long-running material scenario replay in both storage implementations.
+
+Smoke mode keeps the fixtures small enough for hosted validation. Full mode increases entity counts, frame horizons, and repetitions for local fingerprinted measurements. Environment fingerprints remain part of every timing record so results from different machines or toolchains are not silently compared as equivalent.
+
+Hosted `Validate` executes the smoke benchmark suite after deterministic format/lint/build/test validation. The job does not compare elapsed time to a threshold; it only requires that every benchmark fixture constructs, proves its parity preconditions, and executes successfully. Hardware-dependent timing remains evidence rather than a merge gate.
+
+WebGPU is intentionally absent from these physics-response benchmarks. Its existing role remains post-physics AABB pair-bitset verification against Rust evidence, not collision response or material simulation.
