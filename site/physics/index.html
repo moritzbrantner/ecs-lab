@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="Run ECS Lab's deterministic three-dimensional Rust physics room in the browser with smooth rendering and optional exact WebGPU broad-phase verification."
+      content="Run ECS Lab's dense deterministic three-dimensional Rust physics room in the browser with mouse-controlled WebGPU rendering and exact collision verification."
     />
     <title>ECS Lab — 3D physics demo</title>
     <link rel="stylesheet" href="../styles.css" />
@@ -19,10 +19,10 @@
         <p class="eyebrow">ECS Lab · Rust 3D physics → WebAssembly → WebGPU</p>
         <h1>3D physics demo</h1>
         <p class="lede">
-          This is now a real three-dimensional physics world. Rust owns X/Y/Z motion, gravity,
-          collisions against all six room boundaries, mass, restitution, and two-axis contact friction.
-          The browser smoothly interpolates authoritative Rust frames; WebGPU renders the 3D scene when
-          available and can separately verify the exact Rust 3D AABB pair set.
+          Forty-eight dynamic bodies now move on all three axes inside a fixed floor, ceiling, side,
+          front, and back room. Rust owns gravity, collisions, mass, restitution, and two-axis contact
+          friction. The browser interpolates authoritative Rust frames and gives the WebGPU camera direct
+          mouse controls; optional GPU collision verification still has to match Rust exactly.
         </p>
         <nav class="actions" aria-label="Project links">
           <a class="button primary" href="#physics-playground">Open the 3D room</a>
@@ -33,20 +33,31 @@
 
       <section class="demo physics-demo" id="physics-playground" aria-labelledby="physics-title">
         <div class="section-copy">
-          <p class="eyebrow">Canonical 3D material scenario</p>
-          <h2 id="physics-title">Three bodies move through depth inside a closed Rust-owned room</h2>
+          <p class="eyebrow">Dense canonical 3D material scenario</p>
+          <h2 id="physics-title">Forty-eight bodies collide through a Rust-owned 3D room</h2>
           <p>
-            Body A is light and fully bouncy, B uses medium restitution and friction, and C is heavier,
-            inelastic, and maximally frictional. They move on all three axes inside fixed floor, ceiling,
-            side, front, and back slabs. The discrete physics state remains deterministic; only the
-            rendered transform is interpolated for smoother motion.
+            The scene is a deterministic stress fixture rather than three showcase cubes. Bodies start
+            across twelve spatial cells with varied sizes, masses, restitution, friction, and X/Y/Z
+            velocity. Six fixed slabs close the room. The discrete physics state remains deterministic;
+            only the rendered transform is interpolated for smoother motion.
           </p>
         </div>
 
         <div class="physics-workbench">
-          <div class="physics-stage" id="physics-stage">
+          <div
+            class="physics-stage"
+            id="physics-stage"
+            tabindex="0"
+            aria-label="Interactive 3D physics room. Drag to orbit, Shift-drag or right-drag to pan, use the mouse wheel to zoom, and double-click to reset the camera."
+          >
             <canvas id="physics-webgpu-canvas" aria-label="WebGPU rendering of the Rust three-dimensional physics room"></canvas>
             <canvas id="physics-fallback-canvas" aria-label="Fallback rendering of the Rust three-dimensional physics room" hidden></canvas>
+            <div class="camera-hud" aria-hidden="true">
+              <span>Drag orbit</span>
+              <span>Shift/right-drag pan</span>
+              <span>Wheel zoom</span>
+            </div>
+            <button class="camera-reset" id="reset-camera" type="button">Reset camera</button>
             <p class="renderer-status" id="renderer-status" role="status">Preparing 3D renderer…</p>
           </div>
 
@@ -57,25 +68,13 @@
             <label class="frame-control" for="frame">
               <span>Physics step</span>
               <strong id="frame-label">0</strong>
-              <input id="frame" type="range" min="0" max="24" value="0" step="1" />
+              <input id="frame" type="range" min="0" max="64" value="0" step="1" />
             </label>
-          </div>
-
-          <div class="camera-controls" aria-label="3D camera controls">
-            <label for="camera-yaw">
-              <span>Orbit</span>
-              <input id="camera-yaw" type="range" min="-120" max="120" value="38" step="1" />
-            </label>
-            <label for="camera-pitch">
-              <span>Elevation</span>
-              <input id="camera-pitch" type="range" min="8" max="68" value="28" step="1" />
-            </label>
-            <button class="text-button" id="reset-camera" type="button">Reset camera</button>
           </div>
 
           <p class="scenario-legend">
-            Gravity −Y · true X/Y/Z velocity · six fixed room slabs · A: bouncy/frictionless ·
-            B: mixed material, mass 2 · C: inelastic/high-friction, mass 3
+            48 dynamic bodies · gravity −Y · true X/Y/Z velocity · six fixed room slabs · varied mass,
+            restitution, friction, and box footprint
           </p>
 
           <label class="toggle-control physics-toggle" for="webgpu-enabled">
@@ -101,12 +100,12 @@
       <section class="method physics-boundary" aria-labelledby="boundary-title">
         <div class="section-copy">
           <p class="eyebrow">Ownership boundary</p>
-          <h2 id="boundary-title">Smooth rendering never becomes a second simulation</h2>
+          <h2 id="boundary-title">A richer scene still has one simulation authority</h2>
           <p>
             The Wasm adapter exports authoritative 3D positions, collider extents, fixed/dynamic
-            metadata, materials, and the canonical collision-pair bitset. The render loop interpolates
-            only between consecutive Rust frames. At every integer physics step, both the scene and the
-            optional WebGPU verifier return to the exact Rust state.
+            metadata, materials, and the canonical collision-pair bitset. Mouse input changes only the
+            camera. The render loop interpolates only between consecutive Rust frames. At every integer
+            physics step, both the scene and the optional WebGPU verifier return to the exact Rust state.
           </p>
         </div>
       </section>
