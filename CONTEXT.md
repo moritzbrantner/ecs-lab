@@ -24,10 +24,12 @@ Measure how different ECS storage strategies behave under identical deterministi
 
 **Compute evidence** — Optional accelerated work whose output is compared with canonical CPU evidence before timing or performance claims are accepted.
 
+**Interactive experiment input** — Browser-authored entity/component values used to construct a deterministic experiment. The browser may edit and visualize those values, but Rust owns frame integration and CPU collision evidence.
+
 ## Current boundary
 
 Storage and physics semantics remain Rust/CPU-owned. Rendering, networking, persistence, Worldgen, and application-level dependencies remain outside the core graph.
 
 Cross-repository reuse is allowed only where a task explicitly establishes a reusable-kernel boundary. The AABB physics workload pins `geometry-kernels` and `spatial-kernels` from `rust-kernels` while preserving `collision-lab` as an independent teaching/visualization consumer.
 
-The browser demo may use WebGPU as optional compute evidence. WebGPU availability is never required for repository correctness or headless CI, and GPU timing is invalid unless the produced collision-pair bitset exactly matches the Rust/CPU bitset for the same Rust-owned frame.
+The browser demo may author interactive experiment inputs and use WebGPU as optional compute evidence. WebGPU availability is never required for repository correctness or headless CI, and GPU timing is invalid unless the produced collision-pair bitset exactly matches the Rust/CPU bitset for the same Rust-evaluated frame.
