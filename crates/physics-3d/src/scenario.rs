@@ -18,9 +18,9 @@ const ROOM_DYNAMIC_COUNT: u32 = 48;
 const ROOM_COLUMNS: [i64; 4] = [-15, -5, 5, 15];
 const ROOM_ROWS: [i64; 4] = [3, 8, 13, 18];
 const ROOM_LAYERS: [i64; 3] = [-10, 0, 10];
-const ROOM_X_VELOCITIES: [i64; 4] = [-4, -3, 3, 4];
-const ROOM_Y_VELOCITIES: [i64; 4] = [-1, 0, 1, 2];
-const ROOM_Z_VELOCITIES: [i64; 4] = [4, -3, 3, -4];
+const ROOM_X_VELOCITIES: [i32; 4] = [-4, -3, 3, 4];
+const ROOM_Y_VELOCITIES: [i32; 4] = [-1, 0, 1, 2];
+const ROOM_Z_VELOCITIES: [i32; 4] = [4, -3, 3, -4];
 const ROOM_MATERIALS: [(u16, u16); 6] = [
     (1_000, 0),
     (850, 150),
