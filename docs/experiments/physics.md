@@ -38,9 +38,9 @@ Material coefficients are integer thousandths:
 - `1000` means full restitution/friction;
 - values outside `0..=1000` are rejected before simulation.
 
-Contact restitution uses the lower of the two body coefficients. Contact friction uses the higher coefficient. Dynamic-vs-dynamic normal response uses the ordinary one-dimensional mass/restitution equation evaluated with integer rational arithmetic; division truncation is explicit and deterministic. Dynamic-vs-fixed response reflects the normal velocity by restitution. Tangential contact friction deterministically damps velocity toward the contact pair's mass-weighted common tangential velocity.
+Contact restitution uses the higher of the two body coefficients so a bouncy body can bounce against an ordinary non-bouncy surface. Contact friction currently uses the higher coefficient. Dynamic-vs-dynamic normal response uses the ordinary one-dimensional mass/restitution equation evaluated with integer rational arithmetic; division truncation is explicit and deterministic. Dynamic-vs-fixed response reflects the normal velocity by restitution. Tangential contact friction deterministically damps velocity toward the contact pair's mass-weighted common tangential velocity.
 
-Dynamic bodies must have positive integer `mass_units`. Mass also controls dynamic-vs-dynamic positional correction: the lighter body receives the larger correction share. Fixed-body mass is ignored.
+Dynamic bodies must have positive integer `mass_units`. Mass also controls dynamic-vs-dynamic positional correction: the lighter body receives the larger correction share. When integer division leaves a one-unit remainder, that remainder is assigned to the lighter body; equal masses retain the stable entity-order bias of the original solver. Fixed-body mass is ignored.
 
 This is a controlled deterministic contact model for ECS experiments, not a claim of production-grade rigid-body fidelity.
 
@@ -97,11 +97,11 @@ This remains a compute-evidence seam, not a second physics solver. Contact respo
 The material/contact foundation must retain regression coverage for:
 
 - legacy default response;
-- restitution against fixed geometry;
+- restitution against ordinary fixed geometry;
 - contact friction;
-- mass-weighted dynamic response;
+- mass-weighted dynamic response and penetration correction;
 - touching/contact normal and support semantics;
-- malformed mass/material rejection; and
+- duplicate/malformed body configuration rejection; and
 - ordinary ECS-operation replay.
 
 ## Epic #10 follow-up
