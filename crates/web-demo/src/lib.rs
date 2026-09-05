@@ -532,3 +532,5 @@ mod tests {
         }
     }
 }
+
+mod physics_demo;
