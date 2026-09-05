@@ -1,12 +1,12 @@
 .physics-stage {
   width: 100%;
-  min-height: 420px;
+  min-height: 600px;
   aspect-ratio: 16 / 9;
 }
 
 @media (max-width: 760px) {
   .physics-stage {
-    min-height: 340px;
+    min-height: 440px;
     aspect-ratio: 4 / 3;
   }
 }
