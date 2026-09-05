@@ -1,5 +1,5 @@
 use ecs_physics::{
-    PhysicsBody, PhysicsConfig, PhysicsError, PhysicsMaterial, PhysicsStep, MATERIAL_SCALE, step,
+    MATERIAL_SCALE, PhysicsBody, PhysicsConfig, PhysicsError, PhysicsMaterial, PhysicsStep, step,
 };
 use ecs_workload::{EntityId, EntitySnapshot, Operation, Position, Velocity, WorldSnapshot};
 
@@ -8,15 +8,13 @@ const NO_GRAVITY: PhysicsConfig = PhysicsConfig {
 };
 const MAX_EXACT_F32_INTEGER: i64 = 16_777_216;
 
-fn resulting_velocity(
-    original: Velocity,
-    operations: &[Operation],
-    entity: EntityId,
-) -> Velocity {
-    operations.iter().fold(original, |current, operation| match operation {
-        Operation::SetVelocity(id, velocity) if *id == entity => *velocity,
-        _ => current,
-    })
+fn resulting_velocity(original: Velocity, operations: &[Operation], entity: EntityId) -> Velocity {
+    operations
+        .iter()
+        .fold(original, |current, operation| match operation {
+            Operation::SetVelocity(id, velocity) if *id == entity => *velocity,
+            _ => current,
+        })
 }
 
 fn assert_only_ordered_component_writes(step: &PhysicsStep) {
@@ -27,7 +25,10 @@ fn assert_only_ordered_component_writes(step: &PhysicsStep) {
             other => panic!("physics emitted a non-component-write ECS operation: {other:?}"),
         };
         if let Some(previous) = previous {
-            assert!(previous <= entity, "physics operations must remain entity ordered");
+            assert!(
+                previous <= entity,
+                "physics operations must remain entity ordered"
+            );
         }
         previous = Some(entity);
     }
@@ -112,18 +113,12 @@ fn dynamic_collision_rounding_keeps_momentum_error_bounded() {
                         let snapshot = WorldSnapshot::new(vec![
                             EntitySnapshot {
                                 id: left,
-                                position: Some(Position::new(
-                                    -1 - i64::from(left_velocity_x),
-                                    0,
-                                )),
+                                position: Some(Position::new(-1 - i64::from(left_velocity_x), 0)),
                                 velocity: Some(left_velocity),
                             },
                             EntitySnapshot {
                                 id: right,
-                                position: Some(Position::new(
-                                    1 - i64::from(right_velocity_x),
-                                    0,
-                                )),
+                                position: Some(Position::new(1 - i64::from(right_velocity_x), 0)),
                                 velocity: Some(right_velocity),
                             },
                         ]);
@@ -334,8 +329,7 @@ fn fixed_bodies_never_receive_generated_mutations() {
         &snapshot,
         &[
             PhysicsBody::fixed(floor, [16, 1]),
-            PhysicsBody::dynamic(dynamic, [1, 1])
-                .with_material(PhysicsMaterial::new(500, 500)),
+            PhysicsBody::dynamic(dynamic, [1, 1]).with_material(PhysicsMaterial::new(500, 500)),
         ],
         NO_GRAVITY,
         1,
@@ -529,8 +523,8 @@ fn repeated_steps_from_identical_input_are_bit_for_bit_deterministic() {
             .with_mass(7)
             .with_material(PhysicsMaterial::new(500, 1_000)),
     ];
-    let expected = step(&snapshot, &bodies, NO_GRAVITY, 1)
-        .expect("determinism baseline should succeed");
+    let expected =
+        step(&snapshot, &bodies, NO_GRAVITY, 1).expect("determinism baseline should succeed");
 
     for repetition in 0..256 {
         assert_eq!(
