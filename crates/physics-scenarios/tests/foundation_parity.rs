@@ -110,7 +110,10 @@ fn named_scenarios_replay_deterministically_at_multiple_horizons() {
         let second = bouncing
             .reference_after(frames)
             .expect("second bouncing-room replay must succeed");
-        assert_eq!(first, second, "bouncing-room replay diverged at {frames} frames");
+        assert_eq!(
+            first, second,
+            "bouncing-room replay diverged at {frames} frames"
+        );
     }
 
     let falling = FallingBoxesScenario::new(32);
@@ -121,7 +124,10 @@ fn named_scenarios_replay_deterministically_at_multiple_horizons() {
         let second = falling
             .reference_after(frames)
             .expect("second falling-box replay must succeed");
-        assert_eq!(first, second, "falling-box replay diverged at {frames} frames");
+        assert_eq!(
+            first, second,
+            "falling-box replay diverged at {frames} frames"
+        );
     }
 }
 
