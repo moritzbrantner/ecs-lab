@@ -13,6 +13,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "ecs-physics-3d"
+version = "0.1.0"
+dependencies = [
+ "ecs-physics",
+ "ecs-reference",
+ "ecs-sparse-set",
+ "ecs-workload",
+ "geometry-kernels",
+ "spatial-kernels",
+]
+
+[[package]]
 name = "ecs-physics-scenarios"
 version = "0.1.0"
 dependencies = [
@@ -55,6 +67,7 @@ name = "ecs-web-demo"
 version = "0.1.0"
 dependencies = [
  "ecs-physics",
+ "ecs-physics-3d",
  "ecs-physics-scenarios",
  "ecs-reference",
  "ecs-workload",
