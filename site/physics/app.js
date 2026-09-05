@@ -1,20 +1,19 @@
 import { runWebGpuAabbPairs } from "../webgpu.js";
 
-const BODY_NAMES = Object.freeze({
-  0: "A",
-  1: "B",
-  2: "C",
-  3: "Floor",
-  4: "Ceiling",
-  5: "Left wall",
-  6: "Right wall",
-  7: "Back wall",
-  8: "Front wall",
-});
-const HIDDEN_CUTAWAY_WALLS = new Set([4, 6, 8]);
 const MAX_BODIES = 64;
-const TRANSITION_MS = 560;
-const DEFAULT_CAMERA = Object.freeze({ yaw: 38, pitch: 28, radius: 62 });
+const TRANSITION_MS = 220;
+const DEFAULT_CAMERA = Object.freeze({ yaw: 38, pitch: 28, radius: 62, target: [0, 9, 0] });
+const CAMERA_LIMITS = Object.freeze({ minPitch: -70, maxPitch: 78, minRadius: 24, maxRadius: 110 });
+const DYNAMIC_COLORS = Object.freeze([
+  [0.28, 0.62, 0.88, 1],
+  [0.87, 0.58, 0.24, 1],
+  [0.54, 0.72, 0.39, 1],
+  [0.68, 0.47, 0.84, 1],
+  [0.88, 0.36, 0.49, 1],
+  [0.24, 0.72, 0.68, 1],
+  [0.83, 0.74, 0.32, 1],
+  [0.45, 0.55, 0.9, 1],
+]);
 const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 const stage = document.querySelector("#physics-stage");
@@ -26,8 +25,6 @@ const frameLabel = document.querySelector("#frame-label");
 const resetButton = document.querySelector("#reset-frame");
 const stepButton = document.querySelector("#step-frame");
 const runButton = document.querySelector("#run-frames");
-const yawInput = document.querySelector("#camera-yaw");
-const pitchInput = document.querySelector("#camera-pitch");
 const resetCameraButton = document.querySelector("#reset-camera");
 const webgpuEnabled = document.querySelector("#webgpu-enabled");
 const runtimeStatus = document.querySelector("#runtime-status");
@@ -44,8 +41,6 @@ if (
   !(resetButton instanceof HTMLButtonElement) ||
   !(stepButton instanceof HTMLButtonElement) ||
   !(runButton instanceof HTMLButtonElement) ||
-  !(yawInput instanceof HTMLInputElement) ||
-  !(pitchInput instanceof HTMLInputElement) ||
   !(resetCameraButton instanceof HTMLButtonElement) ||
   !(webgpuEnabled instanceof HTMLInputElement) ||
   !(runtimeStatus instanceof HTMLElement) ||
@@ -63,9 +58,29 @@ let transition = null;
 let animationHandle = 0;
 let running = false;
 let renderRevision = 0;
+let camera = defaultCameraState();
+let cameraDrag = null;
+
+function defaultCameraState() {
+  return {
+    yaw: DEFAULT_CAMERA.yaw,
+    pitch: DEFAULT_CAMERA.pitch,
+    radius: DEFAULT_CAMERA.radius,
+    target: [...DEFAULT_CAMERA.target],
+  };
+}
+
+function fixedBodyLabel(entity) {
+  if (entity.y < 0) return "Floor";
+  if (entity.y > 20) return "Ceiling";
+  if (entity.x < 0) return "Left wall";
+  if (entity.x > 0) return "Right wall";
+  if (entity.z < 0) return "Back wall";
+  return "Front wall";
+}
 
 function bodyLabel(entity) {
-  return BODY_NAMES[entity.id] ?? `Entity ${entity.id}`;
+  return entity.fixed ? fixedBodyLabel(entity) : `Body ${entity.id + 1}`;
 }
 
 function currentStep() {
@@ -117,6 +132,10 @@ function lerp(left, right, amount) {
   return left + (right - left) * amount;
 }
 
+function clamp(value, minimum, maximum) {
+  return Math.max(minimum, Math.min(maximum, value));
+}
+
 function pairContacts(frame) {
   const labels = [];
   let pair = 0;
@@ -139,25 +158,47 @@ function updateCollisionStatus(frame) {
     collisionStatus.textContent = `Rust 3D frame ${frame.step}: no AABB contact.`;
     return;
   }
-  collisionStatus.textContent = `Rust 3D frame ${frame.step}: ${contacts.join(", ")}.`;
+  const visible = contacts.slice(0, 6);
+  const remainder = contacts.length - visible.length;
+  const suffix = remainder > 0 ? ` · +${remainder} more` : "";
+  collisionStatus.textContent = `Rust 3D frame ${frame.step}: ${contacts.length} contacts · ${visible.join(", ")}${suffix}.`;
+}
+
+function isCutawayBoundary(entity) {
+  if (!entity.fixed) {
+    return false;
+  }
+  const label = fixedBodyLabel(entity);
+  return label === "Ceiling" || label === "Right wall" || label === "Front wall";
 }
 
 function visibleEntities(entities) {
-  return entities.filter((entity) => !HIDDEN_CUTAWAY_WALLS.has(entity.id));
+  return entities.filter((entity) => !isCutawayBoundary(entity));
 }
 
 function cameraState() {
   return {
-    yaw: Number(yawInput.value),
-    pitch: Number(pitchInput.value),
-    radius: DEFAULT_CAMERA.radius,
-    target: [0, 9, 0],
+    yaw: camera.yaw,
+    pitch: camera.pitch,
+    radius: camera.radius,
+    target: [...camera.target],
   };
 }
 
 function renderVisual(frame) {
   visualFrame = frame;
   renderer?.render(visibleEntities(frame.entities), cameraState());
+}
+
+function renderCameraChange() {
+  if (visualFrame) {
+    renderVisual(visualFrame);
+  }
+}
+
+function resetCamera() {
+  camera = defaultCameraState();
+  renderCameraChange();
 }
 
 function setExactStep(step, { verifyGpu = false } = {}) {
@@ -326,6 +367,118 @@ async function verifyWebGpu(frame, revision) {
   }
 }
 
+function beginCameraDrag(event) {
+  if (event.target instanceof HTMLButtonElement || (event.button !== 0 && event.button !== 2)) {
+    return;
+  }
+  event.preventDefault();
+  stage.focus({ preventScroll: true });
+  stage.setPointerCapture(event.pointerId);
+  cameraDrag = {
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    mode: event.button === 2 || event.shiftKey ? "pan" : "orbit",
+    camera: cameraState(),
+  };
+  stage.classList.add("camera-dragging");
+}
+
+function moveCameraDrag(event) {
+  if (!cameraDrag || event.pointerId !== cameraDrag.pointerId) {
+    return;
+  }
+  event.preventDefault();
+  const deltaX = event.clientX - cameraDrag.startX;
+  const deltaY = event.clientY - cameraDrag.startY;
+  const start = cameraDrag.camera;
+
+  if (cameraDrag.mode === "orbit") {
+    camera.yaw = start.yaw + deltaX * 0.28;
+    camera.pitch = clamp(start.pitch - deltaY * 0.24, CAMERA_LIMITS.minPitch, CAMERA_LIMITS.maxPitch);
+  } else {
+    const yaw = start.yaw * (Math.PI / 180);
+    const pitch = start.pitch * (Math.PI / 180);
+    const right = [Math.cos(yaw), 0, -Math.sin(yaw)];
+    const up = [
+      -Math.sin(yaw) * Math.sin(pitch),
+      Math.cos(pitch),
+      -Math.cos(yaw) * Math.sin(pitch),
+    ];
+    const scale = start.radius * 0.0032;
+    camera.target = [
+      clamp(start.target[0] - deltaX * right[0] * scale + deltaY * up[0] * scale, -35, 35),
+      clamp(start.target[1] + deltaY * up[1] * scale, -10, 30),
+      clamp(start.target[2] - deltaX * right[2] * scale + deltaY * up[2] * scale, -35, 35),
+    ];
+  }
+  renderCameraChange();
+}
+
+function endCameraDrag(event) {
+  if (!cameraDrag || event.pointerId !== cameraDrag.pointerId) {
+    return;
+  }
+  if (stage.hasPointerCapture(event.pointerId)) {
+    stage.releasePointerCapture(event.pointerId);
+  }
+  cameraDrag = null;
+  stage.classList.remove("camera-dragging");
+}
+
+function zoomCamera(deltaY) {
+  const factor = Math.exp(deltaY * 0.0012);
+  camera.radius = clamp(
+    camera.radius * factor,
+    CAMERA_LIMITS.minRadius,
+    CAMERA_LIMITS.maxRadius,
+  );
+  renderCameraChange();
+}
+
+function bindCameraControls() {
+  stage.addEventListener("pointerdown", beginCameraDrag);
+  stage.addEventListener("pointermove", moveCameraDrag);
+  stage.addEventListener("pointerup", endCameraDrag);
+  stage.addEventListener("pointercancel", endCameraDrag);
+  stage.addEventListener("lostpointercapture", () => {
+    cameraDrag = null;
+    stage.classList.remove("camera-dragging");
+  });
+  stage.addEventListener("wheel", (event) => {
+    event.preventDefault();
+    zoomCamera(event.deltaY);
+  }, { passive: false });
+  stage.addEventListener("dblclick", (event) => {
+    if (event.target instanceof HTMLButtonElement) {
+      return;
+    }
+    resetCamera();
+  });
+  stage.addEventListener("contextmenu", (event) => event.preventDefault());
+  stage.addEventListener("keydown", (event) => {
+    let handled = true;
+    switch (event.key) {
+      case "ArrowLeft": camera.yaw -= 4; break;
+      case "ArrowRight": camera.yaw += 4; break;
+      case "ArrowUp": camera.pitch = clamp(camera.pitch + 3, CAMERA_LIMITS.minPitch, CAMERA_LIMITS.maxPitch); break;
+      case "ArrowDown": camera.pitch = clamp(camera.pitch - 3, CAMERA_LIMITS.minPitch, CAMERA_LIMITS.maxPitch); break;
+      case "+":
+      case "=": zoomCamera(-80); break;
+      case "-":
+      case "_": zoomCamera(80); break;
+      case "r":
+      case "R": resetCamera(); break;
+      default: handled = false;
+    }
+    if (handled) {
+      event.preventDefault();
+      renderCameraChange();
+    }
+  });
+  resetCameraButton.addEventListener("click", resetCamera);
+}
+
 function bindControls() {
   frameInput.addEventListener("input", () => {
     stopRun();
@@ -343,15 +496,6 @@ function bindControls() {
     transitionTo(currentStep() + 1, { verifyGpu: true });
   });
   runButton.addEventListener("click", startRun);
-  yawInput.addEventListener("input", () => visualFrame && renderVisual(visualFrame));
-  pitchInput.addEventListener("input", () => visualFrame && renderVisual(visualFrame));
-  resetCameraButton.addEventListener("click", () => {
-    yawInput.value = String(DEFAULT_CAMERA.yaw);
-    pitchInput.value = String(DEFAULT_CAMERA.pitch);
-    if (visualFrame) {
-      renderVisual(visualFrame);
-    }
-  });
   webgpuEnabled.addEventListener("change", () => {
     if (running) {
       webgpuStatus.textContent = "Animation is running; exact verification resumes when it pauses.";
@@ -359,11 +503,8 @@ function bindControls() {
     }
     setExactStep(currentStep(), { verifyGpu: true });
   });
-  window.addEventListener("resize", () => {
-    if (visualFrame) {
-      renderVisual(visualFrame);
-    }
-  });
+  window.addEventListener("resize", renderCameraChange);
+  bindCameraControls();
 }
 
 async function loadWasm() {
@@ -523,7 +664,7 @@ async function createWebGpuRenderer(canvas) {
 
   return {
     mode: "webgpu",
-    render(entities, camera) {
+    render(entities, cameraValue) {
       const { width, height } = resizeCanvas(canvas);
       if (width !== depthWidth || height !== depthHeight) {
         depthTexture?.destroy();
@@ -536,7 +677,7 @@ async function createWebGpuRenderer(canvas) {
         depthHeight = height;
       }
 
-      const viewProjection = cameraViewProjection(camera, width / height);
+      const viewProjection = cameraViewProjection(cameraValue, width / height);
       device.queue.writeBuffer(uniformBuffer, 0, viewProjection);
       const bodyData = new Float32Array(entities.length * 12);
       entities.forEach((entity, index) => {
@@ -580,14 +721,14 @@ function createFallbackRenderer(canvas) {
   }
   return {
     mode: "canvas",
-    render(entities, camera) {
+    render(entities, cameraValue) {
       const { width, height, ratio } = resizeCanvas(canvas);
       const dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
       context.setTransform(ratio, 0, 0, ratio, 0, 0);
       context.clearRect(0, 0, width / ratio, height / ratio);
       context.fillStyle = dark ? "#0b0c0f" : "#f5f5f2";
       context.fillRect(0, 0, width / ratio, height / ratio);
-      const matrix = cameraViewProjection(camera, (width / ratio) / (height / ratio));
+      const matrix = cameraViewProjection(cameraValue, (width / ratio) / (height / ratio));
       const ordered = [...entities].sort((left, right) => Number(left.fixed) - Number(right.fixed));
       for (const entity of ordered) {
         drawWireBox(context, entity, matrix, width / ratio, height / ratio, dark);
@@ -611,9 +752,7 @@ function bodyColor(entity) {
   if (entity.fixed) {
     return [0.42, 0.44, 0.47, 1];
   }
-  if (entity.id === 0) return [0.28, 0.62, 0.88, 1];
-  if (entity.id === 1) return [0.87, 0.58, 0.24, 1];
-  return [0.54, 0.72, 0.39, 1];
+  return DYNAMIC_COLORS[entity.id % DYNAMIC_COLORS.length];
 }
 
 function drawWireBox(context, entity, matrix, width, height, dark) {
@@ -641,11 +780,11 @@ function drawWireBox(context, entity, matrix, width, height, dark) {
     : (dark ? "#f2f2f2" : "#161616");
   context.stroke();
 
-  if (!entity.fixed) {
+  if (!entity.fixed && entity.id % 8 === 0) {
     const center = projectPoint([entity.x, entity.y, entity.z], matrix, width, height);
     if (center) {
       context.fillStyle = dark ? "#f5f5f5" : "#111";
-      context.font = "600 13px system-ui, sans-serif";
+      context.font = "600 12px system-ui, sans-serif";
       context.fillText(bodyLabel(entity), center[0] + 5, center[1] - 5);
     }
   }
@@ -664,16 +803,16 @@ function projectPoint(point, matrix, width, height) {
   return [(ndcX * 0.5 + 0.5) * width, (0.5 - ndcY * 0.5) * height];
 }
 
-function cameraViewProjection(camera, aspect) {
-  const yaw = camera.yaw * (Math.PI / 180);
-  const pitch = camera.pitch * (Math.PI / 180);
-  const horizontal = camera.radius * Math.cos(pitch);
+function cameraViewProjection(cameraValue, aspect) {
+  const yaw = cameraValue.yaw * (Math.PI / 180);
+  const pitch = cameraValue.pitch * (Math.PI / 180);
+  const horizontal = cameraValue.radius * Math.cos(pitch);
   const eye = [
-    camera.target[0] + horizontal * Math.sin(yaw),
-    camera.target[1] + camera.radius * Math.sin(pitch),
-    camera.target[2] + horizontal * Math.cos(yaw),
+    cameraValue.target[0] + horizontal * Math.sin(yaw),
+    cameraValue.target[1] + cameraValue.radius * Math.sin(pitch),
+    cameraValue.target[2] + horizontal * Math.cos(yaw),
   ];
-  const view = lookAt(eye, camera.target, [0, 1, 0]);
+  const view = lookAt(eye, cameraValue.target, [0, 1, 0]);
   const projection = perspective(46 * (Math.PI / 180), aspect, 0.1, 180);
   return multiplyMat4(projection, view);
 }
@@ -761,8 +900,9 @@ async function main() {
     frames = Array.from({ length: maxSteps + 1 }, (_, step) => readRustFrame(step));
     renderer = await createRenderer();
 
+    const dynamicCount = frames[0].entities.filter((entity) => !entity.fixed).length;
     runtimeStatus.textContent =
-      "Rust/Wasm ready. ecs-physics-3d owns X/Y/Z integration, six-sided room response, mass, restitution, two-axis friction, and exact 3D pair evidence.";
+      `Rust/Wasm ready. ${dynamicCount} dynamic bodies; ecs-physics-3d owns X/Y/Z integration, six-sided room response, mass, restitution, two-axis friction, and exact 3D pair evidence.`;
     if (!("gpu" in navigator)) {
       webgpuEnabled.disabled = true;
       webgpuStatus.textContent = "WebGPU is unavailable; Rust physics and the Canvas 3D fallback remain usable.";
@@ -777,7 +917,7 @@ async function main() {
     runtimeStatus.textContent = `Could not start the 3D Rust physics demo: ${error instanceof Error ? error.message : String(error)}`;
     collisionStatus.textContent = "The 3D physics demo is unavailable until the Rust/Wasm module loads.";
     webgpuStatus.textContent = "WebGPU verification was not started.";
-    for (const control of [frameInput, resetButton, stepButton, runButton, yawInput, pitchInput, resetCameraButton, webgpuEnabled]) {
+    for (const control of [frameInput, resetButton, stepButton, runButton, resetCameraButton, webgpuEnabled]) {
       control.disabled = true;
     }
   }
