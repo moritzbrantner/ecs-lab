@@ -444,7 +444,12 @@ mod tests {
         webgpu_pair_word_count,
     };
 
-    fn interactive_entity(id: u32, x: i64, velocity_x: i32, restitution_milli: u16) -> InteractiveEntity {
+    fn interactive_entity(
+        id: u32,
+        x: i64,
+        velocity_x: i32,
+        restitution_milli: u16,
+    ) -> InteractiveEntity {
         InteractiveEntity {
             id: EntityId(id),
             start: Position::new(x, 0),
