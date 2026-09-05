@@ -5,9 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="ECS Lab compares entity-component-system storage, deterministic physics workloads, and optional WebGPU compute against reference semantics."
+      content="ECS Lab is an interactive Rust and WebGPU laboratory for entity-component-system storage, deterministic workloads, and exact CPU/GPU parity."
     />
-    <title>ECS Lab — compare ECS designs against a reference model</title>
+    <title>ECS Lab — build and inspect an ECS world</title>
     <link rel="stylesheet" href="./styles.css" />
     <link rel="stylesheet" href="./webgpu.css" />
   </head>
@@ -17,79 +17,98 @@
         <p class="eyebrow">Entity-component-system laboratory · Rust → WebAssembly → optional WebGPU</p>
         <h1>ECS Lab</h1>
         <p class="lede">
-          Compare ECS storage and execution strategies without losing the semantic baseline. Every
-          candidate must agree with deterministic workloads and a deliberately simple reference world.
+          Build a small world, add entities, change their components, and inspect what the ECS actually
+          does. Rust remains the semantic baseline; WebGPU is an optional compute path that must match
+          the Rust broad phase exactly.
         </p>
         <nav class="actions" aria-label="Project links">
-          <a class="button primary" href="#reference-demo">Run the reference world</a>
-          <a class="button" href="#webgpu-demo">Check WebGPU parity</a>
+          <a class="button primary" href="#world-lab">Open the world lab</a>
           <a class="button" href="https://github.com/moritzbrantner/ecs-lab">Source on GitHub</a>
         </nav>
       </header>
 
-      <section class="demo" id="reference-demo" aria-labelledby="demo-title">
+      <section class="demo" id="world-lab" aria-labelledby="world-lab-title">
         <div class="section-copy">
-          <p class="eyebrow">Live semantic oracle</p>
-          <h2 id="demo-title">One entity, integrated by the Rust reference ECS</h2>
+          <p class="eyebrow">Interactive ECS workbench</p>
+          <h2 id="world-lab-title">Add entities and change the components that move them</h2>
           <p>
-            The browser does not calculate the position itself. Moving the tick slider calls the
-            compiled <code>ReferenceWorld</code> through WebAssembly, using the same spawn, component,
-            and integration operations exercised by native tests.
+            Every displayed position is evaluated by the compiled Rust <code>ReferenceWorld</code>.
+            Collider pairs are checked by the Rust physics path first, then the same AABBs can be sent
+            through WebGPU for exact bitset parity.
           </p>
         </div>
 
-        <div class="demo-card">
-          <div class="world" id="world" aria-label="Two-dimensional ECS reference world">
-            <div class="axis axis-x" aria-hidden="true"></div>
-            <div class="axis axis-y" aria-hidden="true"></div>
-            <div class="entity" id="entity" aria-label="Simulated entity">1</div>
+        <div class="workbench">
+          <aside class="entity-panel" aria-label="Entity list">
+            <div class="panel-heading">
+              <div>
+                <span class="panel-kicker">World</span>
+                <strong>Entities</strong>
+              </div>
+              <button class="compact-button" id="add-entity" type="button">+ Add entity</button>
+            </div>
+            <div class="entity-list" id="entity-list"></div>
+            <button class="text-button" id="reset-world" type="button">Reset example world</button>
+          </aside>
+
+          <div class="viewport-panel">
+            <div class="world" id="world" aria-label="Interactive two-dimensional ECS world">
+              <div class="axis axis-x" aria-hidden="true"></div>
+              <div class="axis axis-y" aria-hidden="true"></div>
+            </div>
+
+            <div class="transport">
+              <button class="compact-button" id="step-tick" type="button">Step +1</button>
+              <label class="tick-control" for="ticks">
+                <span>Integration ticks</span>
+                <strong id="ticks-label">4</strong>
+                <input id="ticks" type="range" min="0" max="6" value="4" step="1" />
+              </label>
+            </div>
+
+            <label class="toggle-control" for="webgpu-enabled">
+              <input id="webgpu-enabled" type="checkbox" />
+              <span>
+                <strong>Verify this world with WebGPU</strong>
+                <small>Rust remains authoritative; GPU evidence is accepted only after exact pair parity.</small>
+              </span>
+            </label>
           </div>
 
-          <div class="controls">
-            <label for="ticks">Integration ticks: <strong id="ticks-label">5</strong></label>
-            <input id="ticks" type="range" min="0" max="20" value="5" step="1" />
-          </div>
+          <aside class="inspector-panel" aria-label="Selected entity inspector">
+            <div class="panel-heading inspector-heading">
+              <div>
+                <span class="panel-kicker">Inspector</span>
+                <strong id="inspector-title">Entity 1</strong>
+              </div>
+              <button class="text-button danger" id="remove-entity" type="button">Remove</button>
+            </div>
 
-          <dl class="readout">
-            <div><dt>Start</dt><dd id="start-position">—</dd></div>
-            <div><dt>Velocity</dt><dd id="velocity">—</dd></div>
-            <div><dt>Result</dt><dd id="result-position">Loading Rust…</dd></div>
-          </dl>
-          <p class="runtime-status" id="runtime-status">Loading WebAssembly module…</p>
+            <fieldset class="component-editor">
+              <legend>Position</legend>
+              <label>X <input data-field="x" type="number" min="-30" max="30" step="1" /></label>
+              <label>Y <input data-field="y" type="number" min="-10" max="10" step="1" /></label>
+            </fieldset>
+
+            <fieldset class="component-editor">
+              <legend>Velocity</legend>
+              <label>X / tick <input data-field="vx" type="number" min="-3" max="3" step="1" /></label>
+              <label>Y / tick <input data-field="vy" type="number" min="-3" max="3" step="1" /></label>
+            </fieldset>
+
+            <fieldset class="component-editor single-field">
+              <legend>Collider</legend>
+              <label>Half extent <input data-field="half" type="number" min="1" max="5" step="1" /></label>
+            </fieldset>
+
+            <p class="inspector-note" id="selected-frame-position">Frame position: —</p>
+          </aside>
         </div>
-      </section>
 
-      <section class="demo" id="webgpu-demo" aria-labelledby="webgpu-title">
-        <div class="section-copy">
-          <p class="eyebrow">Physics compute · optional accelerator</p>
-          <h2 id="webgpu-title">WebGPU must prove the same collision pairs before speed counts</h2>
-          <p>
-            Rust owns the falling-box scenario, advances it through the canonical physics workload,
-            and produces the CPU AABB pair bitset with the same reusable collision kernels used by
-            Collision Lab. WebGPU receives that exact frame. GPU timing is shown only after every
-            bitset word matches the Rust result.
-          </p>
-        </div>
-
-        <div class="demo-card webgpu-card">
-          <label class="toggle-control" for="webgpu-enabled">
-            <input id="webgpu-enabled" type="checkbox" />
-            <span><strong>Enable WebGPU verification</strong><small>Off by default; CPU semantics remain authoritative.</small></span>
-          </label>
-
-          <dl class="readout webgpu-readout">
-            <div><dt>Rust frame</dt><dd id="webgpu-bodies">Preparing…</dd></div>
-            <div><dt>CPU overlaps</dt><dd id="cpu-overlaps">—</dd></div>
-            <div><dt>GPU overlaps</dt><dd id="gpu-overlaps">—</dd></div>
-            <div><dt>Pair parity</dt><dd id="gpu-parity">Not run</dd></div>
-            <div><dt>GPU evidence</dt><dd id="gpu-timing">—</dd></div>
-          </dl>
-          <p class="runtime-status" id="webgpu-status">
-            Waiting for the Rust WebAssembly collision fixture…
-          </p>
-          <p class="hint">
-            Add <code>?webgpu=1</code> to the page URL to opt into the WebGPU check automatically.
-          </p>
+        <div class="evidence" aria-live="polite">
+          <p class="runtime-status" id="runtime-status">Loading Rust WebAssembly module…</p>
+          <p class="runtime-status" id="collision-status">Waiting for the reference world…</p>
+          <p class="runtime-status" id="webgpu-status">Checking browser WebGPU support…</p>
         </div>
       </section>
 
