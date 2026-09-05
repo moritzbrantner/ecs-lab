@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Run ECS Lab's deterministic gravity and material physics scenario in the browser and optionally verify its final collision pairs with WebGPU."
+    />
+    <title>ECS Lab — physics demo</title>
+    <link rel="stylesheet" href="../styles.css" />
+    <link rel="stylesheet" href="../webgpu.css" />
+    <link rel="stylesheet" href="./physics.css" />
+    <link rel="stylesheet" href="./scenario.css" />
+  </head>
+  <body>
+    <main class="shell physics-shell">
+      <header class="hero physics-hero">
+        <p class="eyebrow">ECS Lab · Rust physics → WebAssembly → optional WebGPU verification</p>
+        <h1>Physics demo</h1>
+        <p class="lede">
+          Run the deterministic bouncing-room scenario directly in the browser: gravity, a fixed floor,
+          different masses, restitution, friction, and repeated contact response all stay in Rust.
+          WebGPU can independently recompute the final AABB pair set and is accepted only when it
+          matches Rust exactly.
+        </p>
+        <nav class="actions" aria-label="Project links">
+          <a class="button primary" href="#physics-playground">Open the demo</a>
+          <a class="button" href="../">Back to ECS Lab</a>
+          <a class="button" href="https://github.com/moritzbrantner/ecs-lab">Source on GitHub</a>
+        </nav>
+      </header>
+
+      <section class="demo physics-demo" id="physics-playground" aria-labelledby="physics-title">
+        <div class="section-copy">
+          <p class="eyebrow">Canonical material scenario</p>
+          <h2 id="physics-title">Drop contrasting bodies onto one Rust-owned floor</h2>
+          <p>
+            This is the same named <code>BouncingRoomScenario</code> used by the Rust regression suite.
+            Body A is light and fully bouncy, B uses medium restitution and friction, and C is heavier,
+            inelastic, and maximally frictional. The frame slider replays that scenario from its
+            deterministic initial state.
+          </p>
+        </div>
+
+        <div class="physics-workbench">
+          <div class="physics-stage" id="physics-stage" aria-label="Rust bouncing-room physics simulation">
+            <div class="physics-axis physics-axis-x" aria-hidden="true"></div>
+            <div class="physics-axis physics-axis-y" aria-hidden="true"></div>
+          </div>
+
+          <div class="physics-transport">
+            <button class="compact-button" id="reset-frame" type="button">Reset</button>
+            <button class="compact-button" id="step-frame" type="button">Step +1</button>
+            <button class="compact-button" id="run-frames" type="button">Run</button>
+            <label class="frame-control" for="frame">
+              <span>Physics step</span>
+              <strong id="frame-label">0</strong>
+              <input id="frame" type="range" min="0" max="12" value="0" step="1" />
+            </label>
+          </div>
+
+          <p class="scenario-legend">
+            Gravity ↓ 1 unit/step · A: bouncy/frictionless · B: mixed material, mass 2 ·
+            C: inelastic/high-friction, mass 3 · floor: fixed
+          </p>
+
+          <label class="toggle-control physics-toggle" for="webgpu-enabled">
+            <input id="webgpu-enabled" type="checkbox" />
+            <span>
+              <strong>Verify this frame with WebGPU</strong>
+              <small>
+                The GPU receives only Rust-produced final AABBs. Its pair bitset must match the Rust
+                evidence word-for-word; WebGPU never owns gravity, integration, or contact response.
+              </small>
+            </span>
+          </label>
+        </div>
+
+        <div class="evidence physics-evidence" aria-live="polite">
+          <p class="runtime-status" id="runtime-status">Loading Rust WebAssembly module…</p>
+          <p class="runtime-status" id="collision-status">Waiting for the deterministic physics frame…</p>
+          <p class="runtime-status" id="webgpu-status">Checking browser WebGPU support…</p>
+        </div>
+      </section>
+
+      <section class="method physics-boundary" aria-labelledby="boundary-title">
+        <div class="section-copy">
+          <p class="eyebrow">Ownership boundary</p>
+          <h2 id="boundary-title">The browser is a demo adapter, not a second physics engine</h2>
+          <p>
+            The Wasm adapter asks the Rust scenario for a deterministic frame, including body positions,
+            collider extents, fixed/dynamic metadata, materials, and the canonical collision-pair bitset.
+            JavaScript only draws that state. When enabled, WebGPU is differential broad-phase evidence
+            over those final AABBs and is rejected on any parity mismatch.
+          </p>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

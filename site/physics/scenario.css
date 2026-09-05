@@ -1,0 +1,15 @@
+.physics-stage {
+  width: 100%;
+  min-height: 280px;
+  aspect-ratio: 8 / 3;
+}
+
+.physics-axis-x {
+  top: auto;
+  bottom: 16.6667%;
+}
+
+.physics-body[data-fixed="true"] {
+  border-radius: 0.2rem;
+  background: color-mix(in srgb, Canvas 90%, CanvasText 10%);
+}
