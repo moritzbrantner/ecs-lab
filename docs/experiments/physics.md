@@ -80,6 +80,23 @@ The benchmark runner measures both storage implementations under the same named 
 
 As with the existing `motion` benchmark, elapsed time is descriptive evidence rather than a merge threshold and is useful for comparison only with a verified environment fingerprint.
 
+## Bouncing-room material scenario
+
+`BouncingRoomScenario` adds a deliberately small material fixture above one fixed floor. Three dynamic bodies use contrasting mass, restitution, and friction configurations: a light fully bouncy/frictionless body, a medium mixed-material body, and a heavier fully inelastic/high-friction body.
+
+The scenario keeps material behavior outside storage policy. The same setup and every generated `PhysicsStep` are replayed through `ReferenceWorld` and `SparseWorld`; their snapshots and step evidence must remain identical frame by frame. Focused regression evidence also verifies that the bouncy body rebounds after floor impact while the maximum-friction inelastic body loses its tangential motion.
+
+The interactive Pages workbench uses the same Rust physics path rather than reimplementing response in JavaScript. Each editable dynamic entity can set:
+
+- mass units;
+- restitution from `0` to `1000`;
+- friction from `0` to `1000`;
+- position, velocity, and AABB half extent.
+
+JavaScript transports those inputs into WebAssembly and draws the resulting positions. Rust rebuilds the `ReferenceWorld`, advances deterministic physics steps, and returns the canonical final frame. The workbench currently uses zero gravity so side-by-side material collisions remain easy to inspect; the named `bouncing-room` scenario retains gravity and a floor as the canonical falling/bouncing fixture.
+
+No new benchmark was added for this small material scenario because it would not yet provide useful storage evidence beyond the existing falling-box benchmark. Performance remains descriptive, and solver iterations are still deferred until a measured scenario demonstrates a stability need.
+
 ## Optional WebGPU compute
 
 The scenario crate can advance the Rust reference world to a named frame and then produce a canonical AABB list plus triangular collision-pair bitset using `geometry-kernels::aabb_aabb`.
@@ -88,32 +105,29 @@ The Pages demo exposes one cached 96-box, six-frame fixture through WebAssembly.
 
 The browser then compares every GPU bitset word with the Rust/CPU bitset. Only an exact match makes the GPU timing eligible for display. A mismatch, unavailable adapter, shader failure, or disabled WebGPU leaves Rust/CPU authoritative and suppresses performance evidence.
 
-This remains a compute-evidence seam, not a second physics solver. Contact response, material behavior, contact/support evidence, and ECS mutations remain on the deterministic Rust path.
+This remains a compute-evidence seam, not a second physics solver. Contact response, material behavior, contact/support evidence, and ECS mutations remain on the deterministic Rust path. In the interactive material workbench WebGPU receives only the Rust-evaluated final AABBs and verifies their pair bitset; it never participates in contact response.
 
 ## Evidence
 
 `PhysicsStepStats` exposes body count, naive candidate-pair count, contacts, and resolved contacts. `PhysicsStep` additionally exposes ordered contacts and supported entities. `BroadPhaseFrame` separately exposes the post-physics AABB set, exact overlap count, and canonical pair words used for CPU↔WebGPU parity.
 
-The material/contact foundation must retain regression coverage for:
+The material/contact foundation retains regression coverage for:
 
 - legacy default response;
 - restitution against ordinary fixed geometry;
 - contact friction;
 - mass-weighted dynamic response and penetration correction;
 - touching/contact normal and support semantics;
-- duplicate/malformed body configuration rejection; and
-- ordinary ECS-operation replay.
+- duplicate/malformed body configuration rejection;
+- ordinary ECS-operation replay;
+- `bouncing-room` replay parity across both ECS storage implementations; and
+- Rust-owned interactive material response through the Wasm boundary.
 
-## Epic #10 follow-up
+## Epic #10 completion boundary
 
-The solver foundation deliberately lands before the interactive material scenario. The remaining work in Epic #10 is:
+Epic #10's intended implementation is split into two reviewable slices: the deterministic solver/material/contact foundation and the stacked `bouncing-room` + interactive material demonstration. The epic is ready for integration once both slices are green on their exact heads and the stacked slice remains clean after rebasing onto `main` following the foundation merge.
 
-- add the named `bouncing-room` scenario with contrasting restitution/friction bodies;
-- replay that scenario through both `ReferenceWorld` and `SparseWorld`;
-- expose editable material parameters through the Rust/Wasm Pages boundary; and
-- add benchmark/evidence only where it helps compare ECS/storage behavior.
-
-Solver iterations are not being added pre-emptively. Add a bounded explicit iteration count only if the measured `bouncing-room` scenario demonstrates a correctness/stability need.
+Do not pull character-controller behavior into this boundary. Ground/support evidence exists specifically so Epic #11 can implement jumping and movement above the solver rather than adding character semantics to collision response.
 
 ## Later horizon
 
