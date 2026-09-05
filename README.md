@@ -18,7 +18,7 @@ The storage horizon covers a reference model, a sparse-set world, and later arch
 
 The Pages workbench lets you add entities, select them, and edit Position, Velocity, and Collider components. JavaScript owns only interaction state and visualization: the browser synchronizes those experiment inputs into WebAssembly, `ReferenceWorld` evaluates the frame, and the Rust physics path produces the canonical interactive collision-pair bitset.
 
-A dedicated physics playground is published at [moritzbrantner.github.io/ecs-lab/physics/](https://moritzbrantner.github.io/ecs-lab/physics/). It exposes focused collision presets for restitution, mass transfer, friction, and mixed materials while keeping the same Rust-owned simulation boundary.
+A dedicated physics playground is published at [moritzbrantner.github.io/ecs-lab/physics/](https://moritzbrantner.github.io/ecs-lab/physics/). It runs the named `BouncingRoomScenario` with gravity, a fixed floor, and deliberately different masses, restitution, and friction so material response can be inspected frame by frame in the browser.
 
 WebGPU is optional. When enabled, the browser sends the current Rust-evaluated frame's AABBs through the all-pairs compute shader adapted from Collision Lab's proven WebGPU collision path. The GPU result is accepted only when its pair bitset matches the Rust CPU evidence word-for-word. Browsers without WebGPU continue on the Rust path without changing behavior.
 
