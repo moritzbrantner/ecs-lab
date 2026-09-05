@@ -14,7 +14,22 @@ use crate::{
     types::{PhysicsBody3d, PhysicsConfig3d, PhysicsError3d, PhysicsStep3d},
 };
 
-const ROOM_DYNAMIC_COUNT: u32 = 3;
+const ROOM_DYNAMIC_COUNT: u32 = 48;
+const ROOM_COLUMNS: [i64; 4] = [-15, -5, 5, 15];
+const ROOM_ROWS: [i64; 4] = [3, 8, 13, 18];
+const ROOM_LAYERS: [i64; 3] = [-10, 0, 10];
+const ROOM_X_VELOCITIES: [i64; 4] = [-4, -3, 3, 4];
+const ROOM_Y_VELOCITIES: [i64; 4] = [-1, 0, 1, 2];
+const ROOM_Z_VELOCITIES: [i64; 4] = [4, -3, 3, -4];
+const ROOM_MATERIALS: [(u16, u16); 6] = [
+    (1_000, 0),
+    (850, 150),
+    (650, 350),
+    (450, 550),
+    (250, 750),
+    (0, 1_000),
+];
+const ROOM_SHAPES: [[i32; 3]; 4] = [[2, 1, 1], [1, 1, 2], [2, 1, 2], [1, 1, 1]];
 const FLOOR: EntityId = EntityId(ROOM_DYNAMIC_COUNT);
 const CEILING: EntityId = EntityId(ROOM_DYNAMIC_COUNT + 1);
 const LEFT_WALL: EntityId = EntityId(ROOM_DYNAMIC_COUNT + 2);
@@ -154,41 +169,42 @@ impl Default for BouncingRoom3dScenario {
 impl BouncingRoom3dScenario {
     #[must_use]
     pub fn new() -> Self {
-        let definitions = [
-            (
-                EntityId(0),
-                Position::new3(-10, 12, -8),
-                Velocity::new3(3, -1, 4),
-                PhysicsMaterial::new(1_000, 0),
-                1,
-            ),
-            (
-                EntityId(1),
-                Position::new3(4, 15, 2),
-                Velocity::new3(-2, -2, -3),
-                PhysicsMaterial::new(500, 500),
-                2,
-            ),
-            (
-                EntityId(2),
-                Position::new3(10, 7, 8),
-                Velocity::new3(-4, 0, -3),
-                PhysicsMaterial::new(0, 1_000),
-                3,
-            ),
-        ];
         let mut operations = Vec::new();
         let mut bodies = Vec::new();
-        for (entity, position, velocity, material, mass_units) in definitions {
-            operations.push(Operation::Spawn(entity));
-            operations.push(Operation::SetPosition(entity, position));
-            operations.push(Operation::SetVelocity(entity, velocity));
-            bodies.push(
-                PhysicsBody3d::dynamic(entity, [2, 2, 2])
-                    .with_mass(mass_units)
-                    .with_material(material),
-            );
+        let mut next_entity = 0_u32;
+
+        for (layer_index, z) in ROOM_LAYERS.into_iter().enumerate() {
+            for (row_index, y) in ROOM_ROWS.into_iter().enumerate() {
+                for (column_index, x) in ROOM_COLUMNS.into_iter().enumerate() {
+                    let body_index = bodies.len();
+                    let entity = EntityId(next_entity);
+                    let velocity = Velocity::new3(
+                        ROOM_X_VELOCITIES
+                            [(column_index + row_index + layer_index) % ROOM_X_VELOCITIES.len()],
+                        ROOM_Y_VELOCITIES[(row_index + layer_index) % ROOM_Y_VELOCITIES.len()],
+                        ROOM_Z_VELOCITIES
+                            [(column_index + row_index * 2 + layer_index) % ROOM_Z_VELOCITIES.len()],
+                    );
+                    let (restitution, friction) =
+                        ROOM_MATERIALS[body_index % ROOM_MATERIALS.len()];
+                    let material = PhysicsMaterial::new(restitution, friction);
+                    let mass_units = 1 + next_entity % 4;
+                    let half_extents = ROOM_SHAPES[body_index % ROOM_SHAPES.len()];
+
+                    operations.push(Operation::Spawn(entity));
+                    operations.push(Operation::SetPosition(entity, Position::new3(x, y, z)));
+                    operations.push(Operation::SetVelocity(entity, velocity));
+                    bodies.push(
+                        PhysicsBody3d::dynamic(entity, half_extents)
+                            .with_mass(mass_units)
+                            .with_material(material),
+                    );
+                    next_entity = next_entity.saturating_add(1);
+                }
+            }
         }
+        debug_assert_eq!(next_entity, ROOM_DYNAMIC_COUNT);
+
         add_room_boundaries(&mut operations, &mut bodies);
         Self {
             setup: Workload::new(operations),
@@ -308,7 +324,7 @@ mod tests {
     use ecs_reference::ReferenceWorld;
     use ecs_sparse_set::SparseWorld;
 
-    use super::BouncingRoom3dScenario;
+    use super::{BouncingRoom3dScenario, ROOM_DYNAMIC_COUNT};
 
     #[test]
     fn room_moves_bodies_through_depth() {
@@ -362,7 +378,7 @@ mod tests {
             .broad_phase_frame_after(6)
             .expect("repeated 3D broad phase should succeed");
         assert_eq!(first, second);
-        assert_eq!(first.bodies().len(), 9);
+        assert_eq!(first.bodies().len(), ROOM_DYNAMIC_COUNT as usize + 6);
         assert!(first.bodies()[0].position.z != 0);
     }
 }
