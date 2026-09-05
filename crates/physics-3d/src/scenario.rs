@@ -171,23 +171,23 @@ impl BouncingRoom3dScenario {
     pub fn new() -> Self {
         let mut operations = Vec::new();
         let mut bodies = Vec::new();
+        let mut next_entity = 0_u32;
 
         for (layer_index, z) in ROOM_LAYERS.into_iter().enumerate() {
             for (row_index, y) in ROOM_ROWS.into_iter().enumerate() {
                 for (column_index, x) in ROOM_COLUMNS.into_iter().enumerate() {
                     let body_index = bodies.len();
-                    let entity = EntityId(body_index as u32);
+                    let entity = EntityId(next_entity);
                     let velocity = Velocity::new3(
                         ROOM_X_VELOCITIES
                             [(column_index + row_index + layer_index) % ROOM_X_VELOCITIES.len()],
                         ROOM_Y_VELOCITIES[(row_index + layer_index) % ROOM_Y_VELOCITIES.len()],
-                        ROOM_Z_VELOCITIES
-                            [(column_index + row_index * 2 + layer_index) % ROOM_Z_VELOCITIES.len()],
+                        ROOM_Z_VELOCITIES[(column_index + row_index * 2 + layer_index)
+                            % ROOM_Z_VELOCITIES.len()],
                     );
-                    let (restitution, friction) =
-                        ROOM_MATERIALS[body_index % ROOM_MATERIALS.len()];
+                    let (restitution, friction) = ROOM_MATERIALS[body_index % ROOM_MATERIALS.len()];
                     let material = PhysicsMaterial::new(restitution, friction);
-                    let mass_units = 1 + entity.0 % 4;
+                    let mass_units = 1 + next_entity % 4;
                     let half_extents = ROOM_SHAPES[body_index % ROOM_SHAPES.len()];
 
                     operations.push(Operation::Spawn(entity));
@@ -198,9 +198,11 @@ impl BouncingRoom3dScenario {
                             .with_mass(mass_units)
                             .with_material(material),
                     );
+                    next_entity += 1;
                 }
             }
         }
+        debug_assert_eq!(next_entity, ROOM_DYNAMIC_COUNT);
 
         add_room_boundaries(&mut operations, &mut bodies);
         Self {
