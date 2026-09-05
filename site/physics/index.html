@@ -5,9 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="Run ECS Lab's deterministic gravity and material physics scenario in the browser and optionally verify its final collision pairs with WebGPU."
+      content="Run ECS Lab's deterministic three-dimensional Rust physics room in the browser with smooth rendering and optional exact WebGPU broad-phase verification."
     />
-    <title>ECS Lab — physics demo</title>
+    <title>ECS Lab — 3D physics demo</title>
     <link rel="stylesheet" href="../styles.css" />
     <link rel="stylesheet" href="../webgpu.css" />
     <link rel="stylesheet" href="./physics.css" />
@@ -16,16 +16,16 @@
   <body>
     <main class="shell physics-shell">
       <header class="hero physics-hero">
-        <p class="eyebrow">ECS Lab · Rust physics → WebAssembly → optional WebGPU verification</p>
-        <h1>Physics demo</h1>
+        <p class="eyebrow">ECS Lab · Rust 3D physics → WebAssembly → WebGPU</p>
+        <h1>3D physics demo</h1>
         <p class="lede">
-          Run the deterministic bouncing-room scenario directly in the browser: gravity, a fixed floor,
-          different masses, restitution, friction, and repeated contact response all stay in Rust.
-          WebGPU can independently recompute the final AABB pair set and is accepted only when it
-          matches Rust exactly.
+          This is now a real three-dimensional physics world. Rust owns X/Y/Z motion, gravity,
+          collisions against all six room boundaries, mass, restitution, and two-axis contact friction.
+          The browser smoothly interpolates authoritative Rust frames; WebGPU renders the 3D scene when
+          available and can separately verify the exact Rust 3D AABB pair set.
         </p>
         <nav class="actions" aria-label="Project links">
-          <a class="button primary" href="#physics-playground">Open the demo</a>
+          <a class="button primary" href="#physics-playground">Open the 3D room</a>
           <a class="button" href="../">Back to ECS Lab</a>
           <a class="button" href="https://github.com/moritzbrantner/ecs-lab">Source on GitHub</a>
         </nav>
@@ -33,20 +33,21 @@
 
       <section class="demo physics-demo" id="physics-playground" aria-labelledby="physics-title">
         <div class="section-copy">
-          <p class="eyebrow">Canonical material scenario</p>
-          <h2 id="physics-title">Drop contrasting bodies onto one Rust-owned floor</h2>
+          <p class="eyebrow">Canonical 3D material scenario</p>
+          <h2 id="physics-title">Three bodies move through depth inside a closed Rust-owned room</h2>
           <p>
-            This is the same named <code>BouncingRoomScenario</code> used by the Rust regression suite.
             Body A is light and fully bouncy, B uses medium restitution and friction, and C is heavier,
-            inelastic, and maximally frictional. The frame slider replays that scenario from its
-            deterministic initial state.
+            inelastic, and maximally frictional. They move on all three axes inside fixed floor, ceiling,
+            side, front, and back slabs. The discrete physics state remains deterministic; only the
+            rendered transform is interpolated for smoother motion.
           </p>
         </div>
 
         <div class="physics-workbench">
-          <div class="physics-stage" id="physics-stage" aria-label="Rust bouncing-room physics simulation">
-            <div class="physics-axis physics-axis-x" aria-hidden="true"></div>
-            <div class="physics-axis physics-axis-y" aria-hidden="true"></div>
+          <div class="physics-stage" id="physics-stage">
+            <canvas id="physics-webgpu-canvas" aria-label="WebGPU rendering of the Rust three-dimensional physics room"></canvas>
+            <canvas id="physics-fallback-canvas" aria-label="Fallback rendering of the Rust three-dimensional physics room" hidden></canvas>
+            <p class="renderer-status" id="renderer-status" role="status">Preparing 3D renderer…</p>
           </div>
 
           <div class="physics-transport">
@@ -56,22 +57,35 @@
             <label class="frame-control" for="frame">
               <span>Physics step</span>
               <strong id="frame-label">0</strong>
-              <input id="frame" type="range" min="0" max="12" value="0" step="1" />
+              <input id="frame" type="range" min="0" max="24" value="0" step="1" />
             </label>
           </div>
 
+          <div class="camera-controls" aria-label="3D camera controls">
+            <label for="camera-yaw">
+              <span>Orbit</span>
+              <input id="camera-yaw" type="range" min="-120" max="120" value="38" step="1" />
+            </label>
+            <label for="camera-pitch">
+              <span>Elevation</span>
+              <input id="camera-pitch" type="range" min="8" max="68" value="28" step="1" />
+            </label>
+            <button class="text-button" id="reset-camera" type="button">Reset camera</button>
+          </div>
+
           <p class="scenario-legend">
-            Gravity ↓ 1 unit/step · A: bouncy/frictionless · B: mixed material, mass 2 ·
-            C: inelastic/high-friction, mass 3 · floor: fixed
+            Gravity −Y · true X/Y/Z velocity · six fixed room slabs · A: bouncy/frictionless ·
+            B: mixed material, mass 2 · C: inelastic/high-friction, mass 3
           </p>
 
           <label class="toggle-control physics-toggle" for="webgpu-enabled">
             <input id="webgpu-enabled" type="checkbox" />
             <span>
-              <strong>Verify this frame with WebGPU</strong>
+              <strong>Verify settled 3D AABBs with WebGPU</strong>
               <small>
-                The GPU receives only Rust-produced final AABBs. Its pair bitset must match the Rust
-                evidence word-for-word; WebGPU never owns gravity, integration, or contact response.
+                Rendering and collision verification are separate GPU paths. The verifier receives the
+                exact Rust X/Y/Z AABBs and its pair bitset must match Rust word-for-word; WebGPU never
+                owns physics response.
               </small>
             </span>
           </label>
@@ -79,7 +93,7 @@
 
         <div class="evidence physics-evidence" aria-live="polite">
           <p class="runtime-status" id="runtime-status">Loading Rust WebAssembly module…</p>
-          <p class="runtime-status" id="collision-status">Waiting for the deterministic physics frame…</p>
+          <p class="runtime-status" id="collision-status">Waiting for the deterministic 3D physics frame…</p>
           <p class="runtime-status" id="webgpu-status">Checking browser WebGPU support…</p>
         </div>
       </section>
@@ -87,12 +101,12 @@
       <section class="method physics-boundary" aria-labelledby="boundary-title">
         <div class="section-copy">
           <p class="eyebrow">Ownership boundary</p>
-          <h2 id="boundary-title">The browser is a demo adapter, not a second physics engine</h2>
+          <h2 id="boundary-title">Smooth rendering never becomes a second simulation</h2>
           <p>
-            The Wasm adapter asks the Rust scenario for a deterministic frame, including body positions,
-            collider extents, fixed/dynamic metadata, materials, and the canonical collision-pair bitset.
-            JavaScript only draws that state. When enabled, WebGPU is differential broad-phase evidence
-            over those final AABBs and is rejected on any parity mismatch.
+            The Wasm adapter exports authoritative 3D positions, collider extents, fixed/dynamic
+            metadata, materials, and the canonical collision-pair bitset. The render loop interpolates
+            only between consecutive Rust frames. At every integer physics step, both the scene and the
+            optional WebGPU verifier return to the exact Rust state.
           </p>
         </div>
       </section>
