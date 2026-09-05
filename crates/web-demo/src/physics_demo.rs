@@ -181,7 +181,7 @@ pub extern "C" fn physics_demo_half_extent_y(body_index: u32, steps: u32) -> i32
 
 #[unsafe(no_mangle)]
 pub extern "C" fn physics_demo_is_fixed(body_index: u32, steps: u32) -> u32 {
-    frame_entity(body_index, steps).map_or(0, |entity| u32::from(entity.fixed))
+    frame_entity(body_index, steps).map_or(0, |entity| if entity.fixed { 1 } else { 0 })
 }
 
 #[unsafe(no_mangle)]
