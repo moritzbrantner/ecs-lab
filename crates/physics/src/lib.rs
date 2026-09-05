@@ -216,10 +216,13 @@ impl std::error::Error for PhysicsError {}
 /// Produces one deterministic physics step from an observable ECS snapshot.
 ///
 /// Dynamic bodies use semi-implicit Euler integration. Every body pair is then visited in
-/// ascending entity-id order. `geometry-kernels` owns the AABB overlap decision; this crate owns
-/// deterministic positional correction plus integer mass, restitution, and contact-friction
-/// response. Returned operations are ordinary ECS workload operations, so storage candidates can
-/// consume the same result without implementing a physics-specific trait.
+/// ascending entity-id order. Cheap exact-integer axis separation rejects obviously distant pairs
+/// before the reusable collision kernel is called. Derived f32 AABBs are cached and rebuilt only
+/// after motion or positional correction. Possible contacts still pass through `geometry-kernels`,
+/// which owns the AABB overlap decision; this crate owns deterministic positional correction plus
+/// integer mass, restitution, and contact-friction response. Returned operations are ordinary ECS
+/// workload operations, so storage candidates can consume the same result without implementing a
+/// physics-specific trait.
 ///
 /// Material coefficients use thousandths: `0` is none and [`MATERIAL_SCALE`] is the full value.
 /// Restitution combines by taking the higher coefficient, while friction takes the higher
@@ -253,7 +256,9 @@ pub fn step(
 
     for state in &mut states {
         state.integrate(config.gravity, ticks);
-        state.validate_geometry_range()?;
+        if state.kind == BodyKind::Dynamic {
+            state.refresh_geometry()?;
+        }
     }
 
     let mut step_stats = PhysicsStepStats {
@@ -319,6 +324,7 @@ struct BodyState {
     velocity: Velocity,
     original_position: Position,
     original_velocity: Velocity,
+    geometry: Aabb,
 }
 
 impl BodyState {
@@ -357,22 +363,23 @@ impl BodyState {
                 .velocity
                 .ok_or(PhysicsError::MissingVelocity(body.entity))?,
         };
-        let state = Self {
+        let half_extents = [
+            i64::from(body.half_extents[0]),
+            i64::from(body.half_extents[1]),
+        ];
+        let geometry = build_geometry_aabb(body.entity, position, half_extents)?;
+        Ok(Self {
             entity: body.entity,
             kind: body.kind,
-            half_extents: [
-                i64::from(body.half_extents[0]),
-                i64::from(body.half_extents[1]),
-            ],
+            half_extents,
             mass_units: body.mass_units,
             material: body.material,
             position,
             velocity,
             original_position: position,
             original_velocity: velocity,
-        };
-        state.validate_geometry_range()?;
-        Ok(state)
+            geometry,
+        })
     }
 
     fn integrate(&mut self, gravity: Velocity, ticks: i32) {
@@ -398,30 +405,9 @@ impl BodyState {
             .saturating_add(i64::from(self.velocity.y).saturating_mul(ticks));
     }
 
-    fn validate_geometry_range(&self) -> Result<(), PhysicsError> {
-        if axis_fits_exact_f32(self.position.x, self.half_extents[0])
-            && axis_fits_exact_f32(self.position.y, self.half_extents[1])
-        {
-            Ok(())
-        } else {
-            Err(PhysicsError::CoordinateOutOfRange(self.entity))
-        }
-    }
-
-    fn geometry_aabb(&self) -> Result<Aabb, PhysicsError> {
-        self.validate_geometry_range()?;
-        Ok(Aabb::from_center_half_extents(
-            [
-                exact_i64_to_f32(self.position.x),
-                exact_i64_to_f32(self.position.y),
-                0.0,
-            ],
-            [
-                exact_i64_to_f32(self.half_extents[0]),
-                exact_i64_to_f32(self.half_extents[1]),
-                0.5,
-            ],
-        ))
+    fn refresh_geometry(&mut self) -> Result<(), PhysicsError> {
+        self.geometry = build_geometry_aabb(self.entity, self.position, self.half_extents)?;
+        Ok(())
     }
 
     const fn axis_position(&self, axis: Axis) -> i64 {
@@ -478,13 +464,20 @@ struct PairOutcome {
 }
 
 fn resolve_pair(left: &mut BodyState, right: &mut BodyState) -> Result<PairOutcome, PhysicsError> {
-    let relation = aabb_aabb(left.geometry_aabb()?, right.geometry_aabb()?);
+    let overlap_x = integer_axis_overlap(left, right, Axis::X);
+    if overlap_x < 0 {
+        return Ok(PairOutcome::default());
+    }
+    let overlap_y = integer_axis_overlap(left, right, Axis::Y);
+    if overlap_y < 0 {
+        return Ok(PairOutcome::default());
+    }
+
+    let relation = aabb_aabb(left.geometry, right.geometry);
     if !relation.overlaps {
         return Ok(PairOutcome::default());
     }
 
-    let overlap_x = integer_axis_overlap(left, right, Axis::X);
-    let overlap_y = integer_axis_overlap(left, right, Axis::Y);
     let (axis, penetration) = if overlap_x <= overlap_y {
         (Axis::X, overlap_x)
     } else {
@@ -502,15 +495,16 @@ fn resolve_pair(left: &mut BodyState, right: &mut BodyState) -> Result<PairOutco
     let restitution_milli = combined_restitution(left, right);
     let friction_milli = combined_friction(left, right);
     let corrected = correct_penetration(left, right, axis, normal, penetration);
+    if corrected {
+        left.refresh_geometry()?;
+        right.refresh_geometry()?;
+    }
     let normal_impulsed = if approaching {
         apply_normal_response(left, right, axis, restitution_milli)
     } else {
         false
     };
     let friction_applied = apply_contact_friction(left, right, axis.tangent(), friction_milli);
-
-    left.validate_geometry_range()?;
-    right.validate_geometry_range()?;
 
     Ok(PairOutcome {
         contact: Some(PhysicsContact {
@@ -771,6 +765,31 @@ fn changed_operations(states: &[BodyState]) -> Vec<Operation> {
         }
     }
     operations
+}
+
+fn build_geometry_aabb(
+    entity: EntityId,
+    position: Position,
+    half_extents: [i64; 2],
+) -> Result<Aabb, PhysicsError> {
+    if !axis_fits_exact_f32(position.x, half_extents[0])
+        || !axis_fits_exact_f32(position.y, half_extents[1])
+    {
+        return Err(PhysicsError::CoordinateOutOfRange(entity));
+    }
+
+    Ok(Aabb::from_center_half_extents(
+        [
+            exact_i64_to_f32(position.x),
+            exact_i64_to_f32(position.y),
+            0.0,
+        ],
+        [
+            exact_i64_to_f32(half_extents[0]),
+            exact_i64_to_f32(half_extents[1]),
+            0.5,
+        ],
+    ))
 }
 
 fn axis_fits_exact_f32(position: i64, half_extent: i64) -> bool {
