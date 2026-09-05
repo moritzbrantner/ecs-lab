@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="Run ECS Lab's deterministic Rust physics solver in the browser and optionally verify its final collision pairs with WebGPU."
+      content="Run ECS Lab's deterministic gravity and material physics scenario in the browser and optionally verify its final collision pairs with WebGPU."
     />
     <title>ECS Lab — physics demo</title>
     <link rel="stylesheet" href="../styles.css" />
@@ -18,10 +18,10 @@
         <p class="eyebrow">ECS Lab · Rust physics → WebAssembly → optional WebGPU verification</p>
         <h1>Physics demo</h1>
         <p class="lede">
-          Run deterministic rigid-body collision experiments directly in the browser. Rust owns the
-          simulation and material response; JavaScript supplies the experiment inputs and draws the
-          resulting frame. WebGPU can independently recompute the final AABB pair set and is accepted
-          only when it matches Rust exactly.
+          Run the deterministic bouncing-room scenario directly in the browser: gravity, a fixed floor,
+          different masses, restitution, friction, and repeated contact response all stay in Rust.
+          WebGPU can independently recompute the final AABB pair set and is accepted only when it
+          matches Rust exactly.
         </p>
         <nav class="actions" aria-label="Project links">
           <a class="button primary" href="#physics-playground">Open the demo</a>
@@ -32,31 +32,18 @@
 
       <section class="demo physics-demo" id="physics-playground" aria-labelledby="physics-title">
         <div class="section-copy">
-          <p class="eyebrow">Deterministic collision playground</p>
-          <h2 id="physics-title">Change the experiment, then step the same Rust solver used by ECS Lab</h2>
-          <p id="scenario-copy">
-            Equal-mass, fully elastic bodies exchange momentum. The browser does not approximate the
-            collision response; every displayed position comes back from the compiled Rust module.
+          <p class="eyebrow">Canonical material scenario</p>
+          <h2 id="physics-title">Drop contrasting bodies onto one Rust-owned floor</h2>
+          <p>
+            This is the same named <code>BouncingRoomScenario</code> used by the Rust regression suite.
+            Body A is light and fully bouncy, B uses medium restitution and friction, and C is heavier,
+            inelastic, and maximally frictional. The frame slider replays that scenario from its
+            deterministic initial state.
           </p>
         </div>
 
         <div class="physics-workbench">
-          <div class="scenario-picker" role="group" aria-label="Physics experiment">
-            <button class="compact-button preset-button is-active" type="button" data-preset="elastic">
-              Elastic exchange
-            </button>
-            <button class="compact-button preset-button" type="button" data-preset="mass">
-              Mass transfer
-            </button>
-            <button class="compact-button preset-button" type="button" data-preset="friction">
-              Friction
-            </button>
-            <button class="compact-button preset-button" type="button" data-preset="mixed">
-              Mixed materials
-            </button>
-          </div>
-
-          <div class="physics-stage" id="physics-stage" aria-label="Rust physics simulation viewport">
+          <div class="physics-stage" id="physics-stage" aria-label="Rust bouncing-room physics simulation">
             <div class="physics-axis physics-axis-x" aria-hidden="true"></div>
             <div class="physics-axis physics-axis-y" aria-hidden="true"></div>
           </div>
@@ -68,12 +55,13 @@
             <label class="frame-control" for="frame">
               <span>Physics step</span>
               <strong id="frame-label">0</strong>
-              <input id="frame" type="range" min="0" max="8" value="0" step="1" />
+              <input id="frame" type="range" min="0" max="12" value="0" step="1" />
             </label>
           </div>
 
-          <p class="scenario-legend" id="scenario-legend">
-            A and B: mass 1 · restitution 1000 · friction 0
+          <p class="scenario-legend">
+            Gravity ↓ 1 unit/step · A: bouncy/frictionless · B: mixed material, mass 2 ·
+            C: inelastic/high-friction, mass 3 · floor: fixed
           </p>
 
           <label class="toggle-control physics-toggle" for="webgpu-enabled">
@@ -81,8 +69,8 @@
             <span>
               <strong>Verify this frame with WebGPU</strong>
               <small>
-                The GPU receives the Rust-evaluated AABBs. Its pair bitset must match the Rust evidence
-                word-for-word; WebGPU never owns contact response.
+                The GPU receives only Rust-produced final AABBs. Its pair bitset must match the Rust
+                evidence word-for-word; WebGPU never owns gravity, integration, or contact response.
               </small>
             </span>
           </label>
@@ -100,10 +88,10 @@
           <p class="eyebrow">Ownership boundary</p>
           <h2 id="boundary-title">The browser is a demo adapter, not a second physics engine</h2>
           <p>
-            Each preset is synchronized into the Wasm adapter using ordinary entity inputs. Rust
-            replays the world, performs deterministic material physics, and returns the final positions
-            plus the canonical collision-pair bitset. The page visualizes that state. When enabled,
-            WebGPU is only differential evidence over those final AABBs.
+            The Wasm adapter asks the Rust scenario for a deterministic frame, including body positions,
+            collider extents, fixed/dynamic metadata, materials, and the canonical collision-pair bitset.
+            JavaScript only draws that state. When enabled, WebGPU is differential broad-phase evidence
+            over those final AABBs and is rejected on any parity mismatch.
           </p>
         </div>
       </section>
