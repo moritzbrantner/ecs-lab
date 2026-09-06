@@ -188,8 +188,84 @@
   margin: 0;
 }
 
+.material-lab {
+  display: grid;
+  gap: 1rem;
+  margin-top: 4rem;
+}
+
+.material-lab-status {
+  margin: 0;
+  color: color-mix(in srgb, CanvasText 74%, transparent);
+  font-size: 0.9rem;
+}
+
+.material-traces {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.material-card {
+  display: grid;
+  gap: 0.65rem;
+  min-width: 0;
+  padding: 0.9rem;
+  border: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
+  border-radius: 0.8rem;
+  background: color-mix(in srgb, Canvas 97%, CanvasText 3%);
+}
+
+.material-card-heading {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.material-card-heading h4,
+.material-card-heading p,
+.material-metrics {
+  margin: 0;
+}
+
+.material-card-heading p,
+.material-metrics {
+  color: color-mix(in srgb, CanvasText 68%, transparent);
+  font-size: 0.82rem;
+}
+
+.material-trace {
+  display: block;
+  width: 100%;
+  min-height: 8rem;
+  color: CanvasText;
+  border: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
+  border-radius: 0.55rem;
+  background: Canvas;
+}
+
+.material-path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  vector-effect: non-scaling-stroke;
+}
+
+.material-floor {
+  stroke: currentColor;
+  stroke-width: 0.8;
+  stroke-dasharray: 3 3;
+  opacity: 0.34;
+  vector-effect: non-scaling-stroke;
+}
+
 .physics-boundary {
   margin-top: 4rem;
+}
+
+@media (max-width: 900px) {
+  .material-traces {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 760px) {
@@ -232,6 +308,12 @@
 
   .step-stride-control select {
     width: 100%;
+  }
+}
+
+@media (max-width: 560px) {
+  .material-traces {
+    grid-template-columns: 1fr;
   }
 }
 
