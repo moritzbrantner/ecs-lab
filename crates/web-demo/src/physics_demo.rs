@@ -2,8 +2,8 @@ use std::sync::{Mutex, OnceLock};
 
 use ecs_physics::{BodyKind, PhysicsMaterial};
 use ecs_physics_3d::{
-    BouncingRoom3dScenario, BroadPhaseBody3d, BroadPhaseFrame3d, PhysicsBody3d,
-    PhysicsConfig3d, step_3d,
+    BouncingRoom3dScenario, BroadPhaseBody3d, BroadPhaseFrame3d, PhysicsBody3d, PhysicsConfig3d,
+    step_3d,
 };
 use ecs_reference::ReferenceWorld;
 use ecs_workload::{EntityId, Operation, Position, Velocity, Workload};
@@ -459,8 +459,7 @@ mod tests {
             physics_material_demo_position_y(5, 0)
         );
         assert!(
-            physics_material_demo_position_y(0, 300)
-                > physics_material_demo_position_y(5, 300)
+            physics_material_demo_position_y(0, 300) > physics_material_demo_position_y(5, 300)
         );
     }
 }
