@@ -13,5 +13,9 @@
       "benchmark": ["bash", "scripts/benchmark.sh", "full"],
       "benchmark:smoke": ["bash", "scripts/benchmark.sh", "smoke"]
     }
+  },
+  "merge": {
+    "authority": "hosted",
+    "requiredChecks": ["validate"]
   }
 }
