@@ -106,7 +106,7 @@
 
 .physics-transport {
   display: grid;
-  grid-template-columns: auto auto auto minmax(14rem, 1fr);
+  grid-template-columns: auto auto auto auto minmax(14rem, 1fr);
   gap: 0.65rem;
   align-items: center;
 }
@@ -126,6 +126,112 @@
 
 .frame-control input {
   width: 100%;
+}
+
+.temporal-controls {
+  display: grid;
+  grid-template-columns: minmax(16rem, 0.8fr) minmax(22rem, 1.2fr);
+  gap: 0.8rem;
+  align-items: stretch;
+  border-top: 1px solid color-mix(in srgb, CanvasText 14%, transparent);
+  padding-top: 0.9rem;
+}
+
+.step-stride-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.8rem;
+  align-items: center;
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, CanvasText 16%, transparent);
+  border-radius: 0.75rem;
+  padding: 0.75rem 0.85rem;
+}
+
+.step-stride-control > span {
+  display: grid;
+  gap: 0.18rem;
+  min-width: 0;
+}
+
+.step-stride-control small {
+  color: color-mix(in srgb, CanvasText 62%, transparent);
+  line-height: 1.35;
+}
+
+.step-stride-control select {
+  min-height: 2.4rem;
+  border: 1px solid color-mix(in srgb, CanvasText 24%, transparent);
+  border-radius: 0.55rem;
+  padding: 0.35rem 0.55rem;
+  background: Canvas;
+  color: CanvasText;
+  font: inherit;
+}
+
+.temporal-toggle {
+  margin: 0;
+}
+
+.time-matrix-panel {
+  display: grid;
+  gap: 0.85rem;
+  border-top: 1px solid color-mix(in srgb, CanvasText 14%, transparent);
+  padding-top: 1rem;
+}
+
+.time-matrix-panel[hidden] {
+  display: none;
+}
+
+.time-matrix-heading {
+  display: grid;
+  grid-template-columns: minmax(13rem, 0.55fr) minmax(18rem, 1.45fr);
+  gap: 1rem;
+  align-items: end;
+}
+
+.time-matrix-heading .eyebrow,
+.time-matrix-heading h3,
+.time-matrix-heading > p {
+  margin: 0;
+}
+
+.time-matrix-heading > div {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.time-matrix-heading > p {
+  color: color-mix(in srgb, CanvasText 72%, transparent);
+  line-height: 1.5;
+}
+
+.time-matrix-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border: 1px solid color-mix(in srgb, CanvasText 22%, transparent);
+  border-radius: 0.7rem;
+  background: Canvas;
+}
+
+.time-matrix-scroll canvas {
+  display: block;
+  max-width: none;
+  cursor: crosshair;
+}
+
+.time-matrix-scroll canvas:focus-visible {
+  outline: 2px solid Highlight;
+  outline-offset: -3px;
+}
+
+.time-matrix-readout {
+  min-height: 1.4em;
+  margin: 0;
+  color: color-mix(in srgb, CanvasText 76%, transparent);
+  font-size: 0.88rem;
 }
 
 .scenario-legend {
@@ -151,6 +257,13 @@
   margin-top: 4rem;
 }
 
+@media (max-width: 900px) {
+  .temporal-controls,
+  .time-matrix-heading {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 760px) {
   .physics-stage {
     min-height: 440px;
@@ -172,7 +285,7 @@
   }
 
   .physics-transport {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(4, 1fr);
   }
 
   .physics-transport > .compact-button {
@@ -182,6 +295,20 @@
   .frame-control {
     grid-column: 1 / -1;
     grid-template-columns: auto auto 1fr;
+  }
+
+  .step-stride-control {
+    grid-template-columns: 1fr;
+  }
+
+  .step-stride-control select {
+    width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  .physics-transport {
+    grid-template-columns: repeat(2, 1fr);
   }
 }
 
