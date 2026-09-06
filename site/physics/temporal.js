@@ -1,4 +1,4 @@
-const VALID_STRIDES = new Set([1, 2, 4, 8]);
+const VALID_STRIDES = new Set([1, 2, 4, 8, 15, 30, 60]);
 
 const frameInput = document.querySelector("#frame");
 const stepForwardButton = document.querySelector("#step-frame");
@@ -44,13 +44,9 @@ function updateStepLabels() {
 }
 
 function captureForwardStep(event) {
-  const stride = stepStride();
-  if (stride === 1) {
-    return;
-  }
   event.preventDefault();
   event.stopImmediatePropagation();
-  setFrame(currentStep() + stride);
+  setFrame(currentStep() + stepStride());
 }
 
 function bindPlaybackControls() {
