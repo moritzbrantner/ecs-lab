@@ -80,6 +80,8 @@ pub struct PhysicsContact3d {
 pub struct PhysicsStep3dStats {
     pub body_count: usize,
     pub candidate_pairs: usize,
+    pub ccd_candidate_pairs: usize,
+    pub ccd_contacts: usize,
     pub contacts: usize,
     pub resolved_contacts: usize,
 }
@@ -131,6 +133,7 @@ pub enum PhysicsError3d {
     FrictionOutOfRange(EntityId, u16),
     CoordinateOutOfRange(EntityId),
     NonPositiveTicks(i32),
+    CcdIterationLimit(EntityId),
 }
 
 impl fmt::Display for PhysicsError3d {
@@ -178,6 +181,11 @@ impl fmt::Display for PhysicsError3d {
             Self::NonPositiveTicks(ticks) => write!(
                 formatter,
                 "3D physics step requires positive ticks, got {ticks}"
+            ),
+            Self::CcdIterationLimit(entity) => write!(
+                formatter,
+                "3D physics body {} exceeded the bounded static CCD/contact iteration limit",
+                entity.0
             ),
         }
     }
