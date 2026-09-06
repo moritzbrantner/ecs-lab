@@ -265,8 +265,8 @@ impl BouncingRoom3dScenario {
                         [(column_index + row_index + layer_index) % ROOM_X_VELOCITIES.len()];
                     let y_velocity =
                         ROOM_Y_VELOCITIES[(row_index + layer_index) % ROOM_Y_VELOCITIES.len()];
-                    let z_velocity = ROOM_Z_VELOCITIES[(column_index + row_index * 2 + layer_index)
-                        % ROOM_Z_VELOCITIES.len()];
+                    let z_velocity = ROOM_Z_VELOCITIES
+                        [(column_index + row_index * 2 + layer_index) % ROOM_Z_VELOCITIES.len()];
                     let velocity = Velocity::new3(
                         scale_velocity(x_velocity)?,
                         scale_velocity(y_velocity)?,
@@ -285,11 +285,7 @@ impl BouncingRoom3dScenario {
                     operations.push(Operation::Spawn(entity));
                     operations.push(Operation::SetPosition(
                         entity,
-                        Position::new3(
-                            scale_position(x)?,
-                            scale_position(y)?,
-                            scale_position(z)?,
-                        ),
+                        Position::new3(scale_position(x)?, scale_position(y)?, scale_position(z)?),
                     ));
                     operations.push(Operation::SetVelocity(entity, velocity));
                     bodies.push(
@@ -468,7 +464,10 @@ impl fmt::Display for ScenarioError3d {
                 entity.0
             ),
             Self::InvalidSubstepRate(rate) => {
-                write!(formatter, "3D scenario substep rate {rate} cannot be represented")
+                write!(
+                    formatter,
+                    "3D scenario substep rate {rate} cannot be represented"
+                )
             }
         }
     }
