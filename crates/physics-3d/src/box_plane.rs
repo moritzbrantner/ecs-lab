@@ -116,12 +116,11 @@ impl From<AngularError3d> for BoxPlaneError3d {
 
 /// Advances one oriented cuboid against a static horizontal plane.
 ///
-/// This is the first rotation-aware rigid-body slice. The plane contact is derived from the actual
-/// Rust quaternion orientation: all eight oriented box corners are evaluated, tied lowest vertices form
-/// a deterministic manifold, and an off-center normal impulse changes both linear and angular velocity.
-/// The step uses semi-implicit Euler for linear motion and the fixed-point quaternion integrator for
-/// orientation. Rotational continuous collision detection is deliberately deferred, so penetration from
-/// the 60 Hz discrete step is corrected before response.
+/// The actual Rust quaternion orientation determines the eight world-space box corners. Tied lowest
+/// vertices become one deterministic contact manifold. An off-center normal impulse changes both the
+/// center-of-mass velocity and angular velocity through the cuboid inertia tensor. The existing AABB
+/// room solver stays unchanged until OBB narrow phase lands, so the browser never sees visual-only tilt.
+/// Rotational CCD remains a later horizon; this 60 Hz slice corrects any discrete penetration first.
 ///
 /// # Errors
 ///
@@ -133,107 +132,37 @@ pub fn step_box_on_plane(
 ) -> Result<BoxPlaneStep3d, BoxPlaneError3d> {
     validate(body, config)?;
 
-    let linear_velocity = Velocity::new3(
-        integrate_velocity_axis(
-            state.linear_velocity.x,
-            config.gravity.x,
-            config.timestep_numerator,
-            config.timestep_denominator,
-        )?,
-        integrate_velocity_axis(
-            state.linear_velocity.y,
-            config.gravity.y,
-            config.timestep_numerator,
-            config.timestep_denominator,
-        )?,
-        integrate_velocity_axis(
-            state.linear_velocity.z,
-            config.gravity.z,
-            config.timestep_numerator,
-            config.timestep_denominator,
-        )?,
-    );
-    let center = Position::new3(
-        integrate_position_axis(
-            state.center.x,
-            linear_velocity.x,
-            config.timestep_numerator,
-            config.timestep_denominator,
-        )?,
-        integrate_position_axis(
-            state.center.y,
-            linear_velocity.y,
-            config.timestep_numerator,
-            config.timestep_denominator,
-        )?,
-        integrate_position_axis(
-            state.center.z,
-            linear_velocity.z,
-            config.timestep_numerator,
-            config.timestep_denominator,
-        )?,
-    );
+    let linear_velocity = integrate_linear_velocity(state.linear_velocity, config)?;
+    let center = integrate_center(state.center, linear_velocity, config)?;
     let orientation = integrate_orientation(
         state.angular.orientation,
         state.angular.angular_velocity,
         config.timestep_numerator,
         config.timestep_denominator,
     )?;
-
     let mut next = BoxPlaneState3d::new(
         center,
         linear_velocity,
         AngularState3d::new(orientation, state.angular.angular_velocity),
     );
+
     let offsets = oriented_box_offsets(body.half_extents, orientation)?;
-    let minimum_offset_y = offsets
-        .iter()
-        .map(|offset| offset[1])
-        .min()
-        .ok_or(BoxPlaneError3d::ArithmeticOverflow)?;
-    let lowest_y = next
+    let minimum_y = lowest_offset_y(&offsets);
+    let lowest_world_y = next
         .center
         .y
-        .checked_add(minimum_offset_y)
+        .checked_add(minimum_y)
         .ok_or(BoxPlaneError3d::ArithmeticOverflow)?;
 
-    let contact = if lowest_y < config.plane_y {
-        let correction = config
-            .plane_y
-            .checked_sub(lowest_y)
-            .ok_or(BoxPlaneError3d::ArithmeticOverflow)?;
-        next.center.y = next
-            .center
-            .y
-            .checked_add(correction)
-            .ok_or(BoxPlaneError3d::ArithmeticOverflow)?;
-
-        let (contact_offset, manifold_vertices) = lowest_manifold_offset(&offsets, minimum_offset_y)?;
-        let point = Position::new3(
-            next.center
-                .x
-                .checked_add(contact_offset[0])
-                .ok_or(BoxPlaneError3d::ArithmeticOverflow)?,
-            config.plane_y,
-            next.center
-                .z
-                .checked_add(contact_offset[2])
-                .ok_or(BoxPlaneError3d::ArithmeticOverflow)?,
-        );
-        let contact_velocity = contact_velocity(next, contact_offset)?;
-        let impulse = if contact_velocity[1] < 0 {
-            normal_impulse(body, orientation, contact_offset, contact_velocity[1], config)?
-        } else {
-            0
-        };
-        if impulse > 0 {
-            apply_normal_impulse(&mut next, body, contact_offset, impulse)?;
-        }
-        Some(BoxPlaneContact3d {
-            point,
-            manifold_vertices,
-            normal_impulse_units: impulse,
-        })
+    let contact = if lowest_world_y < config.plane_y {
+        Some(resolve_plane_contact(
+            &mut next,
+            body,
+            config,
+            offsets,
+            minimum_y,
+            lowest_world_y,
+        )?)
     } else {
         None
     };
@@ -260,27 +189,24 @@ pub fn oriented_box_vertices(
     orientation: Orientation3d,
 ) -> Result<[Position; 8], BoxPlaneError3d> {
     let offsets = oriented_box_offsets(half_extents, orientation)?;
-    let vertices = offsets.map(|offset| {
-        Ok(Position::new3(
+    let mut vertices = [Position::new3(0, 0, 0); 8];
+    for index in 0..8 {
+        vertices[index] = Position::new3(
             center
                 .x
-                .checked_add(offset[0])
+                .checked_add(offsets[index][0])
                 .ok_or(BoxPlaneError3d::ArithmeticOverflow)?,
             center
                 .y
-                .checked_add(offset[1])
+                .checked_add(offsets[index][1])
                 .ok_or(BoxPlaneError3d::ArithmeticOverflow)?,
             center
                 .z
-                .checked_add(offset[2])
+                .checked_add(offsets[index][2])
                 .ok_or(BoxPlaneError3d::ArithmeticOverflow)?,
-        ))
-    });
-    vertices
-        .into_iter()
-        .collect::<Result<Vec<_>, _>>()?
-        .try_into()
-        .map_err(|_| BoxPlaneError3d::ArithmeticOverflow)
+        );
+    }
+    Ok(vertices)
 }
 
 fn validate(body: PhysicsBody3d, config: BoxPlaneConfig3d) -> Result<(), BoxPlaneError3d> {
@@ -311,18 +237,69 @@ fn validate(body: PhysicsBody3d, config: BoxPlaneConfig3d) -> Result<(), BoxPlan
     Ok(())
 }
 
+fn integrate_linear_velocity(
+    velocity: Velocity,
+    config: BoxPlaneConfig3d,
+) -> Result<Velocity, BoxPlaneError3d> {
+    Ok(Velocity::new3(
+        integrate_velocity_axis(
+            velocity.x,
+            config.gravity.x,
+            config.timestep_numerator,
+            config.timestep_denominator,
+        )?,
+        integrate_velocity_axis(
+            velocity.y,
+            config.gravity.y,
+            config.timestep_numerator,
+            config.timestep_denominator,
+        )?,
+        integrate_velocity_axis(
+            velocity.z,
+            config.gravity.z,
+            config.timestep_numerator,
+            config.timestep_denominator,
+        )?,
+    ))
+}
+
+fn integrate_center(
+    center: Position,
+    velocity: Velocity,
+    config: BoxPlaneConfig3d,
+) -> Result<Position, BoxPlaneError3d> {
+    Ok(Position::new3(
+        integrate_position_axis(
+            center.x,
+            velocity.x,
+            config.timestep_numerator,
+            config.timestep_denominator,
+        )?,
+        integrate_position_axis(
+            center.y,
+            velocity.y,
+            config.timestep_numerator,
+            config.timestep_denominator,
+        )?,
+        integrate_position_axis(
+            center.z,
+            velocity.z,
+            config.timestep_numerator,
+            config.timestep_denominator,
+        )?,
+    ))
+}
+
 fn integrate_velocity_axis(
     velocity: i32,
     acceleration: i32,
     numerator: i32,
     denominator: i32,
 ) -> Result<i32, BoxPlaneError3d> {
-    let delta = div_round_nearest(
-        i128::from(acceleration)
-            .checked_mul(i128::from(numerator))
-            .ok_or(BoxPlaneError3d::ArithmeticOverflow)?,
-        i128::from(denominator),
-    )?;
+    let acceleration_step = i128::from(acceleration)
+        .checked_mul(i128::from(numerator))
+        .ok_or(BoxPlaneError3d::ArithmeticOverflow)?;
+    let delta = div_round_nearest(acceleration_step, i128::from(denominator))?;
     let next = i128::from(velocity)
         .checked_add(delta)
         .ok_or(BoxPlaneError3d::ArithmeticOverflow)?;
@@ -335,12 +312,10 @@ fn integrate_position_axis(
     numerator: i32,
     denominator: i32,
 ) -> Result<i64, BoxPlaneError3d> {
-    let delta = div_round_nearest(
-        i128::from(velocity)
-            .checked_mul(i128::from(numerator))
-            .ok_or(BoxPlaneError3d::ArithmeticOverflow)?,
-        i128::from(denominator),
-    )?;
+    let velocity_step = i128::from(velocity)
+        .checked_mul(i128::from(numerator))
+        .ok_or(BoxPlaneError3d::ArithmeticOverflow)?;
+    let delta = div_round_nearest(velocity_step, i128::from(denominator))?;
     let next = i128::from(position)
         .checked_add(delta)
         .ok_or(BoxPlaneError3d::ArithmeticOverflow)?;
@@ -354,10 +329,10 @@ fn oriented_box_offsets(
     if half_extents.iter().any(|extent| *extent <= 0) {
         return Err(BoxPlaneError3d::InvalidHalfExtents);
     }
-    let orientation = orientation.normalized()?;
-    let matrix = rotation_matrix(orientation)?;
+    let matrix = rotation_matrix(orientation.normalized()?)?;
     let mut offsets = [[0_i64; 3]; 8];
-    for (index, signs) in CORNER_SIGNS.into_iter().enumerate() {
+    for index in 0..8 {
+        let signs = CORNER_SIGNS[index];
         let local = [
             signs[0] * i64::from(half_extents[0]),
             signs[1] * i64::from(half_extents[1]),
@@ -375,95 +350,75 @@ fn rotation_matrix(orientation: Orientation3d) -> Result<[[i128; 3]; 3], BoxPlan
     let w = i128::from(orientation.w);
     let scale = i128::from(ORIENTATION_SCALE);
 
-    let xx = x.checked_mul(x).ok_or(BoxPlaneError3d::ArithmeticOverflow)?;
-    let yy = y.checked_mul(y).ok_or(BoxPlaneError3d::ArithmeticOverflow)?;
-    let zz = z.checked_mul(z).ok_or(BoxPlaneError3d::ArithmeticOverflow)?;
-    let xy = x.checked_mul(y).ok_or(BoxPlaneError3d::ArithmeticOverflow)?;
-    let xz = x.checked_mul(z).ok_or(BoxPlaneError3d::ArithmeticOverflow)?;
-    let yz = y.checked_mul(z).ok_or(BoxPlaneError3d::ArithmeticOverflow)?;
-    let xw = x.checked_mul(w).ok_or(BoxPlaneError3d::ArithmeticOverflow)?;
-    let yw = y.checked_mul(w).ok_or(BoxPlaneError3d::ArithmeticOverflow)?;
-    let zw = z.checked_mul(w).ok_or(BoxPlaneError3d::ArithmeticOverflow)?;
+    let xx = checked_mul(x, x)?;
+    let yy = checked_mul(y, y)?;
+    let zz = checked_mul(z, z)?;
+    let xy = checked_mul(x, y)?;
+    let xz = checked_mul(x, z)?;
+    let yz = checked_mul(y, z)?;
+    let xw = checked_mul(x, w)?;
+    let yw = checked_mul(y, w)?;
+    let zw = checked_mul(z, w)?;
 
-    let two = 2_i128;
     Ok([
         [
             scale
-                .checked_sub(div_round_nearest(
-                    two.checked_mul(yy.checked_add(zz).ok_or(BoxPlaneError3d::ArithmeticOverflow)?)
-                        .ok_or(BoxPlaneError3d::ArithmeticOverflow)?,
-                    scale,
-                )?)
+                .checked_sub(scaled_twice(checked_add(yy, zz)?, scale)?)
                 .ok_or(BoxPlaneError3d::ArithmeticOverflow)?,
-            div_round_nearest(
-                two.checked_mul(xy.checked_sub(zw).ok_or(BoxPlaneError3d::ArithmeticOverflow)?)
-                    .ok_or(BoxPlaneError3d::ArithmeticOverflow)?,
-                scale,
-            )?,
-            div_round_nearest(
-                two.checked_mul(xz.checked_add(yw).ok_or(BoxPlaneError3d::ArithmeticOverflow)?)
-                    .ok_or(BoxPlaneError3d::ArithmeticOverflow)?,
-                scale,
-            )?,
+            scaled_twice(checked_sub(xy, zw)?, scale)?,
+            scaled_twice(checked_add(xz, yw)?, scale)?,
         ],
         [
-            div_round_nearest(
-                two.checked_mul(xy.checked_add(zw).ok_or(BoxPlaneError3d::ArithmeticOverflow)?)
-                    .ok_or(BoxPlaneError3d::ArithmeticOverflow)?,
-                scale,
-            )?,
+            scaled_twice(checked_add(xy, zw)?, scale)?,
             scale
-                .checked_sub(div_round_nearest(
-                    two.checked_mul(xx.checked_add(zz).ok_or(BoxPlaneError3d::ArithmeticOverflow)?)
-                        .ok_or(BoxPlaneError3d::ArithmeticOverflow)?,
-                    scale,
-                )?)
+                .checked_sub(scaled_twice(checked_add(xx, zz)?, scale)?)
                 .ok_or(BoxPlaneError3d::ArithmeticOverflow)?,
-            div_round_nearest(
-                two.checked_mul(yz.checked_sub(xw).ok_or(BoxPlaneError3d::ArithmeticOverflow)?)
-                    .ok_or(BoxPlaneError3d::ArithmeticOverflow)?,
-                scale,
-            )?,
+            scaled_twice(checked_sub(yz, xw)?, scale)?,
         ],
         [
-            div_round_nearest(
-                two.checked_mul(xz.checked_sub(yw).ok_or(BoxPlaneError3d::ArithmeticOverflow)?)
-                    .ok_or(BoxPlaneError3d::ArithmeticOverflow)?,
-                scale,
-            )?,
-            div_round_nearest(
-                two.checked_mul(yz.checked_add(xw).ok_or(BoxPlaneError3d::ArithmeticOverflow)?)
-                    .ok_or(BoxPlaneError3d::ArithmeticOverflow)?,
-                scale,
-            )?,
+            scaled_twice(checked_sub(xz, yw)?, scale)?,
+            scaled_twice(checked_add(yz, xw)?, scale)?,
             scale
-                .checked_sub(div_round_nearest(
-                    two.checked_mul(xx.checked_add(yy).ok_or(BoxPlaneError3d::ArithmeticOverflow)?)
-                        .ok_or(BoxPlaneError3d::ArithmeticOverflow)?,
-                    scale,
-                )?)
+                .checked_sub(scaled_twice(checked_add(xx, yy)?, scale)?)
                 .ok_or(BoxPlaneError3d::ArithmeticOverflow)?,
         ],
     ])
+}
+
+fn scaled_twice(value: i128, scale: i128) -> Result<i128, BoxPlaneError3d> {
+    let doubled = value
+        .checked_mul(2)
+        .ok_or(BoxPlaneError3d::ArithmeticOverflow)?;
+    div_round_nearest(doubled, scale)
+}
+
+fn checked_mul(left: i128, right: i128) -> Result<i128, BoxPlaneError3d> {
+    left.checked_mul(right)
+        .ok_or(BoxPlaneError3d::ArithmeticOverflow)
+}
+
+fn checked_add(left: i128, right: i128) -> Result<i128, BoxPlaneError3d> {
+    left.checked_add(right)
+        .ok_or(BoxPlaneError3d::ArithmeticOverflow)
+}
+
+fn checked_sub(left: i128, right: i128) -> Result<i128, BoxPlaneError3d> {
+    left.checked_sub(right)
+        .ok_or(BoxPlaneError3d::ArithmeticOverflow)
 }
 
 fn rotate_with_matrix(
     matrix: [[i128; 3]; 3],
     vector: [i64; 3],
 ) -> Result<[i64; 3], BoxPlaneError3d> {
-    let scale = i128::from(ORIENTATION_SCALE);
     let mut output = [0_i64; 3];
+    let scale = i128::from(ORIENTATION_SCALE);
     for row in 0..3 {
-        let value = matrix[row]
-            .into_iter()
-            .zip(vector)
-            .try_fold(0_i128, |sum, (coefficient, component)| {
-                coefficient
-                    .checked_mul(i128::from(component))
-                    .and_then(|term| sum.checked_add(term))
-                    .ok_or(BoxPlaneError3d::ArithmeticOverflow)
-            })?;
-        output[row] = i64::try_from(div_round_nearest(value, scale)?)
+        let first = checked_mul(matrix[row][0], i128::from(vector[0]))?;
+        let second = checked_mul(matrix[row][1], i128::from(vector[1]))?;
+        let third = checked_mul(matrix[row][2], i128::from(vector[2]))?;
+        let sum = checked_add(checked_add(first, second)?, third)?;
+        output[row] = i64::try_from(div_round_nearest(sum, scale)?)
             .map_err(|_| BoxPlaneError3d::ArithmeticOverflow)?;
     }
     Ok(output)
@@ -482,38 +437,103 @@ fn rotate_inverse(
     rotate_with_matrix(transposed, vector)
 }
 
+fn lowest_offset_y(offsets: &[[i64; 3]; 8]) -> i64 {
+    let mut minimum = offsets[0][1];
+    for offset in &offsets[1..] {
+        minimum = minimum.min(offset[1]);
+    }
+    minimum
+}
+
+fn resolve_plane_contact(
+    state: &mut BoxPlaneState3d,
+    body: PhysicsBody3d,
+    config: BoxPlaneConfig3d,
+    offsets: [[i64; 3]; 8],
+    minimum_y: i64,
+    lowest_world_y: i64,
+) -> Result<BoxPlaneContact3d, BoxPlaneError3d> {
+    let correction = config
+        .plane_y
+        .checked_sub(lowest_world_y)
+        .ok_or(BoxPlaneError3d::ArithmeticOverflow)?;
+    state.center.y = state
+        .center
+        .y
+        .checked_add(correction)
+        .ok_or(BoxPlaneError3d::ArithmeticOverflow)?;
+
+    let (contact_offset, manifold_vertices) = lowest_manifold_offset(&offsets, minimum_y)?;
+    let point = Position::new3(
+        state
+            .center
+            .x
+            .checked_add(contact_offset[0])
+            .ok_or(BoxPlaneError3d::ArithmeticOverflow)?,
+        config.plane_y,
+        state
+            .center
+            .z
+            .checked_add(contact_offset[2])
+            .ok_or(BoxPlaneError3d::ArithmeticOverflow)?,
+    );
+    let contact_velocity = contact_velocity(*state, contact_offset)?;
+    let impulse = if contact_velocity[1] < 0 {
+        normal_impulse(
+            body,
+            state.angular.orientation,
+            contact_offset,
+            contact_velocity[1],
+            config,
+        )?
+    } else {
+        0
+    };
+    if impulse > 0 {
+        apply_normal_impulse(state, body, contact_offset, impulse)?;
+    }
+
+    Ok(BoxPlaneContact3d {
+        point,
+        manifold_vertices,
+        normal_impulse_units: impulse,
+    })
+}
+
 fn lowest_manifold_offset(
     offsets: &[[i64; 3]; 8],
     minimum_y: i64,
 ) -> Result<([i64; 3], u8), BoxPlaneError3d> {
-    let selected = offsets
-        .iter()
-        .copied()
-        .filter(|offset| offset[1] == minimum_y)
-        .collect::<Vec<_>>();
-    let count = i128::try_from(selected.len()).map_err(|_| BoxPlaneError3d::ArithmeticOverflow)?;
-    if count == 0 {
-        return Err(BoxPlaneError3d::ArithmeticOverflow);
-    }
     let mut sum = [0_i128; 3];
-    for offset in &selected {
+    let mut count = 0_u8;
+    for offset in offsets {
+        if offset[1] != minimum_y {
+            continue;
+        }
+        count = count
+            .checked_add(1)
+            .ok_or(BoxPlaneError3d::ArithmeticOverflow)?;
         for axis in 0..3 {
             sum[axis] = sum[axis]
                 .checked_add(i128::from(offset[axis]))
                 .ok_or(BoxPlaneError3d::ArithmeticOverflow)?;
         }
     }
-    let averaged = [
-        i64::try_from(div_round_nearest(sum[0], count)?)
-            .map_err(|_| BoxPlaneError3d::ArithmeticOverflow)?,
-        i64::try_from(div_round_nearest(sum[1], count)?)
-            .map_err(|_| BoxPlaneError3d::ArithmeticOverflow)?,
-        i64::try_from(div_round_nearest(sum[2], count)?)
-            .map_err(|_| BoxPlaneError3d::ArithmeticOverflow)?,
-    ];
-    let manifold_vertices =
-        u8::try_from(selected.len()).map_err(|_| BoxPlaneError3d::ArithmeticOverflow)?;
-    Ok((averaged, manifold_vertices))
+    if count == 0 {
+        return Err(BoxPlaneError3d::ArithmeticOverflow);
+    }
+    let divisor = i128::from(count);
+    Ok((
+        [
+            i64::try_from(div_round_nearest(sum[0], divisor)?)
+                .map_err(|_| BoxPlaneError3d::ArithmeticOverflow)?,
+            i64::try_from(div_round_nearest(sum[1], divisor)?)
+                .map_err(|_| BoxPlaneError3d::ArithmeticOverflow)?,
+            i64::try_from(div_round_nearest(sum[2], divisor)?)
+                .map_err(|_| BoxPlaneError3d::ArithmeticOverflow)?,
+        ],
+        count,
+    ))
 }
 
 fn contact_velocity(
@@ -521,41 +541,37 @@ fn contact_velocity(
     offset: [i64; 3],
 ) -> Result<[i64; 3], BoxPlaneError3d> {
     let omega = state.angular.angular_velocity;
-    let rotational = [
-        i128::from(omega.y)
-            .checked_mul(i128::from(offset[2]))
-            .and_then(|value| value.checked_sub(i128::from(omega.z) * i128::from(offset[1])))
-            .ok_or(BoxPlaneError3d::ArithmeticOverflow)?,
-        i128::from(omega.z)
-            .checked_mul(i128::from(offset[0]))
-            .and_then(|value| value.checked_sub(i128::from(omega.x) * i128::from(offset[2])))
-            .ok_or(BoxPlaneError3d::ArithmeticOverflow)?,
-        i128::from(omega.x)
-            .checked_mul(i128::from(offset[1]))
-            .and_then(|value| value.checked_sub(i128::from(omega.y) * i128::from(offset[0])))
-            .ok_or(BoxPlaneError3d::ArithmeticOverflow)?,
-    ];
+    let rotation_x = checked_sub(
+        checked_mul(i128::from(omega.y), i128::from(offset[2]))?,
+        checked_mul(i128::from(omega.z), i128::from(offset[1]))?,
+    )?;
+    let rotation_y = checked_sub(
+        checked_mul(i128::from(omega.z), i128::from(offset[0]))?,
+        checked_mul(i128::from(omega.x), i128::from(offset[2]))?,
+    )?;
+    let rotation_z = checked_sub(
+        checked_mul(i128::from(omega.x), i128::from(offset[1]))?,
+        checked_mul(i128::from(omega.y), i128::from(offset[0]))?,
+    )?;
     let scale = i128::from(ANGULAR_VELOCITY_SCALE);
+
     Ok([
-        i64::from(state.linear_velocity.x)
-            .checked_add(
-                i64::try_from(div_round_nearest(rotational[0], scale)?)
-                    .map_err(|_| BoxPlaneError3d::ArithmeticOverflow)?,
-            )
-            .ok_or(BoxPlaneError3d::ArithmeticOverflow)?,
-        i64::from(state.linear_velocity.y)
-            .checked_add(
-                i64::try_from(div_round_nearest(rotational[1], scale)?)
-                    .map_err(|_| BoxPlaneError3d::ArithmeticOverflow)?,
-            )
-            .ok_or(BoxPlaneError3d::ArithmeticOverflow)?,
-        i64::from(state.linear_velocity.z)
-            .checked_add(
-                i64::try_from(div_round_nearest(rotational[2], scale)?)
-                    .map_err(|_| BoxPlaneError3d::ArithmeticOverflow)?,
-            )
-            .ok_or(BoxPlaneError3d::ArithmeticOverflow)?,
+        add_linear_rotation(state.linear_velocity.x, rotation_x, scale)?,
+        add_linear_rotation(state.linear_velocity.y, rotation_y, scale)?,
+        add_linear_rotation(state.linear_velocity.z, rotation_z, scale)?,
     ])
+}
+
+fn add_linear_rotation(
+    linear: i32,
+    rotational_numerator: i128,
+    scale: i128,
+) -> Result<i64, BoxPlaneError3d> {
+    let rotational = i64::try_from(div_round_nearest(rotational_numerator, scale)?)
+        .map_err(|_| BoxPlaneError3d::ArithmeticOverflow)?;
+    i64::from(linear)
+        .checked_add(rotational)
+        .ok_or(BoxPlaneError3d::ArithmeticOverflow)
 }
 
 fn normal_impulse(
@@ -566,28 +582,26 @@ fn normal_impulse(
     config: BoxPlaneConfig3d,
 ) -> Result<i64, BoxPlaneError3d> {
     let inertia = box_inertia(body)?;
-    let r_cross_n = [-contact_offset[2], 0, contact_offset[0]];
-    let local = rotate_inverse(orientation, r_cross_n)?;
+    let local = rotate_inverse(
+        orientation,
+        [-contact_offset[2], 0, contact_offset[0]],
+    )?;
     let mut rotational_term_scaled = 0_i128;
-    for (axis, component) in local.into_iter().enumerate() {
-        let inverse_inertia = inverse_inertia_scaled(inertia.principal_numerators[axis], inertia.denominator)?;
-        let component_squared = i128::from(component)
-            .checked_mul(i128::from(component))
-            .ok_or(BoxPlaneError3d::ArithmeticOverflow)?;
-        rotational_term_scaled = rotational_term_scaled
-            .checked_add(
-                component_squared
-                    .checked_mul(inverse_inertia)
-                    .ok_or(BoxPlaneError3d::ArithmeticOverflow)?,
-            )
-            .ok_or(BoxPlaneError3d::ArithmeticOverflow)?;
+    for axis in 0..3 {
+        let inverse_inertia = inverse_inertia_scaled(
+            inertia.principal_numerators[axis],
+            inertia.denominator,
+        )?;
+        let component = i128::from(local[axis]);
+        let component_squared = checked_mul(component, component)?;
+        rotational_term_scaled = checked_add(
+            rotational_term_scaled,
+            checked_mul(component_squared, inverse_inertia)?,
+        )?;
     }
-    let inverse_mass_scaled = RESPONSE_SCALE
-        .checked_div(i128::from(body.mass_units))
-        .ok_or(BoxPlaneError3d::ArithmeticOverflow)?;
-    let effective_inverse_mass = inverse_mass_scaled
-        .checked_add(rotational_term_scaled)
-        .ok_or(BoxPlaneError3d::ArithmeticOverflow)?;
+
+    let inverse_mass_scaled = RESPONSE_SCALE / i128::from(body.mass_units);
+    let effective_inverse_mass = checked_add(inverse_mass_scaled, rotational_term_scaled)?;
     if effective_inverse_mass <= 0 {
         return Err(BoxPlaneError3d::ArithmeticOverflow);
     }
@@ -599,13 +613,9 @@ fn normal_impulse(
     let closing_speed = i128::from(normal_velocity)
         .checked_neg()
         .ok_or(BoxPlaneError3d::ArithmeticOverflow)?;
-    let numerator = closing_speed
-        .checked_mul(i128::from(MATERIAL_SCALE) + i128::from(restitution))
-        .and_then(|value| value.checked_mul(RESPONSE_SCALE))
-        .ok_or(BoxPlaneError3d::ArithmeticOverflow)?;
-    let denominator = i128::from(MATERIAL_SCALE)
-        .checked_mul(effective_inverse_mass)
-        .ok_or(BoxPlaneError3d::ArithmeticOverflow)?;
+    let bounce_scale = i128::from(MATERIAL_SCALE) + i128::from(restitution);
+    let numerator = checked_mul(checked_mul(closing_speed, bounce_scale)?, RESPONSE_SCALE)?;
+    let denominator = checked_mul(i128::from(MATERIAL_SCALE), effective_inverse_mass)?;
     i64::try_from(div_round_nearest(numerator, denominator)?)
         .map_err(|_| BoxPlaneError3d::ArithmeticOverflow)
 }
@@ -617,12 +627,9 @@ fn inverse_inertia_scaled(
     if principal_numerator == 0 {
         return Err(BoxPlaneError3d::ArithmeticOverflow);
     }
-    let numerator = RESPONSE_SCALE
-        .checked_mul(i128::from(denominator))
-        .ok_or(BoxPlaneError3d::ArithmeticOverflow)?;
     let principal = i128::try_from(principal_numerator)
         .map_err(|_| BoxPlaneError3d::ArithmeticOverflow)?;
-    Ok(numerator / principal)
+    Ok(checked_mul(RESPONSE_SCALE, i128::from(denominator))? / principal)
 }
 
 fn apply_normal_impulse(
@@ -639,24 +646,27 @@ fn apply_normal_impulse(
         i32::try_from(next_linear_y).map_err(|_| BoxPlaneError3d::ArithmeticOverflow)?;
 
     let angular_impulse = contact_angular_impulse(contact_offset, [0, impulse, 0])?;
-    let angular_impulse_i64 = angular_impulse
-        .map(|component| i64::try_from(component).map_err(|_| BoxPlaneError3d::ArithmeticOverflow))
-        .into_iter()
-        .collect::<Result<Vec<_>, _>>()?
-        .try_into()
-        .map_err(|_| BoxPlaneError3d::ArithmeticOverflow)?;
-    let local_impulse = rotate_inverse(state.angular.orientation, angular_impulse_i64)?;
+    let angular_impulse_world = [
+        i64::try_from(angular_impulse[0]).map_err(|_| BoxPlaneError3d::ArithmeticOverflow)?,
+        i64::try_from(angular_impulse[1]).map_err(|_| BoxPlaneError3d::ArithmeticOverflow)?,
+        i64::try_from(angular_impulse[2]).map_err(|_| BoxPlaneError3d::ArithmeticOverflow)?,
+    ];
+    let local_impulse = rotate_inverse(state.angular.orientation, angular_impulse_world)?;
     let inertia = box_inertia(body)?;
     let mut local_delta = [0_i64; 3];
     for axis in 0..3 {
-        let inverse_inertia = inverse_inertia_scaled(inertia.principal_numerators[axis], inertia.denominator)?;
-        let numerator = i128::from(local_impulse[axis])
-            .checked_mul(inverse_inertia)
-            .and_then(|value| value.checked_mul(i128::from(ANGULAR_VELOCITY_SCALE)))
-            .ok_or(BoxPlaneError3d::ArithmeticOverflow)?;
+        let inverse_inertia = inverse_inertia_scaled(
+            inertia.principal_numerators[axis],
+            inertia.denominator,
+        )?;
+        let numerator = checked_mul(
+            checked_mul(i128::from(local_impulse[axis]), inverse_inertia)?,
+            i128::from(ANGULAR_VELOCITY_SCALE),
+        )?;
         local_delta[axis] = i64::try_from(div_round_nearest(numerator, RESPONSE_SCALE)?)
             .map_err(|_| BoxPlaneError3d::ArithmeticOverflow)?;
     }
+
     let world_delta = rotate_with_matrix(rotation_matrix(state.angular.orientation)?, local_delta)?;
     state.angular.angular_velocity = AngularVelocity3d::new(
         add_angular_axis(state.angular.angular_velocity.x, world_delta[0])?,
@@ -680,13 +690,16 @@ fn damp_angular_velocity(
     let scale = i128::from(MATERIAL_SCALE);
     let damping = i128::from(damping_milli);
     Ok(AngularVelocity3d::new(
-        i32::try_from(div_round_nearest(i128::from(velocity.x) * damping, scale)?)
-            .map_err(|_| BoxPlaneError3d::ArithmeticOverflow)?,
-        i32::try_from(div_round_nearest(i128::from(velocity.y) * damping, scale)?)
-            .map_err(|_| BoxPlaneError3d::ArithmeticOverflow)?,
-        i32::try_from(div_round_nearest(i128::from(velocity.z) * damping, scale)?)
-            .map_err(|_| BoxPlaneError3d::ArithmeticOverflow)?,
+        damp_axis(velocity.x, damping, scale)?,
+        damp_axis(velocity.y, damping, scale)?,
+        damp_axis(velocity.z, damping, scale)?,
     ))
+}
+
+fn damp_axis(value: i32, damping: i128, scale: i128) -> Result<i32, BoxPlaneError3d> {
+    let numerator = checked_mul(i128::from(value), damping)?;
+    i32::try_from(div_round_nearest(numerator, scale)?)
+        .map_err(|_| BoxPlaneError3d::ArithmeticOverflow)
 }
 
 fn div_round_nearest(numerator: i128, denominator: i128) -> Result<i128, BoxPlaneError3d> {
