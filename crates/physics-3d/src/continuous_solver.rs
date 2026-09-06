@@ -84,11 +84,7 @@ pub fn step_3d(
     let mut event_count = 0_usize;
 
     while remaining_subticks > 0 {
-        let event_set = find_earliest_event_set(
-            &body_states,
-            remaining_subticks,
-            &mut step_stats,
-        )?;
+        let event_set = find_earliest_event_set(&body_states, remaining_subticks, &mut step_stats)?;
         let Some(event_set) = event_set else {
             advance_all(&mut body_states, remaining_subticks)?;
             break;
@@ -519,7 +515,8 @@ fn sweep_pair(
     for axis in Axis::ALL {
         let relative_position = left.position.axis(axis) - right.position.axis(axis);
         let (minimum, maximum) = expanded_relative_bounds(left, right, axis);
-        let relative_velocity = i64::from(left.axis_velocity(axis)) - i64::from(right.axis_velocity(axis));
+        let relative_velocity =
+            i64::from(left.axis_velocity(axis)) - i64::from(right.axis_velocity(axis));
         if relative_velocity == 0 {
             if relative_position < minimum || relative_position > maximum {
                 return Ok(Vec::new());
@@ -601,7 +598,8 @@ fn temporal_broad_phase_overlaps(
 ) -> Result<bool, PhysicsError3d> {
     for axis in Axis::ALL {
         let start = left.position.axis(axis) - right.position.axis(axis);
-        let relative_velocity = i64::from(left.axis_velocity(axis)) - i64::from(right.axis_velocity(axis));
+        let relative_velocity =
+            i64::from(left.axis_velocity(axis)) - i64::from(right.axis_velocity(axis));
         let delta = i128::from(relative_velocity)
             .checked_mul(remaining_subticks)
             .ok_or(PhysicsError3d::CoordinateOutOfRange(left.entity))?;
@@ -662,10 +660,7 @@ fn project_contact_set(states: &mut [BodyState], hits: &[SweepHit]) -> Result<()
     ))
 }
 
-fn snap_pair_to_contact(
-    states: &mut [BodyState],
-    hit: SweepHit,
-) -> Result<bool, PhysicsError3d> {
+fn snap_pair_to_contact(states: &mut [BodyState], hit: SweepHit) -> Result<bool, PhysicsError3d> {
     let (left_slice, right_slice) = states.split_at_mut(hit.right_index);
     let left = &mut left_slice[hit.left_index];
     let right = &mut right_slice[0];
@@ -694,8 +689,7 @@ fn snap_pair_to_contact(
 }
 
 fn pair_contact_is_exact(states: &[BodyState], hit: SweepHit) -> bool {
-    states[hit.left_index].position.axis(hit.axis)
-        - states[hit.right_index].position.axis(hit.axis)
+    states[hit.left_index].position.axis(hit.axis) - states[hit.right_index].position.axis(hit.axis)
         == hit.target_relative
 }
 
@@ -720,7 +714,11 @@ fn resolve_contact_set(
         resolved[index] |= friction_a || friction_b;
     }
 
-    if hits.iter().copied().any(|hit| pair_is_approaching(states, hit)) {
+    if hits
+        .iter()
+        .copied()
+        .any(|hit| pair_is_approaching(states, hit))
+    {
         solve_contact_normals(states, hits, &mut resolved, false)?;
     }
 
@@ -770,7 +768,11 @@ fn solve_contact_normals(
             changed_any |= changed;
         }
 
-        if !hits.iter().copied().any(|hit| pair_is_approaching(states, hit)) {
+        if !hits
+            .iter()
+            .copied()
+            .any(|hit| pair_is_approaching(states, hit))
+        {
             return Ok(());
         }
         if !changed_any {
