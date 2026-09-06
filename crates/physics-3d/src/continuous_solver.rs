@@ -75,18 +75,15 @@ pub fn step_3d(
     let mut remaining_subticks = i128::from(ticks)
         .checked_mul(SUBTICK_SCALE)
         .ok_or_else(|| arithmetic_error(&body_states))?;
-    let max_events = body_count.saturating_mul(CCD_EVENTS_PER_BODY).max(CCD_EVENTS_PER_BODY);
+    let max_events = body_count
+        .saturating_mul(CCD_EVENTS_PER_BODY)
+        .max(CCD_EVENTS_PER_BODY);
     let mut event_count = 0_usize;
 
     while remaining_subticks > 0 {
-        let hit = find_earliest_hit(
-            &body_states,
-            remaining_subticks,
-            &mut step_stats,
-        )?;
+        let hit = find_earliest_hit(&body_states, remaining_subticks, &mut step_stats)?;
         let Some(hit) = hit else {
             advance_all(&mut body_states, remaining_subticks)?;
-            remaining_subticks = 0;
             break;
         };
 
@@ -109,7 +106,7 @@ pub fn step_3d(
             &mut step_stats,
             &mut contacts,
             &mut supporting_entities,
-        )?;
+        );
         event_count = event_count.saturating_add(1);
     }
 
@@ -427,7 +424,7 @@ impl SweepHit {
 fn find_earliest_hit(
     states: &[BodyState],
     remaining_subticks: i128,
-    stats: &mut PhysicsStep3dStats,
+    step_stats: &mut PhysicsStep3dStats,
 ) -> Result<Option<SweepHit>, PhysicsError3d> {
     let mut earliest: Option<SweepHit> = None;
     for left_index in 0..states.len() {
@@ -437,13 +434,8 @@ fn find_earliest_hit(
             {
                 continue;
             }
-            stats.ccd_candidate_pairs = stats.ccd_candidate_pairs.saturating_add(1);
-            let Some(hit) = sweep_pair(
-                states,
-                left_index,
-                right_index,
-                remaining_subticks,
-            )? else {
+            step_stats.ccd_candidate_pairs = step_stats.ccd_candidate_pairs.saturating_add(1);
+            let Some(hit) = sweep_pair(states, left_index, right_index, remaining_subticks)? else {
                 continue;
             };
             let replace = match earliest {
@@ -646,14 +638,13 @@ fn snap_pair_to_contact(states: &mut [BodyState], hit: SweepHit) -> Result<(), P
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn resolve_sweep_hit(
     states: &mut [BodyState],
     hit: SweepHit,
-    stats: &mut PhysicsStep3dStats,
+    step_stats: &mut PhysicsStep3dStats,
     contacts: &mut Vec<PhysicsContact3d>,
     supporting_entities: &mut BTreeSet<EntityId>,
-) -> Result<(), PhysicsError3d> {
+) {
     let (left_slice, right_slice) = states.split_at_mut(hit.right_index);
     let left = &mut left_slice[hit.left_index];
     let right = &mut right_slice[0];
@@ -670,20 +661,19 @@ fn resolve_sweep_hit(
         normal: contact_normal(hit.axis, hit.normal),
         penetration: 0,
     });
-    stats.contacts = stats.contacts.saturating_add(1);
-    stats.ccd_contacts = stats.ccd_contacts.saturating_add(1);
+    step_stats.contacts = step_stats.contacts.saturating_add(1);
+    step_stats.ccd_contacts = step_stats.ccd_contacts.saturating_add(1);
     if normal_changed || friction_a || friction_b {
-        stats.resolved_contacts = stats.resolved_contacts.saturating_add(1);
+        step_stats.resolved_contacts = step_stats.resolved_contacts.saturating_add(1);
     }
     if let Some(entity) = supported_entity(left, right, hit.axis, hit.normal) {
         supporting_entities.insert(entity);
     }
-    Ok(())
 }
 
 fn stabilize_penetrations(
     states: &mut [BodyState],
-    stats: &mut PhysicsStep3dStats,
+    step_stats: &mut PhysicsStep3dStats,
     contacts: &mut Vec<PhysicsContact3d>,
     supporting_entities: &mut BTreeSet<EntityId>,
 ) -> Result<(), PhysicsError3d> {
@@ -710,7 +700,7 @@ fn stabilize_penetrations(
                     normal,
                 )?;
                 corrected_any |= outcome.resolved;
-                record_pair_outcome(outcome, stats, contacts, supporting_entities);
+                record_pair_outcome(outcome, step_stats, contacts, supporting_entities);
             }
         }
         if !corrected_any {
@@ -797,8 +787,7 @@ fn resolve_penetration_pair(
     let restitution_milli = combined_restitution(left, right);
     let friction_milli = combined_friction(left, right);
     let corrected = correct_penetration(left, right, axis, normal, penetration)?;
-    let normal_changed =
-        approaching && apply_normal_response(left, right, axis, restitution_milli);
+    let normal_changed = approaching && apply_normal_response(left, right, axis, restitution_milli);
     let [tangent_a, tangent_b] = axis.tangents();
     let friction_a = apply_contact_friction(left, right, tangent_a, friction_milli);
     let friction_b = apply_contact_friction(left, right, tangent_b, friction_milli);
@@ -839,11 +828,8 @@ fn correct_penetration(
             Ok(true)
         }
         (BodyKind::Dynamic, BodyKind::Dynamic) => {
-            let (left_share, right_share) = dynamic_penetration_shares(
-                penetration,
-                left.mass_units,
-                right.mass_units,
-            );
+            let (left_share, right_share) =
+                dynamic_penetration_shares(penetration, left.mass_units, right.mass_units);
             left.offset_axis(axis, -direction * left_share)?;
             right.offset_axis(axis, direction * right_share)?;
             Ok(true)
@@ -851,11 +837,7 @@ fn correct_penetration(
     }
 }
 
-fn dynamic_penetration_shares(
-    penetration: i128,
-    left_mass: u32,
-    right_mass: u32,
-) -> (i128, i128) {
+fn dynamic_penetration_shares(penetration: i128, left_mass: u32, right_mass: u32) -> (i128, i128) {
     let total_mass = i128::from(left_mass) + i128::from(right_mass);
     let mut left_share = penetration * i128::from(right_mass) / total_mass;
     let mut right_share = penetration * i128::from(left_mass) / total_mass;
@@ -1200,14 +1182,20 @@ mod tests {
                 .operations()
                 .contains(&Operation::SetVelocity(right, Velocity::new3(30, 0, 0)))
         );
-        let left_position = physics.operations().iter().find_map(|operation| match operation {
-            Operation::SetPosition(entity, position) if *entity == left => Some(*position),
-            _ => None,
-        });
-        let right_position = physics.operations().iter().find_map(|operation| match operation {
-            Operation::SetPosition(entity, position) if *entity == right => Some(*position),
-            _ => None,
-        });
+        let left_position = physics
+            .operations()
+            .iter()
+            .find_map(|operation| match operation {
+                Operation::SetPosition(entity, position) if *entity == left => Some(*position),
+                _ => None,
+            });
+        let right_position = physics
+            .operations()
+            .iter()
+            .find_map(|operation| match operation {
+                Operation::SetPosition(entity, position) if *entity == right => Some(*position),
+                _ => None,
+            });
         assert!(left_position.is_some_and(|position| position.x <= -21));
         assert!(right_position.is_some_and(|position| position.x >= 21));
     }
@@ -1286,8 +1274,14 @@ mod tests {
             .expect("equal-time independent contacts should remain deterministic");
 
         assert!(physics.contacts().len() >= 2);
-        assert_eq!((physics.contacts()[0].left, physics.contacts()[0].right), (EntityId(1), EntityId(2)));
-        assert_eq!((physics.contacts()[1].left, physics.contacts()[1].right), (EntityId(3), EntityId(4)));
+        assert_eq!(
+            (physics.contacts()[0].left, physics.contacts()[0].right),
+            (EntityId(1), EntityId(2))
+        );
+        assert_eq!(
+            (physics.contacts()[1].left, physics.contacts()[1].right),
+            (EntityId(3), EntityId(4))
+        );
     }
 
     #[test]
@@ -1325,6 +1319,9 @@ mod tests {
         .expect("dynamic and fixed events should be ordered on one timeline");
 
         assert!(!physics.contacts().is_empty());
-        assert_eq!((physics.contacts()[0].left, physics.contacts()[0].right), (mover, target));
+        assert_eq!(
+            (physics.contacts()[0].left, physics.contacts()[0].right),
+            (mover, target)
+        );
     }
 }
