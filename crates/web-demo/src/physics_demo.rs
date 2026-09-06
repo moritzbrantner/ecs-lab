@@ -170,9 +170,12 @@ pub extern "C" fn physics_demo_half_extent_z(body_index: u32, steps: u32) -> f32
 
 #[unsafe(no_mangle)]
 pub extern "C" fn physics_demo_is_fixed(body_index: u32, steps: u32) -> u32 {
-    frame_body(body_index, steps).map_or(0, |(body, _)| {
-        if body.kind == BodyKind::Fixed { 1 } else { 0 }
-    })
+    frame_body(body_index, steps).map_or(
+        0,
+        |(body, _)| {
+            if body.kind == BodyKind::Fixed { 1 } else { 0 }
+        },
+    )
 }
 
 #[unsafe(no_mangle)]
@@ -182,14 +185,12 @@ pub extern "C" fn physics_demo_mass_units(body_index: u32, steps: u32) -> u32 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn physics_demo_restitution_milli(body_index: u32, steps: u32) -> u32 {
-    frame_body(body_index, steps)
-        .map_or(0, |(body, _)| u32::from(body.material.restitution_milli))
+    frame_body(body_index, steps).map_or(0, |(body, _)| u32::from(body.material.restitution_milli))
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn physics_demo_friction_milli(body_index: u32, steps: u32) -> u32 {
-    frame_body(body_index, steps)
-        .map_or(0, |(body, _)| u32::from(body.material.friction_milli))
+    frame_body(body_index, steps).map_or(0, |(body, _)| u32::from(body.material.friction_milli))
 }
 
 #[unsafe(no_mangle)]
@@ -234,11 +235,7 @@ pub extern "C" fn physics_demo_overlap_count(steps: u32) -> u32 {
     let Some(frame) = state.ensure_frame(steps) else {
         return 0;
     };
-    frame
-        .pair_words
-        .iter()
-        .map(|word| word.count_ones())
-        .sum()
+    frame.pair_words.iter().map(|word| word.count_ones()).sum()
 }
 
 #[cfg(test)]
