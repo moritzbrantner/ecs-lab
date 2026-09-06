@@ -180,6 +180,10 @@
   padding-top: 1rem;
 }
 
+.time-matrix-panel[hidden] {
+  display: none;
+}
+
 .time-matrix-heading {
   display: grid;
   grid-template-columns: minmax(13rem, 0.55fr) minmax(18rem, 1.45fr);
