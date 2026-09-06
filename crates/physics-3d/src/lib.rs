@@ -2,6 +2,7 @@ mod continuous_solver;
 mod scenario;
 #[allow(dead_code)]
 mod solver;
+mod swept_broad_phase;
 mod types;
 
 pub use continuous_solver::step_3d;
