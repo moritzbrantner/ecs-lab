@@ -1,3 +1,4 @@
+mod angular;
 mod colliders;
 mod continuous_solver;
 mod controller;
@@ -10,6 +11,10 @@ mod solver;
 mod swept_broad_phase;
 mod types;
 
+pub use angular::{
+    ANGULAR_VELOCITY_SCALE, AngularError3d, AngularState3d, AngularVelocity3d, BoxInertia3d,
+    ORIENTATION_SCALE, Orientation3d, box_inertia, contact_angular_impulse, integrate_orientation,
+};
 pub use colliders::{
     Collider3d, ColliderContact3d, ColliderError3d, ColliderShape3d, collider_contact,
 };
