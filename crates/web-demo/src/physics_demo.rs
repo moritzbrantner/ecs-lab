@@ -2,55 +2,104 @@ use std::sync::{Mutex, OnceLock};
 
 use ecs_physics::BodyKind;
 use ecs_physics_3d::{BouncingRoom3dScenario, BroadPhaseBody3d, BroadPhaseFrame3d};
+use ecs_reference::ReferenceWorld;
 
-const PHYSICS_DEMO_MAX_STEPS: u32 = 64;
+const PHYSICS_DEMO_FPS: u32 = 60;
+const PHYSICS_DEMO_SECONDS: u32 = 10;
+const PHYSICS_DEMO_MAX_STEPS: u32 = PHYSICS_DEMO_FPS * PHYSICS_DEMO_SECONDS;
 
-static PHYSICS_DEMO_STATE: OnceLock<Mutex<PhysicsDemoState>> = OnceLock::new();
+static PHYSICS_DEMO_STATE: OnceLock<Mutex<Option<PhysicsDemoState>>> = OnceLock::new();
 
-#[derive(Clone, Debug, PartialEq)]
 struct PhysicsDemoFrame {
-    steps: u32,
     frame: BroadPhaseFrame3d,
+    pair_words: Vec<u32>,
 }
 
-#[derive(Debug, Default)]
 struct PhysicsDemoState {
-    frame: Option<PhysicsDemoFrame>,
+    scenario: BouncingRoom3dScenario,
+    world: ReferenceWorld,
+    frames: Vec<PhysicsDemoFrame>,
+    spatial_scale: i64,
 }
 
-fn build_frame(steps: u32) -> Option<PhysicsDemoFrame> {
-    if steps > PHYSICS_DEMO_MAX_STEPS {
-        return None;
+impl PhysicsDemoState {
+    fn new() -> Option<Self> {
+        let scenario = BouncingRoom3dScenario::with_substeps_per_tick(PHYSICS_DEMO_FPS).ok()?;
+        let spatial_scale = scenario.spatial_scale();
+        let mut world = ReferenceWorld::new();
+        world.replay(scenario.setup()).ok()?;
+        let initial_frame = build_demo_frame(&scenario, &world, spatial_scale)?;
+        Some(Self {
+            scenario,
+            world,
+            frames: vec![initial_frame],
+            spatial_scale,
+        })
     }
-    let frame = BouncingRoom3dScenario::new()
-        .broad_phase_frame_after(steps)
-        .ok()?;
-    Some(PhysicsDemoFrame { steps, frame })
-}
 
-fn demo_state() -> &'static Mutex<PhysicsDemoState> {
-    PHYSICS_DEMO_STATE.get_or_init(|| Mutex::new(PhysicsDemoState::default()))
-}
-
-fn ensure_frame(state: &mut PhysicsDemoState, steps: u32) -> Option<&PhysicsDemoFrame> {
-    let needs_rebuild = state
-        .frame
-        .as_ref()
-        .is_none_or(|frame| frame.steps != steps);
-    if needs_rebuild {
-        state.frame = build_frame(steps);
+    fn ensure_frame(&mut self, steps: u32) -> Option<&PhysicsDemoFrame> {
+        if steps > PHYSICS_DEMO_MAX_STEPS {
+            return None;
+        }
+        let target = usize::try_from(steps).ok()?;
+        while self.frames.len() <= target {
+            let physics = self.scenario.step(&self.world.snapshot()).ok()?;
+            for operation in physics.operations() {
+                self.world.apply(*operation).ok()?;
+            }
+            let frame = build_demo_frame(&self.scenario, &self.world, self.spatial_scale)?;
+            self.frames.push(frame);
+        }
+        self.frames.get(target)
     }
-    state.frame.as_ref()
 }
 
-fn frame_body(body_index: u32, steps: u32) -> Option<BroadPhaseBody3d> {
+fn build_demo_frame(
+    scenario: &BouncingRoom3dScenario,
+    world: &ReferenceWorld,
+    spatial_scale: i64,
+) -> Option<PhysicsDemoFrame> {
+    let frame = scenario.broad_phase_frame(&world.snapshot()).ok()?;
+    let pair_words = frame.pair_words_at_spatial_scale(spatial_scale)?;
+    Some(PhysicsDemoFrame { frame, pair_words })
+}
+
+fn demo_state() -> &'static Mutex<Option<PhysicsDemoState>> {
+    PHYSICS_DEMO_STATE.get_or_init(|| Mutex::new(None))
+}
+
+fn ensure_state(state: &mut Option<PhysicsDemoState>) -> Option<&mut PhysicsDemoState> {
+    if state.is_none() {
+        *state = PhysicsDemoState::new();
+    }
+    state.as_mut()
+}
+
+fn frame_body(body_index: u32, steps: u32) -> Option<(BroadPhaseBody3d, i64)> {
     let index = usize::try_from(body_index).ok()?;
     let mut state = demo_state().lock().ok()?;
-    ensure_frame(&mut state, steps)?
+    let state = ensure_state(&mut state)?;
+    let spatial_scale = state.spatial_scale;
+    let body = state
+        .ensure_frame(steps)?
         .frame
         .bodies()
         .get(index)
-        .copied()
+        .copied()?;
+    Some((body, spatial_scale))
+}
+
+fn display_coordinate(value: i64, spatial_scale: i64) -> f32 {
+    value as f32 / spatial_scale as f32
+}
+
+fn display_extent(value: i32, spatial_scale: i64) -> f32 {
+    value as f32 / spatial_scale as f32
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn physics_demo_fps() -> u32 {
+    PHYSICS_DEMO_FPS
 }
 
 #[unsafe(no_mangle)]
@@ -63,7 +112,10 @@ pub extern "C" fn physics_demo_body_count(steps: u32) -> u32 {
     let Ok(mut state) = demo_state().lock() else {
         return 0;
     };
-    let Some(frame) = ensure_frame(&mut state, steps) else {
+    let Some(state) = ensure_state(&mut state) else {
+        return 0;
+    };
+    let Some(frame) = state.ensure_frame(steps) else {
         return 0;
     };
     u32::try_from(frame.frame.bodies().len()).unwrap_or_default()
@@ -71,63 +123,74 @@ pub extern "C" fn physics_demo_body_count(steps: u32) -> u32 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn physics_demo_entity_id(body_index: u32, steps: u32) -> u32 {
-    frame_body(body_index, steps).map_or(u32::MAX, |body| body.entity.0)
+    frame_body(body_index, steps).map_or(u32::MAX, |(body, _)| body.entity.0)
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn physics_demo_position_x(body_index: u32, steps: u32) -> i32 {
-    frame_body(body_index, steps)
-        .and_then(|body| i32::try_from(body.position.x).ok())
-        .unwrap_or_default()
+pub extern "C" fn physics_demo_position_x(body_index: u32, steps: u32) -> f32 {
+    frame_body(body_index, steps).map_or(0.0, |(body, spatial_scale)| {
+        display_coordinate(body.position.x, spatial_scale)
+    })
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn physics_demo_position_y(body_index: u32, steps: u32) -> i32 {
-    frame_body(body_index, steps)
-        .and_then(|body| i32::try_from(body.position.y).ok())
-        .unwrap_or_default()
+pub extern "C" fn physics_demo_position_y(body_index: u32, steps: u32) -> f32 {
+    frame_body(body_index, steps).map_or(0.0, |(body, spatial_scale)| {
+        display_coordinate(body.position.y, spatial_scale)
+    })
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn physics_demo_position_z(body_index: u32, steps: u32) -> i32 {
-    frame_body(body_index, steps)
-        .and_then(|body| i32::try_from(body.position.z).ok())
-        .unwrap_or_default()
+pub extern "C" fn physics_demo_position_z(body_index: u32, steps: u32) -> f32 {
+    frame_body(body_index, steps).map_or(0.0, |(body, spatial_scale)| {
+        display_coordinate(body.position.z, spatial_scale)
+    })
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn physics_demo_half_extent_x(body_index: u32, steps: u32) -> i32 {
-    frame_body(body_index, steps).map_or(0, |body| body.half_extents[0])
+pub extern "C" fn physics_demo_half_extent_x(body_index: u32, steps: u32) -> f32 {
+    frame_body(body_index, steps).map_or(0.0, |(body, spatial_scale)| {
+        display_extent(body.half_extents[0], spatial_scale)
+    })
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn physics_demo_half_extent_y(body_index: u32, steps: u32) -> i32 {
-    frame_body(body_index, steps).map_or(0, |body| body.half_extents[1])
+pub extern "C" fn physics_demo_half_extent_y(body_index: u32, steps: u32) -> f32 {
+    frame_body(body_index, steps).map_or(0.0, |(body, spatial_scale)| {
+        display_extent(body.half_extents[1], spatial_scale)
+    })
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn physics_demo_half_extent_z(body_index: u32, steps: u32) -> i32 {
-    frame_body(body_index, steps).map_or(0, |body| body.half_extents[2])
+pub extern "C" fn physics_demo_half_extent_z(body_index: u32, steps: u32) -> f32 {
+    frame_body(body_index, steps).map_or(0.0, |(body, spatial_scale)| {
+        display_extent(body.half_extents[2], spatial_scale)
+    })
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn physics_demo_is_fixed(body_index: u32, steps: u32) -> u32 {
-    frame_body(body_index, steps).map_or(0, |body| if body.kind == BodyKind::Fixed { 1 } else { 0 })
+    frame_body(body_index, steps).map_or(
+        0,
+        |(body, _)| {
+            if body.kind == BodyKind::Fixed { 1 } else { 0 }
+        },
+    )
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn physics_demo_mass_units(body_index: u32, steps: u32) -> u32 {
-    frame_body(body_index, steps).map_or(0, |body| body.mass_units)
+    frame_body(body_index, steps).map_or(0, |(body, _)| body.mass_units)
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn physics_demo_restitution_milli(body_index: u32, steps: u32) -> u32 {
-    frame_body(body_index, steps).map_or(0, |body| u32::from(body.material.restitution_milli))
+    frame_body(body_index, steps).map_or(0, |(body, _)| u32::from(body.material.restitution_milli))
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn physics_demo_friction_milli(body_index: u32, steps: u32) -> u32 {
-    frame_body(body_index, steps).map_or(0, |body| u32::from(body.material.friction_milli))
+    frame_body(body_index, steps).map_or(0, |(body, _)| u32::from(body.material.friction_milli))
 }
 
 #[unsafe(no_mangle)]
@@ -135,10 +198,13 @@ pub extern "C" fn physics_demo_pair_word_count(steps: u32) -> u32 {
     let Ok(mut state) = demo_state().lock() else {
         return 0;
     };
-    let Some(frame) = ensure_frame(&mut state, steps) else {
+    let Some(state) = ensure_state(&mut state) else {
         return 0;
     };
-    u32::try_from(frame.frame.pair_words().len()).unwrap_or_default()
+    let Some(frame) = state.ensure_frame(steps) else {
+        return 0;
+    };
+    u32::try_from(frame.pair_words.len()).unwrap_or_default()
 }
 
 #[unsafe(no_mangle)]
@@ -149,10 +215,13 @@ pub extern "C" fn physics_demo_pair_word(word_index: u32, steps: u32) -> u32 {
     let Ok(mut state) = demo_state().lock() else {
         return 0;
     };
-    let Some(frame) = ensure_frame(&mut state, steps) else {
+    let Some(state) = ensure_state(&mut state) else {
         return 0;
     };
-    frame.frame.pair_words().get(index).copied().unwrap_or(0)
+    let Some(frame) = state.ensure_frame(steps) else {
+        return 0;
+    };
+    frame.pair_words.get(index).copied().unwrap_or(0)
 }
 
 #[unsafe(no_mangle)]
@@ -160,29 +229,40 @@ pub extern "C" fn physics_demo_overlap_count(steps: u32) -> u32 {
     let Ok(mut state) = demo_state().lock() else {
         return 0;
     };
-    ensure_frame(&mut state, steps).map_or(0, |frame| frame.frame.overlap_count())
+    let Some(state) = ensure_state(&mut state) else {
+        return 0;
+    };
+    let Some(frame) = state.ensure_frame(steps) else {
+        return 0;
+    };
+    frame.pair_words.iter().map(|word| word.count_ones()).sum()
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        build_frame, physics_demo_body_count, physics_demo_half_extent_z, physics_demo_is_fixed,
-        physics_demo_max_steps, physics_demo_position_z,
+        physics_demo_body_count, physics_demo_fps, physics_demo_half_extent_z,
+        physics_demo_is_fixed, physics_demo_max_steps, physics_demo_position_z,
     };
 
     #[test]
-    fn browser_demo_exposes_the_true_three_dimensional_room() {
-        assert_eq!(physics_demo_max_steps(), 64);
+    fn browser_demo_exposes_true_sixty_hz_three_dimensional_steps() {
+        assert_eq!(physics_demo_fps(), 60);
+        assert_eq!(physics_demo_max_steps(), 600);
         assert_eq!(physics_demo_body_count(0), 54);
         assert_eq!(physics_demo_is_fixed(48, 0), 1);
-        assert!(physics_demo_half_extent_z(48, 0) > 1);
+        assert!(physics_demo_half_extent_z(48, 0) > 1.0);
 
         let initial_z = physics_demo_position_z(0, 0);
         let next_z = physics_demo_position_z(0, 1);
         assert_ne!(initial_z, next_z);
+        assert!((next_z - initial_z).abs() < 1.0);
 
-        let first = build_frame(6).expect("3D browser frame should be valid");
-        let second = build_frame(6).expect("repeated 3D browser frame should be valid");
-        assert_eq!(first, second);
+        let one_second_z = physics_demo_position_z(0, 60);
+        assert!((one_second_z - initial_z).abs() > 1.0);
+
+        let first_repeat = physics_demo_position_z(0, 6);
+        let second_repeat = physics_demo_position_z(0, 6);
+        assert_eq!(first_repeat, second_repeat);
     }
 }
