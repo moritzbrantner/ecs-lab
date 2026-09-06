@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="Run ECS Lab's dense deterministic three-dimensional Rust physics room in the browser with adjustable temporal inspection, a space-time matrix, mouse-controlled WebGPU rendering, and exact collision verification."
+      content="Run ECS Lab's dense deterministic three-dimensional Rust physics room with swept static collision detection, temporal inspection, mouse-controlled WebGPU rendering, and exact final-frame collision verification."
     />
     <title>ECS Lab — 3D physics demo</title>
     <link rel="stylesheet" href="../styles.css" />
@@ -20,9 +20,9 @@
         <h1>3D physics demo</h1>
         <p class="lede">
           Forty-eight dynamic bodies move on all three axes inside a fixed floor, ceiling, side, front,
-          and back room. Rust owns gravity, collisions, mass, restitution, and two-axis contact friction.
-          The browser interpolates authoritative Rust frames, exposes direct camera control, and now lets
-          you inspect time at adjustable strides or as a body × time matrix.
+          and back room. Rust now sweeps dynamic boxes through the full X/Y/Z/time interval against fixed
+          geometry, resolves the earliest wall impact, and continues through the remaining timestep.
+          The browser only interpolates authoritative Rust frames and exposes direct camera controls.
         </p>
         <nav class="actions" aria-label="Project links">
           <a class="button primary" href="#physics-playground">Open the 3D room</a>
@@ -38,8 +38,8 @@
           <p>
             The scene is a deterministic stress fixture rather than three showcase cubes. Bodies start
             across twelve spatial cells with varied sizes, masses, restitution, friction, and X/Y/Z
-            velocity. Six fixed slabs close the room. The discrete physics state remains deterministic;
-            temporal controls only choose which Rust frames to inspect and how densely to sample them.
+            velocity. Six fixed slabs close the room. Fixed-body collision detection is continuous over
+            the timestep, while dynamic-vs-dynamic CCD remains the next solver horizon.
           </p>
         </div>
 
@@ -90,8 +90,8 @@
             <label class="toggle-control temporal-toggle" for="time-matrix-enabled">
               <input id="time-matrix-enabled" type="checkbox" />
               <span>
-                <strong>Show time as a matrix dimension</strong>
-                <small>Rows are sampled Rust steps; columns are dynamic bodies. Click a cell to jump the 3D scene to that time.</small>
+                <strong>Show timeline inspection matrix</strong>
+                <small>Visualization only: rows sample Rust steps and columns are dynamic bodies. The solver's X/Y/Z/time CCD remains inside Rust.</small>
               </span>
             </label>
           </div>
@@ -100,29 +100,29 @@
             <div class="time-matrix-heading">
               <div>
                 <p class="eyebrow">Temporal inspection</p>
-                <h3 id="time-matrix-title">Space-time matrix</h3>
+                <h3 id="time-matrix-title">Frame timeline matrix</h3>
               </div>
               <p>
+                This is an inspection view over already-computed Rust frames, not the collision solver.
                 Time is the vertical matrix axis and dynamic body identity is horizontal. Cell brightness
-                encodes Y height; the corner dot marks that body participating in an AABB contact at that
-                exact Rust frame.
+                encodes Y height; the corner dot marks final-frame AABB overlap participation.
               </p>
             </div>
             <div class="time-matrix-scroll">
               <canvas
                 id="time-matrix-canvas"
                 tabindex="0"
-                aria-label="Space-time matrix of authoritative Rust physics frames. Use Up and Down arrow keys to move through time."
+                aria-label="Timeline matrix of authoritative Rust physics frames. Use Up and Down arrow keys to move through time."
                 aria-describedby="time-matrix-readout"
               ></canvas>
             </div>
             <p class="time-matrix-readout" id="time-matrix-readout" aria-live="polite">
-              Enable the time matrix to load the authoritative Rust timeline.
+              Enable the timeline matrix to load the authoritative Rust frames.
             </p>
           </section>
 
           <p class="scenario-legend">
-            48 dynamic bodies · gravity −Y · true X/Y/Z velocity · six fixed room slabs · varied mass,
+            48 dynamic bodies · gravity −Y · swept fixed geometry · true X/Y/Z velocity · six fixed room slabs · varied mass,
             restitution, friction, and box footprint
           </p>
 
@@ -131,9 +131,9 @@
             <span>
               <strong>Verify settled 3D AABBs with WebGPU</strong>
               <small>
-                Rendering and collision verification are separate GPU paths. The verifier receives the
-                exact Rust X/Y/Z AABBs and its pair bitset must match Rust word-for-word; WebGPU never
-                owns physics response.
+                Rendering and final-frame collision verification are separate GPU paths. The verifier
+                receives the exact Rust X/Y/Z AABBs and its pair bitset must match Rust word-for-word;
+                WebGPU never owns time-of-impact or physics response.
               </small>
             </span>
           </label>
@@ -149,13 +149,12 @@
       <section class="method physics-boundary" aria-labelledby="boundary-title">
         <div class="section-copy">
           <p class="eyebrow">Ownership boundary</p>
-          <h2 id="boundary-title">Time can become another view dimension without becoming another simulation</h2>
+          <h2 id="boundary-title">Continuous collision time belongs to Rust, not the visualization</h2>
           <p>
-            The Wasm adapter exports authoritative 3D positions, collider extents, fixed/dynamic
-            metadata, materials, and the canonical collision-pair bitset. Mouse input changes only the
-            camera. Step stride changes only which existing frames are selected, while the time matrix
-            independently reads the same deterministic Rust/Wasm timeline. Neither feature integrates
-            velocity, resolves contacts, or changes solver dt in JavaScript.
+            Rust owns swept fixed-body candidate tests, exact fractional TOI ordering, bounded impact
+            iteration, response, and ECS writes. The Wasm adapter exports authoritative integer frames.
+            Mouse input changes only the camera; step stride and the timeline matrix select or visualize
+            those frames and never integrate velocity, resolve contacts, or change solver time.
           </p>
         </div>
       </section>
