@@ -253,34 +253,33 @@ pub fn box_inertia(body: PhysicsBody3d) -> Result<BoxInertia3d, AngularError3d> 
 
     let half = body
         .half_extents
-        .map(|value| u128::from(u32::try_from(value).unwrap_or_default()));
+        .map(|value| u128::from(value.unsigned_abs()));
     let squared = half.map(|value| value * value);
     let mass = u128::from(body.mass_units);
-    let principal_numerators = [
-        mass.checked_mul(
+    let x = mass
+        .checked_mul(
             squared[1]
                 .checked_add(squared[2])
                 .ok_or(AngularError3d::ArithmeticOverflow)?,
-        ),
-        mass.checked_mul(
+        )
+        .ok_or(AngularError3d::ArithmeticOverflow)?;
+    let y = mass
+        .checked_mul(
             squared[0]
                 .checked_add(squared[2])
                 .ok_or(AngularError3d::ArithmeticOverflow)?,
-        ),
-        mass.checked_mul(
+        )
+        .ok_or(AngularError3d::ArithmeticOverflow)?;
+    let z = mass
+        .checked_mul(
             squared[0]
                 .checked_add(squared[1])
                 .ok_or(AngularError3d::ArithmeticOverflow)?,
-        ),
-    ]
-    .map(|value| value.ok_or(AngularError3d::ArithmeticOverflow))
-    .into_iter()
-    .collect::<Result<Vec<_>, _>>()?
-    .try_into()
-    .map_err(|_| AngularError3d::ArithmeticOverflow)?;
+        )
+        .ok_or(AngularError3d::ArithmeticOverflow)?;
 
     Ok(BoxInertia3d {
-        principal_numerators,
+        principal_numerators: [x, y, z],
         denominator: 3,
     })
 }
@@ -320,11 +319,7 @@ fn integrated_component(
     i32::try_from(next).map_err(|_| AngularError3d::ArithmeticOverflow)
 }
 
-fn normalized_component(
-    component: i32,
-    scale: i128,
-    norm: i128,
-) -> Result<i32, AngularError3d> {
+fn normalized_component(component: i32, scale: i128, norm: i128) -> Result<i32, AngularError3d> {
     let numerator = i128::from(component)
         .checked_mul(scale)
         .ok_or(AngularError3d::ArithmeticOverflow)?;
@@ -370,18 +365,13 @@ fn checked_cross_component(
 }
 
 fn orientation_norm_squared(orientation: Orientation3d) -> u128 {
-    [
-        orientation.x,
-        orientation.y,
-        orientation.z,
-        orientation.w,
-    ]
-    .into_iter()
-    .map(|component| {
-        let component = i128::from(component);
-        u128::try_from(component * component).unwrap_or_default()
-    })
-    .sum()
+    [orientation.x, orientation.y, orientation.z, orientation.w]
+        .into_iter()
+        .map(|component| {
+            let component = u128::from(component.unsigned_abs());
+            component * component
+        })
+        .sum()
 }
 
 fn integer_sqrt(value: u128) -> u128 {
@@ -391,7 +381,7 @@ fn integer_sqrt(value: u128) -> u128 {
     let bit_length = u128::BITS - value.leading_zeros();
     let mut estimate = 1_u128 << bit_length.div_ceil(2);
     loop {
-        let next = (estimate + value / estimate) / 2;
+        let next = u128::midpoint(estimate, value / estimate);
         if next >= estimate {
             return estimate;
         }
