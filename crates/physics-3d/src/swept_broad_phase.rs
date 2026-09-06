@@ -96,9 +96,8 @@ fn swept_bounds(
 
     for axis in 0..3 {
         let half_scaled = i128::from(body.half_extents[axis]).checked_mul(subtick_scale)?;
-        let end_center = body.center_scaled[axis].checked_add(
-            i128::from(body.velocity[axis]).checked_mul(remaining_subticks)?,
-        )?;
+        let end_center = body.center_scaled[axis]
+            .checked_add(i128::from(body.velocity[axis]).checked_mul(remaining_subticks)?)?;
         let start_min = body.center_scaled[axis].checked_sub(half_scaled)?;
         let start_max = body.center_scaled[axis].checked_add(half_scaled)?;
         let end_min = end_center.checked_sub(half_scaled)?;
@@ -152,9 +151,7 @@ mod tests {
 
     use ecs_physics::BodyKind;
 
-    use super::{
-        SweptBroadPhaseBody, swept_bounds, swept_candidate_pairs,
-    };
+    use super::{SweptBroadPhaseBody, swept_bounds, swept_candidate_pairs};
 
     const SCALE: i128 = 1_i128 << 32;
 
@@ -237,12 +234,7 @@ mod tests {
     #[test]
     fn oversized_grid_falls_back_instead_of_dropping_pairs() {
         let bodies = [
-            body(
-                BodyKind::Dynamic,
-                [0, 0, 0],
-                [1, 1, 1],
-                [i32::MAX, 0, 0],
-            ),
+            body(BodyKind::Dynamic, [0, 0, 0], [1, 1, 1], [i32::MAX, 0, 0]),
             body(BodyKind::Dynamic, [10, 0, 0], [1, 1, 1], [0, 0, 0]),
         ];
         assert!(swept_candidate_pairs(&bodies, SCALE, SCALE).is_none());
