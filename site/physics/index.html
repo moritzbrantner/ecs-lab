@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="Run ECS Lab's dense deterministic three-dimensional Rust physics room with unified continuous AABB collision detection, temporal inspection, mouse-controlled WebGPU rendering, and exact final-frame collision verification."
+      content="Run ECS Lab's deterministic three-dimensional Rust physics room with unified continuous AABB collision detection, simultaneous contact sets, temporal inspection, WebGPU rendering, and exact final-frame collision verification."
     />
     <title>ECS Lab — 3D physics demo</title>
     <link rel="stylesheet" href="../styles.css" />
@@ -20,9 +20,10 @@
         <h1>3D physics demo</h1>
         <p class="lede">
           Forty-eight dynamic bodies move on all three axes inside a fixed floor, ceiling, side, front,
-          and back room. Rust sweeps fixed and moving AABB pairs through one X/Y/Z/time event timeline,
-          resolves the globally earliest impact, and continues through the remaining timestep. The browser
-          only interpolates authoritative Rust frames and exposes direct camera controls.
+          and back room. Rust sweeps fixed and moving AABB pairs through one X/Y/Z/time timeline,
+          collects every pair and tied axis at the earliest exact impact time, resolves that contact set
+          deterministically, and continues through the remaining timestep. The browser only interpolates
+          authoritative Rust frames and exposes direct camera controls.
         </p>
         <nav class="actions" aria-label="Project links">
           <a class="button primary" href="#physics-playground">Open the 3D room</a>
@@ -39,7 +40,8 @@
             The scene is a deterministic stress fixture rather than three showcase cubes. Bodies start
             across twelve spatial cells with varied sizes, masses, restitution, friction, and X/Y/Z
             velocity. Six fixed slabs close the room. Relative-motion swept AABB tests put body-body and
-            body-wall impacts on the same deterministic continuous timeline.
+            body-wall impacts on the same continuous timeline, while equal-time pairs and tied axes are
+            resolved together under a bounded deterministic contact policy.
           </p>
         </div>
 
@@ -91,7 +93,7 @@
               <input id="time-matrix-enabled" type="checkbox" />
               <span>
                 <strong>Show timeline inspection matrix</strong>
-                <small>Visualization only: rows sample Rust steps and columns are dynamic bodies. The solver's X/Y/Z/time CCD remains inside Rust.</small>
+                <small>Visualization only: rows sample Rust steps and columns are dynamic bodies. The solver's X/Y/Z/time CCD and contact-set iteration remain inside Rust.</small>
               </span>
             </label>
           </div>
@@ -122,7 +124,7 @@
           </section>
 
           <p class="scenario-legend">
-            48 dynamic bodies · gravity −Y · unified swept AABB CCD · true X/Y/Z velocity · six fixed room slabs · varied mass,
+            48 dynamic bodies · gravity −Y · unified swept AABB CCD · simultaneous contact sets · true X/Y/Z velocity · six fixed room slabs · varied mass,
             restitution, friction, and box footprint
           </p>
 
@@ -133,7 +135,7 @@
               <small>
                 Rendering and final-frame collision verification are separate GPU paths. The verifier
                 receives the exact Rust X/Y/Z AABBs and its pair bitset must match Rust word-for-word;
-                WebGPU never owns time-of-impact or physics response.
+                WebGPU never owns time-of-impact, contact-set iteration, or physics response.
               </small>
             </span>
           </label>
@@ -151,10 +153,11 @@
           <p class="eyebrow">Ownership boundary</p>
           <h2 id="boundary-title">Continuous collision time belongs to Rust, not the visualization</h2>
           <p>
-            Rust owns relative-motion swept pair tests, exact fractional TOI ordering, global earliest-event
-            selection, bounded impact iteration, response, and ECS writes. The Wasm adapter exports
-            authoritative integer frames. Mouse input changes only the camera; step stride and the timeline
-            matrix select or visualize those frames and never integrate velocity, resolve contacts, or change solver time.
+            Rust owns relative-motion swept pair tests, exact fractional TOI comparison, global earliest
+            contact-set collection, bounded coupled response, deterministic fixed-point quantization, and
+            ECS writes. The Wasm adapter exports authoritative integer frames. Mouse input changes only
+            the camera; step stride and the timeline matrix select or visualize those frames and never
+            integrate velocity, resolve contacts, or change solver time.
           </p>
         </div>
       </section>
