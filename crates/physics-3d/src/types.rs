@@ -184,7 +184,7 @@ impl fmt::Display for PhysicsError3d {
             ),
             Self::CcdIterationLimit(entity) => write!(
                 formatter,
-                "3D physics body {} exceeded the bounded static CCD/contact iteration limit",
+                "3D physics body {} exceeded the bounded CCD/contact iteration limit",
                 entity.0
             ),
         }
