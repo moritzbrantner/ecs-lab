@@ -188,6 +188,49 @@
   margin: 0;
 }
 
+.dice-lab {
+  display: grid;
+  gap: 1rem;
+  margin-top: 4rem;
+}
+
+.dice-workbench {
+  display: grid;
+  gap: 0.9rem;
+  padding: clamp(1rem, 2.5vw, 1.5rem);
+  border: 1px solid color-mix(in srgb, CanvasText 20%, transparent);
+  border-radius: 1rem;
+  background: color-mix(in srgb, Canvas 97%, CanvasText 3%);
+}
+
+.dice-stage {
+  display: block;
+  width: 100%;
+  height: min(32rem, 62vw);
+  min-height: 21rem;
+  border: 1px solid color-mix(in srgb, CanvasText 24%, transparent);
+  border-radius: 0.8rem;
+  background: Canvas;
+}
+
+.dice-transport {
+  display: grid;
+  grid-template-columns: auto auto auto minmax(14rem, 1fr);
+  gap: 0.65rem;
+  align-items: center;
+}
+
+.dice-frame-control {
+  min-width: 0;
+}
+
+.dice-status {
+  margin: 0;
+  color: color-mix(in srgb, CanvasText 78%, transparent);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
 .material-lab {
   display: grid;
   gap: 1rem;
@@ -309,17 +352,41 @@
   .step-stride-control select {
     width: 100%;
   }
+
+  .dice-transport {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .dice-transport > .compact-button {
+    width: 100%;
+  }
+
+  .dice-frame-control {
+    grid-column: 1 / -1;
+  }
 }
 
 @media (max-width: 560px) {
   .material-traces {
     grid-template-columns: 1fr;
   }
+
+  .dice-stage {
+    min-height: 18rem;
+  }
 }
 
 @media (max-width: 480px) {
   .physics-transport {
     grid-template-columns: repeat(2, 1fr);
+  }
+
+  .dice-transport {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  #dice-run {
+    grid-column: 1 / -1;
   }
 }
 
