@@ -158,6 +158,7 @@ fn body_aabb(body: PhysicsBody3d, position: Position) -> Result<Aabb, ScenarioEr
 pub struct BouncingRoom3dScenario {
     setup: Workload,
     bodies: Vec<PhysicsBody3d>,
+    spatial_scale: i64,
 }
 
 impl Default for BouncingRoom3dScenario {
@@ -169,6 +170,48 @@ impl Default for BouncingRoom3dScenario {
 impl BouncingRoom3dScenario {
     #[must_use]
     pub fn new() -> Self {
+        Self::with_substeps_per_tick(1).expect("the canonical unit timestep must be valid")
+    }
+
+    /// Builds the canonical room at a finer integer fixed-step resolution.
+    ///
+    /// `substeps_per_tick = N` scales positions and extents by `N²` and velocities by `N` while
+    /// leaving the integer gravity impulse unchanged. One solver step then represents `1/N` of the
+    /// canonical time unit without introducing floating-point ECS state. Dividing exported positions
+    /// and extents by [`Self::spatial_scale`] restores the ordinary room coordinates.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ScenarioError3d::InvalidSubstepRate`] when the rate is zero or cannot be represented
+    /// by the integer position, velocity, or extent types used by the scenario.
+    pub fn with_substeps_per_tick(substeps_per_tick: u32) -> Result<Self, ScenarioError3d> {
+        let velocity_scale = i32::try_from(substeps_per_tick)
+            .map_err(|_| ScenarioError3d::InvalidSubstepRate(substeps_per_tick))?;
+        if velocity_scale <= 0 {
+            return Err(ScenarioError3d::InvalidSubstepRate(substeps_per_tick));
+        }
+        let spatial_scale = i64::from(velocity_scale)
+            .checked_mul(i64::from(velocity_scale))
+            .ok_or(ScenarioError3d::InvalidSubstepRate(substeps_per_tick))?;
+        let extent_scale = i32::try_from(spatial_scale)
+            .map_err(|_| ScenarioError3d::InvalidSubstepRate(substeps_per_tick))?;
+
+        let scale_position = |value: i64| {
+            value
+                .checked_mul(spatial_scale)
+                .ok_or(ScenarioError3d::InvalidSubstepRate(substeps_per_tick))
+        };
+        let scale_velocity = |value: i32| {
+            value
+                .checked_mul(velocity_scale)
+                .ok_or(ScenarioError3d::InvalidSubstepRate(substeps_per_tick))
+        };
+        let scale_extent = |value: i32| {
+            value
+                .checked_mul(extent_scale)
+                .ok_or(ScenarioError3d::InvalidSubstepRate(substeps_per_tick))
+        };
+
         let mut operations = Vec::new();
         let mut bodies = Vec::new();
         let mut next_entity = 0_u32;
@@ -178,20 +221,36 @@ impl BouncingRoom3dScenario {
                 for (column_index, x) in ROOM_COLUMNS.into_iter().enumerate() {
                     let body_index = bodies.len();
                     let entity = EntityId(next_entity);
+                    let x_velocity = ROOM_X_VELOCITIES
+                        [(column_index + row_index + layer_index) % ROOM_X_VELOCITIES.len()];
+                    let y_velocity =
+                        ROOM_Y_VELOCITIES[(row_index + layer_index) % ROOM_Y_VELOCITIES.len()];
+                    let z_velocity = ROOM_Z_VELOCITIES[(column_index + row_index * 2 + layer_index)
+                        % ROOM_Z_VELOCITIES.len()];
                     let velocity = Velocity::new3(
-                        ROOM_X_VELOCITIES
-                            [(column_index + row_index + layer_index) % ROOM_X_VELOCITIES.len()],
-                        ROOM_Y_VELOCITIES[(row_index + layer_index) % ROOM_Y_VELOCITIES.len()],
-                        ROOM_Z_VELOCITIES[(column_index + row_index * 2 + layer_index)
-                            % ROOM_Z_VELOCITIES.len()],
+                        scale_velocity(x_velocity)?,
+                        scale_velocity(y_velocity)?,
+                        scale_velocity(z_velocity)?,
                     );
                     let (restitution, friction) = ROOM_MATERIALS[body_index % ROOM_MATERIALS.len()];
                     let material = PhysicsMaterial::new(restitution, friction);
                     let mass_units = 1 + next_entity % 4;
-                    let half_extents = ROOM_SHAPES[body_index % ROOM_SHAPES.len()];
+                    let half_extents = ROOM_SHAPES[body_index % ROOM_SHAPES.len()]
+                        .map(scale_extent)
+                        .into_iter()
+                        .collect::<Result<Vec<_>, _>>()?
+                        .try_into()
+                        .map_err(|_| ScenarioError3d::InvalidSubstepRate(substeps_per_tick))?;
 
                     operations.push(Operation::Spawn(entity));
-                    operations.push(Operation::SetPosition(entity, Position::new3(x, y, z)));
+                    operations.push(Operation::SetPosition(
+                        entity,
+                        Position::new3(
+                            scale_position(x)?,
+                            scale_position(y)?,
+                            scale_position(z)?,
+                        ),
+                    ));
                     operations.push(Operation::SetVelocity(entity, velocity));
                     bodies.push(
                         PhysicsBody3d::dynamic(entity, half_extents)
@@ -204,11 +263,18 @@ impl BouncingRoom3dScenario {
         }
         debug_assert_eq!(next_entity, ROOM_DYNAMIC_COUNT);
 
-        add_room_boundaries(&mut operations, &mut bodies);
-        Self {
+        add_room_boundaries(
+            &mut operations,
+            &mut bodies,
+            spatial_scale,
+            extent_scale,
+            substeps_per_tick,
+        )?;
+        Ok(Self {
             setup: Workload::new(operations),
             bodies,
-        }
+            spatial_scale,
+        })
     }
 
     #[must_use]
@@ -219,6 +285,11 @@ impl BouncingRoom3dScenario {
     #[must_use]
     pub fn bodies(&self) -> &[PhysicsBody3d] {
         &self.bodies
+    }
+
+    #[must_use]
+    pub const fn spatial_scale(&self) -> i64 {
+        self.spatial_scale
     }
 
     #[must_use]
@@ -258,6 +329,19 @@ impl BouncingRoom3dScenario {
         Ok(world.snapshot())
     }
 
+    /// Builds exact 3D AABB evidence from a supplied Rust-owned room snapshot.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ScenarioError3d`] when the snapshot is missing required room state or exceeds the
+    /// exact collision-coordinate range.
+    pub fn broad_phase_frame(
+        &self,
+        snapshot: &WorldSnapshot,
+    ) -> Result<BroadPhaseFrame3d, ScenarioError3d> {
+        BroadPhaseFrame3d::from_snapshot(snapshot, &self.bodies)
+    }
+
     /// Builds exact 3D AABB evidence from the Rust-owned room state.
     ///
     /// # Errors
@@ -267,11 +351,27 @@ impl BouncingRoom3dScenario {
         &self,
         frames: u32,
     ) -> Result<BroadPhaseFrame3d, ScenarioError3d> {
-        BroadPhaseFrame3d::from_snapshot(&self.reference_after(frames)?, &self.bodies)
+        self.broad_phase_frame(&self.reference_after(frames)?)
     }
 }
 
-fn add_room_boundaries(operations: &mut Vec<Operation>, bodies: &mut Vec<PhysicsBody3d>) {
+fn add_room_boundaries(
+    operations: &mut Vec<Operation>,
+    bodies: &mut Vec<PhysicsBody3d>,
+    spatial_scale: i64,
+    extent_scale: i32,
+    substeps_per_tick: u32,
+) -> Result<(), ScenarioError3d> {
+    let scale_position = |value: i64| {
+        value
+            .checked_mul(spatial_scale)
+            .ok_or(ScenarioError3d::InvalidSubstepRate(substeps_per_tick))
+    };
+    let scale_extent = |value: i32| {
+        value
+            .checked_mul(extent_scale)
+            .ok_or(ScenarioError3d::InvalidSubstepRate(substeps_per_tick))
+    };
     let fixed = [
         (FLOOR, Position::new3(0, -1, 0), [20, 1, 16]),
         (CEILING, Position::new3(0, 21, 0), [20, 1, 16]),
@@ -281,10 +381,24 @@ fn add_room_boundaries(operations: &mut Vec<Operation>, bodies: &mut Vec<Physics
         (FRONT_WALL, Position::new3(0, 10, 17), [20, 12, 1]),
     ];
     for (entity, position, half_extents) in fixed {
+        let scaled_half_extents = half_extents
+            .map(scale_extent)
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()?
+            .try_into()
+            .map_err(|_| ScenarioError3d::InvalidSubstepRate(substeps_per_tick))?;
         operations.push(Operation::Spawn(entity));
-        operations.push(Operation::SetPosition(entity, position));
-        bodies.push(PhysicsBody3d::fixed(entity, half_extents));
+        operations.push(Operation::SetPosition(
+            entity,
+            Position::new3(
+                scale_position(position.x)?,
+                scale_position(position.y)?,
+                scale_position(position.z)?,
+            ),
+        ));
+        bodies.push(PhysicsBody3d::fixed(entity, scaled_half_extents));
     }
+    Ok(())
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -294,6 +408,7 @@ pub enum ScenarioError3d {
     MissingEntity(EntityId),
     MissingPosition(EntityId),
     CoordinateOutOfRange(EntityId),
+    InvalidSubstepRate(u32),
 }
 
 impl fmt::Display for ScenarioError3d {
@@ -312,6 +427,9 @@ impl fmt::Display for ScenarioError3d {
                 "3D scenario entity {} exceeds the exact f32 collision range",
                 entity.0
             ),
+            Self::InvalidSubstepRate(rate) => {
+                write!(formatter, "3D scenario substep rate {rate} cannot be represented")
+            }
         }
     }
 }
@@ -341,6 +459,40 @@ mod tests {
             .expect("position should exist")
             .z;
         assert_ne!(initial_z, next_z);
+    }
+
+    #[test]
+    fn room_supports_sixty_fine_solver_steps_per_tick() {
+        let scenario = BouncingRoom3dScenario::with_substeps_per_tick(60)
+            .expect("60 Hz room scaling should be representable");
+        assert_eq!(scenario.spatial_scale(), 3_600);
+
+        let initial = scenario
+            .reference_after(0)
+            .expect("initial fine frame should work");
+        let next = scenario
+            .reference_after(1)
+            .expect("next fine frame should work");
+        let initial_z = initial.entities()[0]
+            .position
+            .expect("position should exist")
+            .z;
+        let next_z = next.entities()[0]
+            .position
+            .expect("position should exist")
+            .z;
+        let fine_delta = (next_z - initial_z).abs();
+        assert!(fine_delta > 0);
+        assert!(fine_delta < scenario.spatial_scale());
+
+        let one_tick = scenario
+            .reference_after(60)
+            .expect("one nominal tick of fine frames should work");
+        let one_tick_z = one_tick.entities()[0]
+            .position
+            .expect("position should exist")
+            .z;
+        assert!((one_tick_z - initial_z).abs() > scenario.spatial_scale());
     }
 
     #[test]
