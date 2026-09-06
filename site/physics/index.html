@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="Run ECS Lab's deterministic three-dimensional Rust physics room at a true 60 Hz solver rate with unified continuous AABB collision detection, simultaneous contact sets, WebGPU rendering, and exact final-frame collision verification."
+      content="Run ECS Lab's deterministic three-dimensional Rust physics room at a true 60 Hz solver rate with unified continuous AABB collision detection, simultaneous contact sets, WebGPU rendering, material-response evidence, and exact final-frame collision verification."
     />
     <title>ECS Lab — 3D physics demo</title>
     <link rel="stylesheet" href="../styles.css" />
@@ -28,6 +28,7 @@
         </p>
         <nav class="actions" aria-label="Project links">
           <a class="button primary" href="#physics-playground">Open the 3D room</a>
+          <a class="button" href="#material-response">Compare bounciness</a>
           <a class="button" href="../">Back to ECS Lab</a>
           <a class="button" href="https://github.com/moritzbrantner/ecs-lab">Source on GitHub</a>
         </nav>
@@ -120,6 +121,23 @@
         </div>
       </section>
 
+      <section class="method material-lab" id="material-response" aria-labelledby="material-response-title">
+        <div class="section-copy">
+          <p class="eyebrow">Material response</p>
+          <h2 id="material-response-title">Bounciness is a solver property, not an animation trick</h2>
+          <p>
+            Six isolated Rust bodies start with identical mass, shape, position, velocity, and gravity.
+            Only restitution and friction change. Each trace below is sampled from the same 60 Hz Rust
+            solver used by the room, so higher rebound and shorter sliding distance come from contact
+            response rather than browser easing.
+          </p>
+        </div>
+        <p class="material-lab-status" id="material-lab-status" aria-live="polite">
+          Loading deterministic material-response traces…
+        </p>
+        <div class="material-traces" id="material-traces"></div>
+      </section>
+
       <section class="method physics-boundary" aria-labelledby="boundary-title">
         <div class="section-copy">
           <p class="eyebrow">Ownership boundary</p>
@@ -138,5 +156,6 @@
     <script type="module" src="./app.js"></script>
     <script type="module" src="./temporal.js"></script>
     <script type="module" src="./playback.js"></script>
+    <script type="module" src="./materials.js"></script>
   </body>
 </html>
