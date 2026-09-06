@@ -1,3 +1,4 @@
+mod colliders;
 mod continuous_solver;
 mod scenario;
 #[allow(dead_code)]
@@ -5,6 +6,9 @@ mod solver;
 mod swept_broad_phase;
 mod types;
 
+pub use colliders::{
+    Collider3d, ColliderContact3d, ColliderError3d, ColliderShape3d, collider_contact,
+};
 pub use continuous_solver::step_3d;
 pub use scenario::{BouncingRoom3dScenario, BroadPhaseBody3d, BroadPhaseFrame3d, ScenarioError3d};
 pub use types::{
