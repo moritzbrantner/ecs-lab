@@ -72,6 +72,39 @@ impl BroadPhaseFrame3d {
         self.overlap_count
     }
 
+    /// Rebuilds pair evidence after normalizing the fixed-point room coordinates for display.
+    ///
+    /// The browser receives normalized `f32` centers and half extents. Recomputing the bitset from the
+    /// same normalized values keeps optional WebGPU verification word-for-word comparable even when a
+    /// mathematically exact contact lies on an `f32` rounding boundary after normalization.
+    #[must_use]
+    pub fn pair_words_at_spatial_scale(&self, spatial_scale: i64) -> Option<Vec<u32>> {
+        if spatial_scale <= 0 {
+            return None;
+        }
+        let scale = exact_i64_to_f32(spatial_scale);
+        let geometry = self
+            .bodies
+            .iter()
+            .map(|body| {
+                let half = body.half_extents.map(i64::from);
+                Aabb::from_center_half_extents(
+                    [
+                        exact_i64_to_f32(body.position.x) / scale,
+                        exact_i64_to_f32(body.position.y) / scale,
+                        exact_i64_to_f32(body.position.z) / scale,
+                    ],
+                    [
+                        exact_i64_to_f32(half[0]) / scale,
+                        exact_i64_to_f32(half[1]) / scale,
+                        exact_i64_to_f32(half[2]) / scale,
+                    ],
+                )
+            })
+            .collect::<Vec<_>>();
+        Some(pair_evidence(&geometry).0)
+    }
+
     fn from_snapshot(
         snapshot: &WorldSnapshot,
         bodies: &[PhysicsBody3d],
@@ -105,27 +138,31 @@ impl BroadPhaseFrame3d {
             geometry.push(aabb);
         }
 
-        let body_count = geometry.len();
-        let possible_pairs = body_count.saturating_mul(body_count.saturating_sub(1)) / 2;
-        let mut pair_words = vec![0_u32; possible_pairs.div_ceil(32)];
-        let mut overlap_count = 0_u32;
-        for left in 0..body_count {
-            for right in (left + 1)..body_count {
-                if !aabb_aabb(geometry[left], geometry[right]).overlaps {
-                    continue;
-                }
-                let pair = pair_index(left, right, body_count);
-                pair_words[pair / 32] |= 1_u32 << (pair % 32);
-                overlap_count = overlap_count.saturating_add(1);
-            }
-        }
-
+        let (pair_words, overlap_count) = pair_evidence(&geometry);
         Ok(Self {
             bodies: frame_bodies,
             pair_words,
             overlap_count,
         })
     }
+}
+
+fn pair_evidence(geometry: &[Aabb]) -> (Vec<u32>, u32) {
+    let body_count = geometry.len();
+    let possible_pairs = body_count.saturating_mul(body_count.saturating_sub(1)) / 2;
+    let mut pair_words = vec![0_u32; possible_pairs.div_ceil(32)];
+    let mut overlap_count = 0_u32;
+    for left in 0..body_count {
+        for right in (left + 1)..body_count {
+            if !aabb_aabb(geometry[left], geometry[right]).overlaps {
+                continue;
+            }
+            let pair = pair_index(left, right, body_count);
+            pair_words[pair / 32] |= 1_u32 << (pair % 32);
+            overlap_count = overlap_count.saturating_add(1);
+        }
+    }
+    (pair_words, overlap_count)
 }
 
 fn pair_index(left: usize, right: usize, count: usize) -> usize {
@@ -170,7 +207,10 @@ impl Default for BouncingRoom3dScenario {
 impl BouncingRoom3dScenario {
     #[must_use]
     pub fn new() -> Self {
-        Self::with_substeps_per_tick(1).expect("the canonical unit timestep must be valid")
+        let Ok(scenario) = Self::with_substeps_per_tick(1) else {
+            unreachable!("the canonical unit timestep is statically representable");
+        };
+        scenario
     }
 
     /// Builds the canonical room at a finer integer fixed-step resolution.
