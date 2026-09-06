@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="Run ECS Lab's deterministic three-dimensional Rust physics room with unified continuous AABB collision detection, simultaneous contact sets, 60 FPS playback, WebGPU rendering, and exact final-frame collision verification."
+      content="Run ECS Lab's deterministic three-dimensional Rust physics room at a true 60 Hz solver rate with unified continuous AABB collision detection, simultaneous contact sets, WebGPU rendering, and exact final-frame collision verification."
     />
     <title>ECS Lab — 3D physics demo</title>
     <link rel="stylesheet" href="../styles.css" />
@@ -20,10 +20,11 @@
         <h1>3D physics demo</h1>
         <p class="lede">
           Forty-eight dynamic bodies move on all three axes inside a fixed floor, ceiling, side, front,
-          and back room. Rust sweeps fixed and moving AABB pairs through one X/Y/Z/time timeline,
-          collects every pair and tied axis at the earliest exact impact time, resolves that contact set
-          deterministically, and continues through the remaining timestep. The browser renders the
-          authoritative Rust frames at a 60 FPS playback cadence and exposes direct camera controls.
+          and back room. Rust advances the authoritative simulation at 60 fixed solver steps per second,
+          sweeps fixed and moving AABB pairs through X/Y/Z/time inside every 1/60-second frame, collects
+          every pair and tied axis at the earliest exact impact time, and resolves that contact set
+          deterministically before the next frame. The browser only presents those Rust frames and exposes
+          direct camera controls.
         </p>
         <nav class="actions" aria-label="Project links">
           <a class="button primary" href="#physics-playground">Open the 3D room</a>
@@ -35,13 +36,14 @@
       <section class="demo physics-demo" id="physics-playground" aria-labelledby="physics-title">
         <div class="section-copy">
           <p class="eyebrow">Dense canonical 3D material scenario</p>
-          <h2 id="physics-title">Forty-eight bodies collide through a Rust-owned 3D room</h2>
+          <h2 id="physics-title">Forty-eight bodies collide through a Rust-owned 60 Hz world</h2>
           <p>
             The scene is a deterministic stress fixture rather than three showcase cubes. Bodies start
             across twelve spatial cells with varied sizes, masses, restitution, friction, and X/Y/Z
-            velocity. Six fixed slabs close the room. Relative-motion swept AABB tests put body-body and
-            body-wall impacts on the same continuous timeline, while equal-time pairs and tied axes are
-            resolved together under a bounded deterministic contact policy.
+            velocity. Six fixed slabs close the room. The fixed-point room uses enough integer spatial
+            precision for every visible frame to be a real Rust physics step at 60 Hz; there is no browser
+            interpolation standing in for missing solver states. Relative-motion swept AABB tests put
+            body-body and body-wall impacts on the same continuous timeline within each frame.
           </p>
         </div>
 
@@ -69,9 +71,9 @@
             <button class="compact-button" id="step-frame" type="button">Step +1</button>
             <button class="compact-button" id="run-frames" type="button">Run</button>
             <label class="frame-control" for="frame">
-              <span>Physics step</span>
+              <span>Physics frame · 1/60 s</span>
               <strong id="frame-label">0</strong>
-              <input id="frame" type="range" min="0" max="64" value="0" step="1" />
+              <input id="frame" type="range" min="0" max="600" value="0" step="1" />
             </label>
           </div>
 
@@ -79,19 +81,22 @@
             <label class="step-stride-control" for="step-stride">
               <span>
                 <strong>Step stride</strong>
-                <small>Run targets 60 authoritative Rust frames per second. Manual stepping can jump farther without changing solver dt.</small>
+                <small>Each frame is one authoritative 1/60-second Rust solver step. Larger strides only change manual navigation.</small>
               </span>
               <select id="step-stride">
                 <option value="1" selected>1 frame</option>
                 <option value="2">2 frames</option>
                 <option value="4">4 frames</option>
                 <option value="8">8 frames</option>
+                <option value="15">15 frames</option>
+                <option value="30">30 frames</option>
+                <option value="60">60 frames · 1 s</option>
               </select>
             </label>
           </div>
 
           <p class="scenario-legend">
-            48 dynamic bodies · gravity −Y · unified swept AABB CCD · simultaneous contact sets · true X/Y/Z velocity · six fixed room slabs · varied mass,
+            60 Hz Rust solver · 48 dynamic bodies · gravity −Y · unified swept AABB CCD · simultaneous contact sets · true X/Y/Z velocity · six fixed room slabs · varied mass,
             restitution, friction, and box footprint
           </p>
 
@@ -101,7 +106,7 @@
               <strong>Verify settled 3D AABBs with WebGPU</strong>
               <small>
                 Rendering and final-frame collision verification are separate GPU paths. The verifier
-                receives the exact Rust X/Y/Z AABBs and its pair bitset must match Rust word-for-word;
+                receives the Rust X/Y/Z AABBs and its pair bitset must match Rust word-for-word;
                 WebGPU never owns time-of-impact, contact-set iteration, or physics response.
               </small>
             </span>
@@ -118,13 +123,14 @@
       <section class="method physics-boundary" aria-labelledby="boundary-title">
         <div class="section-copy">
           <p class="eyebrow">Ownership boundary</p>
-          <h2 id="boundary-title">Continuous collision time belongs to Rust, not the visualization</h2>
+          <h2 id="boundary-title">Every displayed frame is a Rust physics state</h2>
           <p>
-            Rust owns relative-motion swept pair tests, exact fractional TOI comparison, global earliest
-            contact-set collection, bounded coupled response, deterministic fixed-point quantization, and
-            ECS writes. The Wasm adapter exports authoritative integer frames. Mouse input changes only
-            the camera; playback and manual step selection only choose or interpolate those frames and
-            never integrate velocity, resolve contacts, or change solver time.
+            Rust owns the 60 Hz fixed-step progression, relative-motion swept pair tests, exact fractional
+            TOI comparison inside each frame, global earliest contact-set collection, bounded coupled
+            response, deterministic fixed-point quantization, and ECS writes. The Wasm adapter normalizes
+            the high-resolution integer room coordinates only for display. Mouse input changes the camera;
+            playback and manual frame selection never integrate velocity, resolve contacts, or invent
+            intermediate physics states.
           </p>
         </div>
       </section>
