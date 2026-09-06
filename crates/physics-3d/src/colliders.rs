@@ -76,19 +76,17 @@ pub fn collider_contact(
     validate_shape(right.shape)?;
     match (left.shape, right.shape) {
         (
-            ColliderShape3d::Sphere { radius: left_radius },
+            ColliderShape3d::Sphere {
+                radius: left_radius,
+            },
             ColliderShape3d::Sphere {
                 radius: right_radius,
             },
         ) => sphere_sphere_contact(left.center, left_radius, right.center, right_radius),
-        (
-            ColliderShape3d::Sphere { radius },
-            ColliderShape3d::Aabb { half_extents },
-        ) => sphere_aabb_contact(left.center, radius, right.center, half_extents),
-        (
-            ColliderShape3d::Aabb { half_extents },
-            ColliderShape3d::Sphere { radius },
-        ) => {
+        (ColliderShape3d::Sphere { radius }, ColliderShape3d::Aabb { half_extents }) => {
+            sphere_aabb_contact(left.center, radius, right.center, half_extents)
+        }
+        (ColliderShape3d::Aabb { half_extents }, ColliderShape3d::Sphere { radius }) => {
             let contact = sphere_aabb_contact(right.center, radius, left.center, half_extents)?;
             Ok(ColliderContact3d {
                 direction: contact.direction.map(|value| -value),
@@ -108,9 +106,7 @@ pub fn collider_contact(
 
 fn validate_shape(shape: ColliderShape3d) -> Result<(), ColliderError3d> {
     match shape {
-        ColliderShape3d::Aabb { half_extents }
-            if half_extents.iter().any(|extent| *extent < 0) =>
-        {
+        ColliderShape3d::Aabb { half_extents } if half_extents.iter().any(|extent| *extent < 0) => {
             Err(ColliderError3d::NegativeAabbHalfExtent)
         }
         ColliderShape3d::Sphere { radius } if radius < 0 => {
@@ -190,8 +186,6 @@ fn aabb_aabb_contact(
     right: Position,
     right_half: [i32; 3],
 ) -> Result<ColliderContact3d, ColliderError3d> {
-    let left_axes = position_axes(left);
-    let right_axes = position_axes(right);
     let direction = checked_delta(left, right)?;
     let mut separated_squared = 0_i128;
     for axis in 0..3 {
@@ -207,7 +201,6 @@ fn aabb_aabb_contact(
             )
             .ok_or(ColliderError3d::ArithmeticOverflow)?;
     }
-    let _ = (left_axes, right_axes);
     Ok(ColliderContact3d {
         direction,
         distance_squared: separated_squared,
@@ -251,9 +244,7 @@ const fn position_axes(position: Position) -> [i64; 3] {
 mod tests {
     use ecs_workload::Position;
 
-    use super::{
-        Collider3d, ColliderError3d, ColliderShape3d, collider_contact,
-    };
+    use super::{Collider3d, ColliderError3d, ColliderShape3d, collider_contact};
 
     #[test]
     fn sphere_sphere_touching_is_contact() {
@@ -270,16 +261,17 @@ mod tests {
     fn separated_spheres_do_not_contact() {
         let left = Collider3d::new(Position::new3(0, 0, 0), ColliderShape3d::sphere(2));
         let right = Collider3d::new(Position::new3(5, 0, 0), ColliderShape3d::sphere(2));
-        assert!(!collider_contact(left, right).expect("valid sphere pair").overlaps());
+        assert!(
+            !collider_contact(left, right)
+                .expect("valid sphere pair")
+                .overlaps()
+        );
     }
 
     #[test]
     fn sphere_aabb_corner_uses_exact_squared_distance() {
         let sphere = Collider3d::new(Position::new3(4, 4, 0), ColliderShape3d::sphere(3));
-        let aabb = Collider3d::new(
-            Position::new3(0, 0, 0),
-            ColliderShape3d::aabb([2, 2, 2]),
-        );
+        let aabb = Collider3d::new(Position::new3(0, 0, 0), ColliderShape3d::aabb([2, 2, 2]));
         let contact = collider_contact(sphere, aabb).expect("valid mixed pair");
         assert!(contact.overlaps());
         assert_eq!(contact.direction, [-2, -2, 0]);
@@ -290,10 +282,7 @@ mod tests {
     #[test]
     fn aabb_sphere_is_symmetric_except_for_direction() {
         let sphere = Collider3d::new(Position::new3(5, 0, 0), ColliderShape3d::sphere(2));
-        let aabb = Collider3d::new(
-            Position::new3(0, 0, 0),
-            ColliderShape3d::aabb([3, 3, 3]),
-        );
+        let aabb = Collider3d::new(Position::new3(0, 0, 0), ColliderShape3d::aabb([3, 3, 3]));
         let left = collider_contact(sphere, aabb).expect("sphere-aabb");
         let right = collider_contact(aabb, sphere).expect("aabb-sphere");
         assert_eq!(left.overlaps(), right.overlaps());
@@ -304,24 +293,19 @@ mod tests {
 
     #[test]
     fn existing_aabb_touching_semantics_are_preserved() {
-        let left = Collider3d::new(
-            Position::new3(0, 0, 0),
-            ColliderShape3d::aabb([2, 2, 2]),
+        let left = Collider3d::new(Position::new3(0, 0, 0), ColliderShape3d::aabb([2, 2, 2]));
+        let right = Collider3d::new(Position::new3(4, 0, 0), ColliderShape3d::aabb([2, 2, 2]));
+        assert!(
+            collider_contact(left, right)
+                .expect("valid AABB pair")
+                .overlaps()
         );
-        let right = Collider3d::new(
-            Position::new3(4, 0, 0),
-            ColliderShape3d::aabb([2, 2, 2]),
-        );
-        assert!(collider_contact(left, right).expect("valid AABB pair").overlaps());
     }
 
     #[test]
     fn invalid_shapes_fail_closed() {
         let sphere = Collider3d::new(Position::new3(0, 0, 0), ColliderShape3d::sphere(-1));
-        let box_shape = Collider3d::new(
-            Position::new3(0, 0, 0),
-            ColliderShape3d::aabb([1, 1, 1]),
-        );
+        let box_shape = Collider3d::new(Position::new3(0, 0, 0), ColliderShape3d::aabb([1, 1, 1]));
         assert_eq!(
             collider_contact(sphere, box_shape),
             Err(ColliderError3d::NegativeSphereRadius)
