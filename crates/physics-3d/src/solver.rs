@@ -1317,9 +1317,10 @@ mod tests {
                 .contains(&Operation::SetPosition(dynamic, Position::new3(4, 0, 0)))
         );
         assert!(
-            physics
-                .operations()
-                .contains(&Operation::SetVelocity(dynamic, Velocity::new3(100, 0, 0)))
+            !physics.operations().iter().any(
+                |operation| matches!(operation, Operation::SetVelocity(entity, _) if *entity == dynamic)
+            ),
+            "six full-restitution impacts return to the input velocity, so no velocity write is emitted"
         );
         assert_eq!(physics.stats().ccd_contacts, 6);
     }
