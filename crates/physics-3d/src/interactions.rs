@@ -145,8 +145,8 @@ mod tests {
     use crate::{Collider3d, ColliderShape3d};
 
     use super::{
-        ColliderRole3d, CollisionFilter3d, InteractiveCollider3d, PairInteraction3d,
-        SensorEvent3d, pair_interaction, sensor_events,
+        ColliderRole3d, CollisionFilter3d, InteractiveCollider3d, PairInteraction3d, SensorEvent3d,
+        pair_interaction, sensor_events,
     };
 
     fn sphere(entity: u32, x: i64, role: ColliderRole3d) -> InteractiveCollider3d {
@@ -160,10 +160,10 @@ mod tests {
 
     #[test]
     fn layer_masks_must_agree_in_both_directions() {
-        let left = sphere(1, 0, ColliderRole3d::Solid)
-            .with_filter(CollisionFilter3d::new(0b0001, 0b0010));
-        let right = sphere(2, 0, ColliderRole3d::Solid)
-            .with_filter(CollisionFilter3d::new(0b0010, 0b0001));
+        let left =
+            sphere(1, 0, ColliderRole3d::Solid).with_filter(CollisionFilter3d::new(0b0001, 0b0010));
+        let right =
+            sphere(2, 0, ColliderRole3d::Solid).with_filter(CollisionFilter3d::new(0b0010, 0b0001));
         assert_eq!(pair_interaction(&left, &right), PairInteraction3d::Solid);
 
         let masked = right.with_filter(CollisionFilter3d::new(0b0010, 0b0100));
@@ -198,8 +198,12 @@ mod tests {
     fn masked_sensor_overlap_is_not_reported() {
         let sensor = sphere(1, 0, ColliderRole3d::Sensor)
             .with_filter(CollisionFilter3d::new(0b0001, 0b0010));
-        let solid = sphere(2, 0, ColliderRole3d::Solid)
-            .with_filter(CollisionFilter3d::new(0b0100, 0b0001));
-        assert!(sensor_events(&[sensor, solid]).expect("valid shapes").is_empty());
+        let solid =
+            sphere(2, 0, ColliderRole3d::Solid).with_filter(CollisionFilter3d::new(0b0100, 0b0001));
+        assert!(
+            sensor_events(&[sensor, solid])
+                .expect("valid shapes")
+                .is_empty()
+        );
     }
 }
