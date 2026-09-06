@@ -1,5 +1,6 @@
 mod colliders;
 mod continuous_solver;
+mod controller;
 mod interactions;
 mod scenario;
 #[allow(dead_code)]
@@ -11,6 +12,9 @@ pub use colliders::{
     Collider3d, ColliderContact3d, ColliderError3d, ColliderShape3d, collider_contact,
 };
 pub use continuous_solver::step_3d;
+pub use controller::{
+    ControllerConfig3d, ControllerError3d, ControllerInput3d, controller_operations,
+};
 pub use interactions::{
     ColliderRole3d, CollisionFilter3d, InteractiveCollider3d, PairInteraction3d, SensorEvent3d,
     pair_interaction, sensor_events,
