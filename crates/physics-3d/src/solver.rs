@@ -523,9 +523,7 @@ fn find_earliest_static_hit(
 
         let replace = match earliest {
             None => true,
-            Some(current) => {
-                hit.time.checked_cmp(current.time, dynamic.entity)? == Ordering::Less
-            }
+            Some(current) => hit.time.checked_cmp(current.time, dynamic.entity)? == Ordering::Less,
         };
         if replace {
             earliest = Some(hit);
@@ -577,28 +575,21 @@ fn sweep_static_aabb(
             }
         };
         if replace_entry {
-            entry = Some((
-                axis_entry,
-                axis,
-                normal_to_fixed,
-                contact_coordinate,
-            ));
+            entry = Some((axis_entry, axis, normal_to_fixed, contact_coordinate));
         }
 
         let replace_exit = match exit {
             None => true,
-            Some(current) => {
-                axis_exit.checked_cmp(current, dynamic.entity)? == Ordering::Less
-            }
+            Some(current) => axis_exit.checked_cmp(current, dynamic.entity)? == Ordering::Less,
         };
         if replace_exit {
             exit = Some(axis_exit);
         }
 
-        if let (Some((entry_time, ..)), Some(exit_time)) = (entry, exit) {
-            if entry_time.checked_cmp(exit_time, dynamic.entity)? == Ordering::Greater {
-                return Ok(None);
-            }
+        if let (Some((entry_time, ..)), Some(exit_time)) = (entry, exit)
+            && entry_time.checked_cmp(exit_time, dynamic.entity)? == Ordering::Greater
+        {
+            return Ok(None);
         }
     }
 
@@ -717,8 +708,7 @@ fn stabilize_static_penetrations(
                 let kinds = (body_states[left_index].kind, body_states[right_index].kind);
                 if !matches!(
                     kinds,
-                    (BodyKind::Dynamic, BodyKind::Fixed)
-                        | (BodyKind::Fixed, BodyKind::Dynamic)
+                    (BodyKind::Dynamic, BodyKind::Fixed) | (BodyKind::Fixed, BodyKind::Dynamic)
                 ) {
                     continue;
                 }
@@ -731,12 +721,7 @@ fn stabilize_static_penetrations(
                 let right = &mut right_slice[0];
                 let outcome = resolve_pair(left, right)?;
                 corrected_any |= outcome.resolved;
-                record_pair_outcome(
-                    outcome,
-                    step_stats,
-                    contacts,
-                    supporting_entities,
-                );
+                record_pair_outcome(outcome, step_stats, contacts, supporting_entities);
             }
         }
         if !corrected_any {
@@ -746,18 +731,16 @@ fn stabilize_static_penetrations(
 
     for left_index in 0..body_states.len() {
         for right_index in (left_index + 1)..body_states.len() {
-            let (dynamic, fixed) = match (
-                body_states[left_index].kind,
-                body_states[right_index].kind,
-            ) {
-                (BodyKind::Dynamic, BodyKind::Fixed) => {
-                    (body_states[left_index], body_states[right_index])
-                }
-                (BodyKind::Fixed, BodyKind::Dynamic) => {
-                    (body_states[right_index], body_states[left_index])
-                }
-                _ => continue,
-            };
+            let (dynamic, fixed) =
+                match (body_states[left_index].kind, body_states[right_index].kind) {
+                    (BodyKind::Dynamic, BodyKind::Fixed) => {
+                        (body_states[left_index], body_states[right_index])
+                    }
+                    (BodyKind::Fixed, BodyKind::Dynamic) => {
+                        (body_states[right_index], body_states[left_index])
+                    }
+                    _ => continue,
+                };
             if has_positive_penetration(dynamic, fixed)? {
                 return Err(PhysicsError3d::CcdIterationLimit(dynamic.entity));
             }
