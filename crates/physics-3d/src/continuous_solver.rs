@@ -675,14 +675,11 @@ fn snap_pair_to_contact(states: &mut [BodyState], hit: SweepHit) -> Result<bool,
         (BodyKind::Dynamic, BodyKind::Fixed) => left.offset_axis(hit.axis, correction)?,
         (BodyKind::Fixed, BodyKind::Dynamic) => right.offset_axis(hit.axis, -correction)?,
         (BodyKind::Dynamic, BodyKind::Dynamic) => {
-            let total_mass = i128::from(left.mass_units) + i128::from(right.mass_units);
-            let left_delta = correction
-                .checked_mul(i128::from(right.mass_units))
-                .ok_or(PhysicsError3d::CoordinateOutOfRange(left.entity))?
-                / total_mass;
-            let right_delta = left_delta - correction;
-            left.offset_axis(hit.axis, left_delta)?;
-            right.offset_axis(hit.axis, right_delta)?;
+            // This projection only repairs the fractional error introduced by flooring an exact TOI
+            // to Q32.32 subticks. Anchor the lower canonical entity and move the higher one so a
+            // shared-body chain cannot oscillate forever on a one-subunit mass-split remainder.
+            // Physical impulse response and penetration stabilization remain mass-aware elsewhere.
+            right.offset_axis(hit.axis, -correction)?;
         }
     }
     Ok(true)
