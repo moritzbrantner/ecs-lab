@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="Run ECS Lab's deterministic three-dimensional Rust physics room with unified continuous AABB collision detection, simultaneous contact sets, temporal inspection, WebGPU rendering, and exact final-frame collision verification."
+      content="Run ECS Lab's deterministic three-dimensional Rust physics room with unified continuous AABB collision detection, simultaneous contact sets, 60 FPS playback, WebGPU rendering, and exact final-frame collision verification."
     />
     <title>ECS Lab — 3D physics demo</title>
     <link rel="stylesheet" href="../styles.css" />
@@ -22,8 +22,8 @@
           Forty-eight dynamic bodies move on all three axes inside a fixed floor, ceiling, side, front,
           and back room. Rust sweeps fixed and moving AABB pairs through one X/Y/Z/time timeline,
           collects every pair and tied axis at the earliest exact impact time, resolves that contact set
-          deterministically, and continues through the remaining timestep. The browser only interpolates
-          authoritative Rust frames and exposes direct camera controls.
+          deterministically, and continues through the remaining timestep. The browser renders the
+          authoritative Rust frames at a 60 FPS playback cadence and exposes direct camera controls.
         </p>
         <nav class="actions" aria-label="Project links">
           <a class="button primary" href="#physics-playground">Open the 3D room</a>
@@ -75,11 +75,11 @@
             </label>
           </div>
 
-          <div class="temporal-controls" aria-label="Temporal inspection controls">
+          <div class="temporal-controls" aria-label="Playback controls">
             <label class="step-stride-control" for="step-stride">
               <span>
                 <strong>Step stride</strong>
-                <small>Jump through authoritative Rust frames without changing solver dt.</small>
+                <small>Run targets 60 authoritative Rust frames per second. Manual stepping can jump farther without changing solver dt.</small>
               </span>
               <select id="step-stride">
                 <option value="1" selected>1 frame</option>
@@ -88,40 +88,7 @@
                 <option value="8">8 frames</option>
               </select>
             </label>
-
-            <label class="toggle-control temporal-toggle" for="time-matrix-enabled">
-              <input id="time-matrix-enabled" type="checkbox" />
-              <span>
-                <strong>Show timeline inspection matrix</strong>
-                <small>Visualization only: rows sample Rust steps and columns are dynamic bodies. The solver's X/Y/Z/time CCD and contact-set iteration remain inside Rust.</small>
-              </span>
-            </label>
           </div>
-
-          <section class="time-matrix-panel" id="time-matrix-panel" aria-labelledby="time-matrix-title" hidden>
-            <div class="time-matrix-heading">
-              <div>
-                <p class="eyebrow">Temporal inspection</p>
-                <h3 id="time-matrix-title">Frame timeline matrix</h3>
-              </div>
-              <p>
-                This is an inspection view over already-computed Rust frames, not the collision solver.
-                Time is the vertical matrix axis and dynamic body identity is horizontal. Cell brightness
-                encodes Y height; the corner dot marks final-frame AABB overlap participation.
-              </p>
-            </div>
-            <div class="time-matrix-scroll">
-              <canvas
-                id="time-matrix-canvas"
-                tabindex="0"
-                aria-label="Timeline matrix of authoritative Rust physics frames. Use Up and Down arrow keys to move through time."
-                aria-describedby="time-matrix-readout"
-              ></canvas>
-            </div>
-            <p class="time-matrix-readout" id="time-matrix-readout" aria-live="polite">
-              Enable the timeline matrix to load the authoritative Rust frames.
-            </p>
-          </section>
 
           <p class="scenario-legend">
             48 dynamic bodies · gravity −Y · unified swept AABB CCD · simultaneous contact sets · true X/Y/Z velocity · six fixed room slabs · varied mass,
@@ -156,13 +123,14 @@
             Rust owns relative-motion swept pair tests, exact fractional TOI comparison, global earliest
             contact-set collection, bounded coupled response, deterministic fixed-point quantization, and
             ECS writes. The Wasm adapter exports authoritative integer frames. Mouse input changes only
-            the camera; step stride and the timeline matrix select or visualize those frames and never
-            integrate velocity, resolve contacts, or change solver time.
+            the camera; playback and manual step selection only choose or interpolate those frames and
+            never integrate velocity, resolve contacts, or change solver time.
           </p>
         </div>
       </section>
     </main>
     <script type="module" src="./app.js"></script>
     <script type="module" src="./temporal.js"></script>
+    <script type="module" src="./playback.js"></script>
   </body>
 </html>
