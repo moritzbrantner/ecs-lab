@@ -46,6 +46,9 @@ function dispatchStep(step, settle = false) {
   } finally {
     advancing = false;
   }
+  if (running) {
+    runButton.textContent = "Pause";
+  }
 }
 
 function stopPlayback({ settle = false } = {}) {
