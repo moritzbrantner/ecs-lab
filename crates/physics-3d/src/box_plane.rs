@@ -525,10 +525,7 @@ fn lowest_manifold_offset(
     ))
 }
 
-fn contact_velocity(
-    state: BoxPlaneState3d,
-    offset: [i64; 3],
-) -> Result<[i64; 3], BoxPlaneError3d> {
+fn contact_velocity(state: BoxPlaneState3d, offset: [i64; 3]) -> Result<[i64; 3], BoxPlaneError3d> {
     let omega = state.angular.angular_velocity;
     let rotation_x = checked_sub(
         checked_mul(i128::from(omega.y), i128::from(offset[2]))?,
@@ -635,11 +632,7 @@ fn apply_normal_impulse(
     let local_impulse = rotate_inverse(state.angular.orientation, angular_impulse_world)?;
     let inertia = box_inertia(body)?;
     let mut local_delta = [0_i64; 3];
-    for (axis, (target, component)) in local_delta
-        .iter_mut()
-        .zip(local_impulse)
-        .enumerate()
-    {
+    for (axis, (target, component)) in local_delta.iter_mut().zip(local_impulse).enumerate() {
         let inverse_inertia =
             inverse_inertia_scaled(inertia.principal_numerators[axis], inertia.denominator)?;
         let numerator = checked_mul(
