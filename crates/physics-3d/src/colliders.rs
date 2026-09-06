@@ -193,7 +193,7 @@ fn aabb_aabb_contact(
         let combined_half = i128::from(left_half[axis])
             .checked_add(i128::from(right_half[axis]))
             .ok_or(ColliderError3d::ArithmeticOverflow)?;
-        let gap = center_distance.saturating_sub(combined_half);
+        let gap = center_distance.saturating_sub(combined_half).max(0);
         separated_squared = separated_squared
             .checked_add(
                 gap.checked_mul(gap)
