@@ -1,6 +1,7 @@
 mod colliders;
 mod continuous_solver;
 mod controller;
+mod impact;
 mod interactions;
 mod scenario;
 #[allow(dead_code)]
@@ -14,6 +15,9 @@ pub use colliders::{
 pub use continuous_solver::step_3d;
 pub use controller::{
     ControllerConfig3d, ControllerError3d, ControllerInput3d, controller_operations,
+};
+pub use impact::{
+    DestructionRecipe3d, ImpactError3d, ImpactEvidence3d, destruction_operations, impact_evidence,
 };
 pub use interactions::{
     ColliderRole3d, CollisionFilter3d, InteractiveCollider3d, PairInteraction3d, SensorEvent3d,
