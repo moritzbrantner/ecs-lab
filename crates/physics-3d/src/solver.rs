@@ -1,4 +1,7 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    cmp::Ordering,
+    collections::{BTreeMap, BTreeSet},
+};
 
 use ecs_physics::{BodyKind, MATERIAL_SCALE, PhysicsMaterial};
 use ecs_workload::{EntityId, EntitySnapshot, Operation, Position, Velocity, WorldSnapshot};
@@ -11,18 +14,28 @@ use crate::types::{
 };
 
 const MAX_EXACT_F32_INTEGER: i64 = 16_777_216;
+const SUBTICK_SCALE: i128 = 1_i128 << 32;
+const MAX_CCD_EVENTS_PER_BODY: usize = 64;
+const MAX_STATIC_CORRECTION_PASSES: usize = 8;
 
 /// Produces one deterministic three-dimensional AABB physics step.
 ///
-/// Positions and velocities remain integer ECS components. Candidate pairs are visited in ascending
-/// entity-id order, the reusable geometry kernel owns the 3D AABB overlap decision, and this crate
-/// owns deterministic positional correction plus mass, restitution, and two-axis tangent friction.
-/// Returned mutations remain ordinary ECS workload operations.
+/// Dynamic bodies are integrated through a four-dimensional space-time interval `(x, y, z, t)`.
+/// Swept AABB tests find the earliest time of impact against fixed bodies before discrete end-of-step
+/// overlap handling. Time-of-impact ordering is compared with exact integer fractions while temporal
+/// advancement uses deterministic Q32.32 subticks. Dynamic-vs-dynamic response remains the existing
+/// deterministic discrete path for this first CCD horizon.
+///
+/// Positions and velocities remain integer ECS components. Body configuration and pair ordering are
+/// canonicalized by entity id, the reusable geometry kernel remains authoritative for discrete 3D
+/// overlap/touching, and this crate owns deterministic response and positional correction. Returned
+/// mutations remain ordinary ECS workload operations.
 ///
 /// # Errors
 ///
 /// Returns [`PhysicsError3d`] for malformed body configuration, missing ECS components, coordinates
-/// outside the exact f32 collision range, or a non-positive timestep.
+/// outside the exact f32 collision range, a non-positive timestep, or a body that exceeds the bounded
+/// static CCD/contact iteration budget.
 pub fn step_3d(
     snapshot: &WorldSnapshot,
     bodies: &[PhysicsBody3d],
@@ -43,37 +56,58 @@ pub fn step_3d(
         .map(|body| BodyState::from_body(body, &snapshots))
         .collect::<Result<Vec<_>, _>>()?;
 
-    for state in &mut body_states {
-        state.integrate(config.gravity, ticks);
-        state.validate_geometry_range()?;
-    }
-
+    let body_count = body_states.len();
     let mut step_stats = PhysicsStep3dStats {
-        body_count: body_states.len(),
+        body_count,
+        candidate_pairs: body_count.saturating_mul(body_count.saturating_sub(1)) / 2,
         ..PhysicsStep3dStats::default()
     };
     let mut contacts = Vec::new();
     let mut supporting_entities = BTreeSet::new();
 
+    for dynamic_index in 0..body_states.len() {
+        if body_states[dynamic_index].kind == BodyKind::Fixed {
+            continue;
+        }
+        integrate_dynamic_with_static_ccd(
+            &mut body_states,
+            dynamic_index,
+            config.gravity,
+            ticks,
+            &mut step_stats,
+            &mut contacts,
+            &mut supporting_entities,
+        )?;
+    }
+
+    // Dynamic-vs-dynamic CCD is intentionally the next horizon. Preserve the existing deterministic
+    // discrete response for those pairs while static geometry already uses continuous space-time TOI.
     for left_index in 0..body_states.len() {
         for right_index in (left_index + 1)..body_states.len() {
-            step_stats.candidate_pairs = step_stats.candidate_pairs.saturating_add(1);
+            if body_states[left_index].kind != BodyKind::Dynamic
+                || body_states[right_index].kind != BodyKind::Dynamic
+            {
+                continue;
+            }
             let (left_slice, right_slice) = body_states.split_at_mut(right_index);
             let left = &mut left_slice[left_index];
             let right = &mut right_slice[0];
             let outcome = resolve_pair(left, right)?;
-            if let Some(contact) = outcome.contact {
-                contacts.push(contact);
-                step_stats.contacts = step_stats.contacts.saturating_add(1);
-            }
-            if outcome.resolved {
-                step_stats.resolved_contacts = step_stats.resolved_contacts.saturating_add(1);
-            }
-            if let Some(entity) = outcome.supported_entity {
-                supporting_entities.insert(entity);
-            }
+            record_pair_outcome(
+                outcome,
+                &mut step_stats,
+                &mut contacts,
+                &mut supporting_entities,
+            );
         }
     }
+
+    stabilize_static_penetrations(
+        &mut body_states,
+        &mut step_stats,
+        &mut contacts,
+        &mut supporting_entities,
+    )?;
 
     Ok(PhysicsStep3d {
         operations: changed_operations(&body_states),
@@ -164,7 +198,7 @@ impl BodyState {
         Ok(state)
     }
 
-    fn integrate(&mut self, gravity: Velocity, ticks: i32) {
+    fn apply_gravity(&mut self, gravity: Velocity, ticks: i32) {
         if self.kind == BodyKind::Fixed {
             return;
         }
@@ -180,19 +214,6 @@ impl BodyState {
             .velocity
             .z
             .saturating_add(gravity.z.saturating_mul(ticks));
-        let ticks = i64::from(ticks);
-        self.position.x = self
-            .position
-            .x
-            .saturating_add(i64::from(self.velocity.x).saturating_mul(ticks));
-        self.position.y = self
-            .position
-            .y
-            .saturating_add(i64::from(self.velocity.y).saturating_mul(ticks));
-        self.position.z = self
-            .position
-            .z
-            .saturating_add(i64::from(self.velocity.z).saturating_mul(ticks));
     }
 
     fn validate_geometry_range(&self) -> Result<(), PhysicsError3d> {
@@ -265,6 +286,8 @@ enum Axis {
 }
 
 impl Axis {
+    const ALL: [Self; 3] = [Self::X, Self::Y, Self::Z];
+
     const fn index(self) -> usize {
         match self {
             Self::X => 0,
@@ -282,11 +305,499 @@ impl Axis {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct TimeFraction {
+    numerator: i128,
+    denominator: i128,
+}
+
+impl TimeFraction {
+    fn new(numerator: i128, denominator: i128) -> Self {
+        debug_assert_ne!(denominator, 0);
+        if denominator < 0 {
+            Self {
+                numerator: -numerator,
+                denominator: -denominator,
+            }
+        } else {
+            Self {
+                numerator,
+                denominator,
+            }
+        }
+    }
+
+    const fn is_negative(self) -> bool {
+        self.numerator < 0
+    }
+
+    fn checked_cmp(self, other: Self, entity: EntityId) -> Result<Ordering, PhysicsError3d> {
+        let left = self
+            .numerator
+            .checked_mul(other.denominator)
+            .ok_or(PhysicsError3d::CoordinateOutOfRange(entity))?;
+        let right = other
+            .numerator
+            .checked_mul(self.denominator)
+            .ok_or(PhysicsError3d::CoordinateOutOfRange(entity))?;
+        Ok(left.cmp(&right))
+    }
+
+    fn within_subticks(
+        self,
+        remaining_subticks: i128,
+        entity: EntityId,
+    ) -> Result<bool, PhysicsError3d> {
+        let remaining = Self::new(remaining_subticks, SUBTICK_SCALE);
+        Ok(self.checked_cmp(remaining, entity)? != Ordering::Greater)
+    }
+
+    fn to_subticks_floor(self, entity: EntityId) -> Result<i128, PhysicsError3d> {
+        let scaled = self
+            .numerator
+            .checked_mul(SUBTICK_SCALE)
+            .ok_or(PhysicsError3d::CoordinateOutOfRange(entity))?;
+        Ok((scaled / self.denominator).max(0))
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ScaledPosition {
+    values: [i128; 3],
+}
+
+impl ScaledPosition {
+    fn from_position(position: Position) -> Self {
+        Self {
+            values: [
+                i128::from(position.x) * SUBTICK_SCALE,
+                i128::from(position.y) * SUBTICK_SCALE,
+                i128::from(position.z) * SUBTICK_SCALE,
+            ],
+        }
+    }
+
+    const fn axis(self, axis: Axis) -> i128 {
+        self.values[axis.index()]
+    }
+
+    fn set_axis(&mut self, axis: Axis, value: i128) {
+        self.values[axis.index()] = value;
+    }
+
+    fn advance(
+        &mut self,
+        velocity: Velocity,
+        subticks: i128,
+        entity: EntityId,
+    ) -> Result<(), PhysicsError3d> {
+        for axis in Axis::ALL {
+            let delta = i128::from(velocity_component(velocity, axis))
+                .checked_mul(subticks)
+                .ok_or(PhysicsError3d::CoordinateOutOfRange(entity))?;
+            self.values[axis.index()] = self.values[axis.index()]
+                .checked_add(delta)
+                .ok_or(PhysicsError3d::CoordinateOutOfRange(entity))?;
+        }
+        Ok(())
+    }
+
+    fn into_position(self, entity: EntityId) -> Result<Position, PhysicsError3d> {
+        let x = scaled_axis_to_i64(self.values[0], entity)?;
+        let y = scaled_axis_to_i64(self.values[1], entity)?;
+        let z = scaled_axis_to_i64(self.values[2], entity)?;
+        Ok(Position::new3(x, y, z))
+    }
+}
+
+fn scaled_axis_to_i64(value: i128, entity: EntityId) -> Result<i64, PhysicsError3d> {
+    i64::try_from(value / SUBTICK_SCALE).map_err(|_| PhysicsError3d::CoordinateOutOfRange(entity))
+}
+
+const fn velocity_component(velocity: Velocity, axis: Axis) -> i32 {
+    match axis {
+        Axis::X => velocity.x,
+        Axis::Y => velocity.y,
+        Axis::Z => velocity.z,
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct StaticSweepHit {
+    fixed_index: usize,
+    axis: Axis,
+    normal_to_fixed: i64,
+    contact_coordinate: i128,
+    time: TimeFraction,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn integrate_dynamic_with_static_ccd(
+    body_states: &mut [BodyState],
+    dynamic_index: usize,
+    gravity: Velocity,
+    ticks: i32,
+    step_stats: &mut PhysicsStep3dStats,
+    contacts: &mut Vec<PhysicsContact3d>,
+    supporting_entities: &mut BTreeSet<EntityId>,
+) -> Result<(), PhysicsError3d> {
+    let dynamic_entity = body_states[dynamic_index].entity;
+    body_states[dynamic_index].apply_gravity(gravity, ticks);
+    let mut position = ScaledPosition::from_position(body_states[dynamic_index].position);
+    let mut remaining_subticks = i128::from(ticks)
+        .checked_mul(SUBTICK_SCALE)
+        .ok_or(PhysicsError3d::CoordinateOutOfRange(dynamic_entity))?;
+    let mut events = 0_usize;
+
+    while remaining_subticks > 0 {
+        let hit = find_earliest_static_hit(
+            body_states,
+            dynamic_index,
+            position,
+            remaining_subticks,
+            step_stats,
+        )?;
+        let Some(hit) = hit else {
+            position.advance(
+                body_states[dynamic_index].velocity,
+                remaining_subticks,
+                dynamic_entity,
+            )?;
+            break;
+        };
+
+        if events >= MAX_CCD_EVENTS_PER_BODY {
+            return Err(PhysicsError3d::CcdIterationLimit(dynamic_entity));
+        }
+
+        let hit_subticks = hit.time.to_subticks_floor(dynamic_entity)?;
+        position.advance(
+            body_states[dynamic_index].velocity,
+            hit_subticks,
+            dynamic_entity,
+        )?;
+        // The slab TOI makes the normal-axis contact coordinate exact even when tangent coordinates
+        // lie between integer ECS units. Snap only that axis; tangent axes retain Q32.32 precision.
+        position.set_axis(hit.axis, hit.contact_coordinate);
+        remaining_subticks = remaining_subticks.saturating_sub(hit_subticks);
+
+        let fixed = body_states[hit.fixed_index];
+        let resolved = apply_static_response(&mut body_states[dynamic_index], fixed, hit.axis);
+        let contact = static_sweep_contact(body_states[dynamic_index], fixed, hit);
+        contacts.push(contact);
+        step_stats.contacts = step_stats.contacts.saturating_add(1);
+        step_stats.ccd_contacts = step_stats.ccd_contacts.saturating_add(1);
+        if resolved {
+            step_stats.resolved_contacts = step_stats.resolved_contacts.saturating_add(1);
+        }
+        if hit.axis == Axis::Y && hit.normal_to_fixed < 0 {
+            supporting_entities.insert(dynamic_entity);
+        }
+
+        events = events.saturating_add(1);
+    }
+
+    body_states[dynamic_index].position = position.into_position(dynamic_entity)?;
+    body_states[dynamic_index].validate_geometry_range()
+}
+
+fn find_earliest_static_hit(
+    body_states: &[BodyState],
+    dynamic_index: usize,
+    position: ScaledPosition,
+    remaining_subticks: i128,
+    step_stats: &mut PhysicsStep3dStats,
+) -> Result<Option<StaticSweepHit>, PhysicsError3d> {
+    let dynamic = body_states[dynamic_index];
+    let mut earliest: Option<StaticSweepHit> = None;
+
+    for (fixed_index, fixed) in body_states.iter().copied().enumerate() {
+        if fixed.kind != BodyKind::Fixed {
+            continue;
+        }
+        step_stats.ccd_candidate_pairs = step_stats.ccd_candidate_pairs.saturating_add(1);
+        let Some(mut hit) = sweep_static_aabb(dynamic, position, fixed, remaining_subticks)? else {
+            continue;
+        };
+        hit.fixed_index = fixed_index;
+
+        let replace = match earliest {
+            None => true,
+            Some(current) => {
+                hit.time.checked_cmp(current.time, dynamic.entity)? == Ordering::Less
+            }
+        };
+        if replace {
+            earliest = Some(hit);
+        }
+    }
+
+    Ok(earliest)
+}
+
+fn sweep_static_aabb(
+    dynamic: BodyState,
+    position: ScaledPosition,
+    fixed: BodyState,
+    remaining_subticks: i128,
+) -> Result<Option<StaticSweepHit>, PhysicsError3d> {
+    if !temporal_broad_phase_overlaps(dynamic, position, fixed, remaining_subticks)? {
+        return Ok(None);
+    }
+
+    let mut entry: Option<(TimeFraction, Axis, i64, i128)> = None;
+    let mut exit: Option<TimeFraction> = None;
+
+    for axis in Axis::ALL {
+        let point = position.axis(axis);
+        let (minimum, maximum) = expanded_static_bounds(dynamic, fixed, axis);
+        let velocity = dynamic.axis_velocity(axis);
+        if velocity == 0 {
+            if point < minimum || point > maximum {
+                return Ok(None);
+            }
+            continue;
+        }
+
+        let velocity_scaled = i128::from(velocity)
+            .checked_mul(SUBTICK_SCALE)
+            .ok_or(PhysicsError3d::CoordinateOutOfRange(dynamic.entity))?;
+        let to_minimum = TimeFraction::new(minimum - point, velocity_scaled);
+        let to_maximum = TimeFraction::new(maximum - point, velocity_scaled);
+        let (axis_entry, axis_exit, normal_to_fixed, contact_coordinate) = if velocity > 0 {
+            (to_minimum, to_maximum, 1_i64, minimum)
+        } else {
+            (to_maximum, to_minimum, -1_i64, maximum)
+        };
+
+        let replace_entry = match entry {
+            None => true,
+            Some((current, ..)) => {
+                axis_entry.checked_cmp(current, dynamic.entity)? == Ordering::Greater
+            }
+        };
+        if replace_entry {
+            entry = Some((
+                axis_entry,
+                axis,
+                normal_to_fixed,
+                contact_coordinate,
+            ));
+        }
+
+        let replace_exit = match exit {
+            None => true,
+            Some(current) => {
+                axis_exit.checked_cmp(current, dynamic.entity)? == Ordering::Less
+            }
+        };
+        if replace_exit {
+            exit = Some(axis_exit);
+        }
+
+        if let (Some((entry_time, ..)), Some(exit_time)) = (entry, exit) {
+            if entry_time.checked_cmp(exit_time, dynamic.entity)? == Ordering::Greater {
+                return Ok(None);
+            }
+        }
+    }
+
+    let Some((entry_time, axis, normal_to_fixed, contact_coordinate)) = entry else {
+        return Ok(None);
+    };
+    let Some(exit_time) = exit else {
+        return Ok(None);
+    };
+    if entry_time.is_negative() || exit_time.is_negative() {
+        return Ok(None);
+    }
+    if !entry_time.within_subticks(remaining_subticks, dynamic.entity)? {
+        return Ok(None);
+    }
+
+    Ok(Some(StaticSweepHit {
+        fixed_index: 0,
+        axis,
+        normal_to_fixed,
+        contact_coordinate,
+        time: entry_time,
+    }))
+}
+
+fn temporal_broad_phase_overlaps(
+    dynamic: BodyState,
+    position: ScaledPosition,
+    fixed: BodyState,
+    remaining_subticks: i128,
+) -> Result<bool, PhysicsError3d> {
+    for axis in Axis::ALL {
+        let start = position.axis(axis);
+        let delta = i128::from(dynamic.axis_velocity(axis))
+            .checked_mul(remaining_subticks)
+            .ok_or(PhysicsError3d::CoordinateOutOfRange(dynamic.entity))?;
+        let end = start
+            .checked_add(delta)
+            .ok_or(PhysicsError3d::CoordinateOutOfRange(dynamic.entity))?;
+        let swept_min = start.min(end);
+        let swept_max = start.max(end);
+        let (fixed_min, fixed_max) = expanded_static_bounds(dynamic, fixed, axis);
+        if swept_max < fixed_min || swept_min > fixed_max {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+fn expanded_static_bounds(dynamic: BodyState, fixed: BodyState, axis: Axis) -> (i128, i128) {
+    let index = axis.index();
+    let center = i128::from(fixed.axis_position(axis)) * SUBTICK_SCALE;
+    let expanded_half = (i128::from(dynamic.half_extents[index])
+        + i128::from(fixed.half_extents[index]))
+        * SUBTICK_SCALE;
+    (center - expanded_half, center + expanded_half)
+}
+
+fn apply_static_response(dynamic: &mut BodyState, fixed: BodyState, axis: Axis) -> bool {
+    let restitution_milli = dynamic
+        .material
+        .restitution_milli
+        .max(fixed.material.restitution_milli);
+    let friction_milli = dynamic
+        .material
+        .friction_milli
+        .max(fixed.material.friction_milli);
+
+    let normal_velocity = dynamic.axis_velocity(axis);
+    let reflected = scaled_i32(-i64::from(normal_velocity), restitution_milli);
+    let mut changed = dynamic.set_axis_velocity(axis, reflected);
+
+    if friction_milli > 0 {
+        let retained = MATERIAL_SCALE.saturating_sub(friction_milli);
+        for tangent in axis.tangents() {
+            let next = scaled_i32(i64::from(dynamic.axis_velocity(tangent)), retained);
+            changed |= dynamic.set_axis_velocity(tangent, next);
+        }
+    }
+
+    changed
+}
+
+fn static_sweep_contact(
+    dynamic: BodyState,
+    fixed: BodyState,
+    hit: StaticSweepHit,
+) -> PhysicsContact3d {
+    if dynamic.entity < fixed.entity {
+        PhysicsContact3d {
+            left: dynamic.entity,
+            right: fixed.entity,
+            normal: contact_normal(hit.axis, hit.normal_to_fixed),
+            penetration: 0,
+        }
+    } else {
+        PhysicsContact3d {
+            left: fixed.entity,
+            right: dynamic.entity,
+            normal: contact_normal(hit.axis, -hit.normal_to_fixed),
+            penetration: 0,
+        }
+    }
+}
+
+fn stabilize_static_penetrations(
+    body_states: &mut [BodyState],
+    step_stats: &mut PhysicsStep3dStats,
+    contacts: &mut Vec<PhysicsContact3d>,
+    supporting_entities: &mut BTreeSet<EntityId>,
+) -> Result<(), PhysicsError3d> {
+    for _ in 0..MAX_STATIC_CORRECTION_PASSES {
+        let mut corrected_any = false;
+        for left_index in 0..body_states.len() {
+            for right_index in (left_index + 1)..body_states.len() {
+                let kinds = (body_states[left_index].kind, body_states[right_index].kind);
+                if !matches!(
+                    kinds,
+                    (BodyKind::Dynamic, BodyKind::Fixed)
+                        | (BodyKind::Fixed, BodyKind::Dynamic)
+                ) {
+                    continue;
+                }
+                if !has_positive_penetration(body_states[left_index], body_states[right_index])? {
+                    continue;
+                }
+
+                let (left_slice, right_slice) = body_states.split_at_mut(right_index);
+                let left = &mut left_slice[left_index];
+                let right = &mut right_slice[0];
+                let outcome = resolve_pair(left, right)?;
+                corrected_any |= outcome.resolved;
+                record_pair_outcome(
+                    outcome,
+                    step_stats,
+                    contacts,
+                    supporting_entities,
+                );
+            }
+        }
+        if !corrected_any {
+            return Ok(());
+        }
+    }
+
+    for left_index in 0..body_states.len() {
+        for right_index in (left_index + 1)..body_states.len() {
+            let (dynamic, fixed) = match (
+                body_states[left_index].kind,
+                body_states[right_index].kind,
+            ) {
+                (BodyKind::Dynamic, BodyKind::Fixed) => {
+                    (body_states[left_index], body_states[right_index])
+                }
+                (BodyKind::Fixed, BodyKind::Dynamic) => {
+                    (body_states[right_index], body_states[left_index])
+                }
+                _ => continue,
+            };
+            if has_positive_penetration(dynamic, fixed)? {
+                return Err(PhysicsError3d::CcdIterationLimit(dynamic.entity));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn has_positive_penetration(left: BodyState, right: BodyState) -> Result<bool, PhysicsError3d> {
+    if !aabb_aabb(left.geometry_aabb()?, right.geometry_aabb()?).overlaps {
+        return Ok(false);
+    }
+    Ok(integer_axis_overlap(&left, &right, Axis::X) > 0
+        && integer_axis_overlap(&left, &right, Axis::Y) > 0
+        && integer_axis_overlap(&left, &right, Axis::Z) > 0)
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 struct PairOutcome {
     contact: Option<PhysicsContact3d>,
     resolved: bool,
     supported_entity: Option<EntityId>,
+}
+
+fn record_pair_outcome(
+    outcome: PairOutcome,
+    step_stats: &mut PhysicsStep3dStats,
+    contacts: &mut Vec<PhysicsContact3d>,
+    supporting_entities: &mut BTreeSet<EntityId>,
+) {
+    if let Some(contact) = outcome.contact {
+        contacts.push(contact);
+        step_stats.contacts = step_stats.contacts.saturating_add(1);
+    }
+    if outcome.resolved {
+        step_stats.resolved_contacts = step_stats.resolved_contacts.saturating_add(1);
+    }
+    if let Some(entity) = outcome.supported_entity {
+        supporting_entities.insert(entity);
+    }
 }
 
 fn resolve_pair(
@@ -661,5 +1172,172 @@ mod tests {
                 .operations()
                 .contains(&Operation::SetVelocity(right, Velocity::new3(0, 0, 2)))
         );
+    }
+
+    #[test]
+    fn fast_dynamic_body_cannot_tunnel_through_fixed_wall() {
+        let dynamic = EntityId(1);
+        let wall = EntityId(2);
+        let snapshot = WorldSnapshot::new(vec![
+            EntitySnapshot {
+                id: dynamic,
+                position: Some(Position::new3(-10, 0, 0)),
+                velocity: Some(Velocity::new3(30, 0, 0)),
+            },
+            EntitySnapshot {
+                id: wall,
+                position: Some(Position::new3(0, 0, 0)),
+                velocity: None,
+            },
+        ]);
+        let physics = step_3d(
+            &snapshot,
+            &[
+                PhysicsBody3d::dynamic(dynamic, [1, 1, 1]),
+                PhysicsBody3d::fixed(wall, [1, 20, 20]),
+            ],
+            NO_GRAVITY,
+            1,
+        )
+        .expect("swept wall collision should succeed");
+
+        assert!(
+            physics
+                .operations()
+                .contains(&Operation::SetPosition(dynamic, Position::new3(-2, 0, 0)))
+        );
+        assert!(
+            physics
+                .operations()
+                .contains(&Operation::SetVelocity(dynamic, Velocity::new3(0, 0, 0)))
+        );
+        assert_eq!(physics.stats().ccd_contacts, 1);
+        assert_eq!(
+            physics.contacts()[0].normal,
+            ContactNormal3d { x: 1, y: 0, z: 0 }
+        );
+    }
+
+    #[test]
+    fn bouncy_static_toi_consumes_the_remaining_fraction_of_the_step() {
+        let dynamic = EntityId(1);
+        let wall = EntityId(2);
+        let snapshot = WorldSnapshot::new(vec![
+            EntitySnapshot {
+                id: dynamic,
+                position: Some(Position::new3(-10, 0, 0)),
+                velocity: Some(Velocity::new3(30, 0, 0)),
+            },
+            EntitySnapshot {
+                id: wall,
+                position: Some(Position::new3(0, 0, 0)),
+                velocity: None,
+            },
+        ]);
+        let bouncy = PhysicsMaterial::new(1_000, 0);
+        let physics = step_3d(
+            &snapshot,
+            &[
+                PhysicsBody3d::dynamic(dynamic, [1, 1, 1]).with_material(bouncy),
+                PhysicsBody3d::fixed(wall, [1, 20, 20]),
+            ],
+            NO_GRAVITY,
+            1,
+        )
+        .expect("bouncy swept wall collision should succeed");
+
+        assert!(
+            physics
+                .operations()
+                .contains(&Operation::SetPosition(dynamic, Position::new3(-24, 0, 0)))
+        );
+        assert!(
+            physics
+                .operations()
+                .contains(&Operation::SetVelocity(dynamic, Velocity::new3(-30, 0, 0)))
+        );
+    }
+
+    #[test]
+    fn swept_aabb_requires_tangent_overlap_at_time_of_impact() {
+        let dynamic = EntityId(1);
+        let wall = EntityId(2);
+        let snapshot = WorldSnapshot::new(vec![
+            EntitySnapshot {
+                id: dynamic,
+                position: Some(Position::new3(-10, 50, 0)),
+                velocity: Some(Velocity::new3(30, 0, 0)),
+            },
+            EntitySnapshot {
+                id: wall,
+                position: Some(Position::new3(0, 0, 0)),
+                velocity: None,
+            },
+        ]);
+        let physics = step_3d(
+            &snapshot,
+            &[
+                PhysicsBody3d::dynamic(dynamic, [1, 1, 1]),
+                PhysicsBody3d::fixed(wall, [1, 5, 5]),
+            ],
+            NO_GRAVITY,
+            1,
+        )
+        .expect("tangent miss should remain collision-free");
+
+        assert!(
+            physics
+                .operations()
+                .contains(&Operation::SetPosition(dynamic, Position::new3(20, 50, 0)))
+        );
+        assert_eq!(physics.stats().ccd_contacts, 0);
+    }
+
+    #[test]
+    fn bounded_toi_loop_handles_multiple_wall_impacts_in_one_step() {
+        let dynamic = EntityId(1);
+        let left_wall = EntityId(2);
+        let right_wall = EntityId(3);
+        let snapshot = WorldSnapshot::new(vec![
+            EntitySnapshot {
+                id: dynamic,
+                position: Some(Position::new3(0, 0, 0)),
+                velocity: Some(Velocity::new3(100, 0, 0)),
+            },
+            EntitySnapshot {
+                id: left_wall,
+                position: Some(Position::new3(-10, 0, 0)),
+                velocity: None,
+            },
+            EntitySnapshot {
+                id: right_wall,
+                position: Some(Position::new3(10, 0, 0)),
+                velocity: None,
+            },
+        ]);
+        let bouncy = PhysicsMaterial::new(1_000, 0);
+        let physics = step_3d(
+            &snapshot,
+            &[
+                PhysicsBody3d::dynamic(dynamic, [1, 1, 1]).with_material(bouncy),
+                PhysicsBody3d::fixed(left_wall, [1, 20, 20]),
+                PhysicsBody3d::fixed(right_wall, [1, 20, 20]),
+            ],
+            NO_GRAVITY,
+            1,
+        )
+        .expect("multiple swept wall impacts should succeed");
+
+        assert!(
+            physics
+                .operations()
+                .contains(&Operation::SetPosition(dynamic, Position::new3(4, 0, 0)))
+        );
+        assert!(
+            physics
+                .operations()
+                .contains(&Operation::SetVelocity(dynamic, Velocity::new3(100, 0, 0)))
+        );
+        assert_eq!(physics.stats().ccd_contacts, 6);
     }
 }
