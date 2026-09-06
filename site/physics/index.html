@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="Run ECS Lab's deterministic three-dimensional Rust physics room at a true 60 Hz solver rate with unified continuous AABB collision detection, simultaneous contact sets, WebGPU rendering, material-response evidence, and exact final-frame collision verification."
+      content="Run ECS Lab's deterministic three-dimensional Rust physics at a true 60 Hz solver rate with swept AABB collision detection, material response, rotation-aware box-plane torque, tumbling dice evidence, WebGPU rendering, and exact browser inspection."
     />
     <title>ECS Lab — 3D physics demo</title>
     <link rel="stylesheet" href="../styles.css" />
@@ -23,11 +23,13 @@
           and back room. Rust advances the authoritative simulation at 60 fixed solver steps per second,
           sweeps fixed and moving AABB pairs through X/Y/Z/time inside every 1/60-second frame, collects
           every pair and tied axis at the earliest exact impact time, and resolves that contact set
-          deterministically before the next frame. The browser only presents those Rust frames and exposes
-          direct camera controls.
+          deterministically before the next frame. A separate rotation-aware dice fixture now demonstrates
+          Rust-owned orientation, off-center contact impulses, and angular velocity without pretending the
+          existing AABB room is already an oriented-box solver.
         </p>
         <nav class="actions" aria-label="Project links">
           <a class="button primary" href="#physics-playground">Open the 3D room</a>
+          <a class="button" href="#tumbling-dice">Tumble a die</a>
           <a class="button" href="#material-response">Compare bounciness</a>
           <a class="button" href="../">Back to ECS Lab</a>
           <a class="button" href="https://github.com/moritzbrantner/ecs-lab">Source on GitHub</a>
@@ -121,6 +123,46 @@
         </div>
       </section>
 
+      <section class="method dice-lab" id="tumbling-dice" aria-labelledby="dice-title">
+        <div class="section-copy">
+          <p class="eyebrow">Angular rigid-body slice</p>
+          <h2 id="dice-title">A tilted box acquires real spin from an off-center floor impact</h2>
+          <p>
+            This fixture starts with a tilted cuboid and zero angular velocity. Every 1/60-second step is
+            computed in Rust. The actual oriented corners determine which vertex or edge reaches the
+            plane; the resulting contact impulse acts away from the center of mass and therefore changes
+            angular velocity through the cuboid inertia tensor. The browser draws the eight exact vertices
+            exported by that same Rust collision geometry rather than rotating a decorative cube itself.
+          </p>
+        </div>
+
+        <div class="dice-workbench">
+          <canvas
+            class="dice-stage"
+            id="dice-canvas"
+            width="960"
+            height="520"
+            aria-label="Wireframe of a Rust-simulated oriented box tumbling against a horizontal plane"
+          ></canvas>
+          <div class="dice-transport">
+            <button class="compact-button" id="dice-reset" type="button">Reset</button>
+            <button class="compact-button" id="dice-step" type="button">Step +1</button>
+            <button class="compact-button" id="dice-run" type="button">Run</button>
+            <label class="frame-control dice-frame-control" for="dice-frame">
+              <span>Dice frame · 1/60 s</span>
+              <strong id="dice-frame-label">0</strong>
+              <input id="dice-frame" type="range" min="0" max="360" value="0" step="1" />
+            </label>
+          </div>
+          <p class="dice-status" id="dice-status" aria-live="polite">
+            Loading Rust-owned angular state and oriented collision vertices…
+          </p>
+          <p class="scenario-legend">
+            Zero initial spin · Q30 Rust quaternion · oriented box↔plane contact · off-center normal impulse · cuboid inertia · 60 Hz authoritative stepping
+          </p>
+        </div>
+      </section>
+
       <section class="method material-lab" id="material-response" aria-labelledby="material-response-title">
         <div class="section-copy">
           <p class="eyebrow">Material response</p>
@@ -145,10 +187,10 @@
           <p>
             Rust owns the 60 Hz fixed-step progression, relative-motion swept pair tests, exact fractional
             TOI comparison inside each frame, global earliest contact-set collection, bounded coupled
-            response, deterministic fixed-point quantization, and ECS writes. The Wasm adapter normalizes
-            the high-resolution integer room coordinates only for display. Mouse input changes the camera;
-            playback and manual frame selection never integrate velocity, resolve contacts, or invent
-            intermediate physics states.
+            response, deterministic fixed-point quantization, angular orientation integration, and the
+            rotation-aware dice contact response. The Wasm adapter normalizes coordinates only for display.
+            Mouse input changes the room camera; playback and manual frame selection never integrate
+            velocity, resolve contacts, rotate collision geometry, or invent intermediate physics states.
           </p>
         </div>
       </section>
@@ -156,6 +198,7 @@
     <script type="module" src="./app.js"></script>
     <script type="module" src="./temporal.js"></script>
     <script type="module" src="./playback.js"></script>
+    <script type="module" src="./dice.js"></script>
     <script type="module" src="./materials.js"></script>
   </body>
 </html>
