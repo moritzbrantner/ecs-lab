@@ -4,9 +4,8 @@ use ecs_physics::{BodyKind, MATERIAL_SCALE, PhysicsMaterial};
 use ecs_workload::{Position, Velocity};
 
 use crate::{
-    ANGULAR_VELOCITY_SCALE, AngularError3d, AngularState3d, AngularVelocity3d,
-    ORIENTATION_SCALE, Orientation3d, PhysicsBody3d, box_inertia, contact_angular_impulse,
-    integrate_orientation,
+    ANGULAR_VELOCITY_SCALE, AngularError3d, AngularState3d, AngularVelocity3d, ORIENTATION_SCALE,
+    Orientation3d, PhysicsBody3d, box_inertia, contact_angular_impulse, integrate_orientation,
 };
 
 const RESPONSE_SCALE: i128 = 1_i128 << 50;
@@ -30,11 +29,7 @@ pub struct BoxPlaneState3d {
 
 impl BoxPlaneState3d {
     #[must_use]
-    pub const fn new(
-        center: Position,
-        linear_velocity: Velocity,
-        angular: AngularState3d,
-    ) -> Self {
+    pub const fn new(center: Position, linear_velocity: Velocity, angular: AngularState3d) -> Self {
         Self {
             center,
             linear_velocity,
@@ -45,7 +40,7 @@ impl BoxPlaneState3d {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct BoxPlaneConfig3d {
-    /// Linear acceleration in the same coordinate-units/second² used by the box state.
+    /// Linear acceleration in the coordinate units used by the box state.
     pub gravity: Velocity,
     pub plane_y: i64,
     pub timestep_numerator: i32,
@@ -83,11 +78,18 @@ pub enum BoxPlaneError3d {
 impl fmt::Display for BoxPlaneError3d {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::FixedBody => write!(formatter, "box-plane angular stepping requires a dynamic body"),
-            Self::InvalidHalfExtents => {
-                write!(formatter, "box-plane angular stepping requires positive half extents")
-            }
-            Self::ZeroMass => write!(formatter, "box-plane angular stepping requires non-zero mass"),
+            Self::FixedBody => write!(
+                formatter,
+                "box-plane angular stepping requires a dynamic body"
+            ),
+            Self::InvalidHalfExtents => write!(
+                formatter,
+                "box-plane angular stepping requires positive half extents"
+            ),
+            Self::ZeroMass => write!(
+                formatter,
+                "box-plane angular stepping requires non-zero mass"
+            ),
             Self::NegativeTimestepNumerator(value) => write!(
                 formatter,
                 "box-plane timestep numerator must be non-negative, got {value}"
@@ -101,7 +103,9 @@ impl fmt::Display for BoxPlaneError3d {
                 "box-plane angular damping must be 0..={MATERIAL_SCALE}, got {value}"
             ),
             Self::Angular(error) => write!(formatter, "box-plane angular state failed: {error}"),
-            Self::ArithmeticOverflow => write!(formatter, "box-plane angular calculation overflowed"),
+            Self::ArithmeticOverflow => {
+                write!(formatter, "box-plane angular calculation overflowed")
+            }
         }
     }
 }
@@ -116,11 +120,11 @@ impl From<AngularError3d> for BoxPlaneError3d {
 
 /// Advances one oriented cuboid against a static horizontal plane.
 ///
-/// The actual Rust quaternion orientation determines the eight world-space box corners. Tied lowest
-/// vertices become one deterministic contact manifold. An off-center normal impulse changes both the
-/// center-of-mass velocity and angular velocity through the cuboid inertia tensor. The existing AABB
-/// room solver stays unchanged until OBB narrow phase lands, so the browser never sees visual-only tilt.
-/// Rotational CCD remains a later horizon; this 60 Hz slice corrects any discrete penetration first.
+/// Rust orientation determines all eight world-space corners. Tied lowest vertices become one stable
+/// manifold. An off-center normal impulse changes both linear and angular velocity through cuboid
+/// inertia. This does not rotate the existing AABB room solver; the orientation-aware plane fixture is
+/// kept separate until OBB narrow phase is ready. Rotational CCD is also deferred, so this 60 Hz slice
+/// corrects discrete penetration before response.
 ///
 /// # Errors
 ///
@@ -153,13 +157,12 @@ pub fn step_box_on_plane(
         .y
         .checked_add(minimum_y)
         .ok_or(BoxPlaneError3d::ArithmeticOverflow)?;
-
     let contact = if lowest_world_y < config.plane_y {
         Some(resolve_plane_contact(
             &mut next,
             body,
             config,
-            offsets,
+            &offsets,
             minimum_y,
             lowest_world_y,
         )?)
@@ -167,10 +170,8 @@ pub fn step_box_on_plane(
         None
     };
 
-    next.angular.angular_velocity = damp_angular_velocity(
-        next.angular.angular_velocity,
-        config.angular_damping_milli,
-    )?;
+    next.angular.angular_velocity =
+        damp_angular_velocity(next.angular.angular_velocity, config.angular_damping_milli)?;
 
     Ok(BoxPlaneStep3d {
         state: next,
@@ -190,19 +191,19 @@ pub fn oriented_box_vertices(
 ) -> Result<[Position; 8], BoxPlaneError3d> {
     let offsets = oriented_box_offsets(half_extents, orientation)?;
     let mut vertices = [Position::new3(0, 0, 0); 8];
-    for index in 0..8 {
-        vertices[index] = Position::new3(
+    for (vertex, offset) in vertices.iter_mut().zip(offsets) {
+        *vertex = Position::new3(
             center
                 .x
-                .checked_add(offsets[index][0])
+                .checked_add(offset[0])
                 .ok_or(BoxPlaneError3d::ArithmeticOverflow)?,
             center
                 .y
-                .checked_add(offsets[index][1])
+                .checked_add(offset[1])
                 .ok_or(BoxPlaneError3d::ArithmeticOverflow)?,
             center
                 .z
-                .checked_add(offsets[index][2])
+                .checked_add(offset[2])
                 .ok_or(BoxPlaneError3d::ArithmeticOverflow)?,
         );
     }
@@ -331,14 +332,13 @@ fn oriented_box_offsets(
     }
     let matrix = rotation_matrix(orientation.normalized()?)?;
     let mut offsets = [[0_i64; 3]; 8];
-    for index in 0..8 {
-        let signs = CORNER_SIGNS[index];
+    for (offset, signs) in offsets.iter_mut().zip(CORNER_SIGNS) {
         let local = [
             signs[0] * i64::from(half_extents[0]),
             signs[1] * i64::from(half_extents[1]),
             signs[2] * i64::from(half_extents[2]),
         ];
-        offsets[index] = rotate_with_matrix(matrix, local)?;
+        *offset = rotate_with_matrix(matrix, local)?;
     }
     Ok(offsets)
 }
@@ -349,7 +349,6 @@ fn rotation_matrix(orientation: Orientation3d) -> Result<[[i128; 3]; 3], BoxPlan
     let z = i128::from(orientation.z);
     let w = i128::from(orientation.w);
     let scale = i128::from(ORIENTATION_SCALE);
-
     let xx = checked_mul(x, x)?;
     let yy = checked_mul(y, y)?;
     let zz = checked_mul(z, z)?;
@@ -362,34 +361,25 @@ fn rotation_matrix(orientation: Orientation3d) -> Result<[[i128; 3]; 3], BoxPlan
 
     Ok([
         [
-            scale
-                .checked_sub(scaled_twice(checked_add(yy, zz)?, scale)?)
-                .ok_or(BoxPlaneError3d::ArithmeticOverflow)?,
+            checked_sub(scale, scaled_twice(checked_add(yy, zz)?, scale)?)?,
             scaled_twice(checked_sub(xy, zw)?, scale)?,
             scaled_twice(checked_add(xz, yw)?, scale)?,
         ],
         [
             scaled_twice(checked_add(xy, zw)?, scale)?,
-            scale
-                .checked_sub(scaled_twice(checked_add(xx, zz)?, scale)?)
-                .ok_or(BoxPlaneError3d::ArithmeticOverflow)?,
+            checked_sub(scale, scaled_twice(checked_add(xx, zz)?, scale)?)?,
             scaled_twice(checked_sub(yz, xw)?, scale)?,
         ],
         [
             scaled_twice(checked_sub(xz, yw)?, scale)?,
             scaled_twice(checked_add(yz, xw)?, scale)?,
-            scale
-                .checked_sub(scaled_twice(checked_add(xx, yy)?, scale)?)
-                .ok_or(BoxPlaneError3d::ArithmeticOverflow)?,
+            checked_sub(scale, scaled_twice(checked_add(xx, yy)?, scale)?)?,
         ],
     ])
 }
 
 fn scaled_twice(value: i128, scale: i128) -> Result<i128, BoxPlaneError3d> {
-    let doubled = value
-        .checked_mul(2)
-        .ok_or(BoxPlaneError3d::ArithmeticOverflow)?;
-    div_round_nearest(doubled, scale)
+    div_round_nearest(checked_mul(value, 2)?, scale)
 }
 
 fn checked_mul(left: i128, right: i128) -> Result<i128, BoxPlaneError3d> {
@@ -411,14 +401,14 @@ fn rotate_with_matrix(
     matrix: [[i128; 3]; 3],
     vector: [i64; 3],
 ) -> Result<[i64; 3], BoxPlaneError3d> {
-    let mut output = [0_i64; 3];
     let scale = i128::from(ORIENTATION_SCALE);
-    for row in 0..3 {
-        let first = checked_mul(matrix[row][0], i128::from(vector[0]))?;
-        let second = checked_mul(matrix[row][1], i128::from(vector[1]))?;
-        let third = checked_mul(matrix[row][2], i128::from(vector[2]))?;
+    let mut output = [0_i64; 3];
+    for (target, row) in output.iter_mut().zip(matrix) {
+        let first = checked_mul(row[0], i128::from(vector[0]))?;
+        let second = checked_mul(row[1], i128::from(vector[1]))?;
+        let third = checked_mul(row[2], i128::from(vector[2]))?;
         let sum = checked_add(checked_add(first, second)?, third)?;
-        output[row] = i64::try_from(div_round_nearest(sum, scale)?)
+        *target = i64::try_from(div_round_nearest(sum, scale)?)
             .map_err(|_| BoxPlaneError3d::ArithmeticOverflow)?;
     }
     Ok(output)
@@ -429,27 +419,29 @@ fn rotate_inverse(
     vector: [i64; 3],
 ) -> Result<[i64; 3], BoxPlaneError3d> {
     let matrix = rotation_matrix(orientation.normalized()?)?;
-    let transposed = [
-        [matrix[0][0], matrix[1][0], matrix[2][0]],
-        [matrix[0][1], matrix[1][1], matrix[2][1]],
-        [matrix[0][2], matrix[1][2], matrix[2][2]],
-    ];
-    rotate_with_matrix(transposed, vector)
+    rotate_with_matrix(
+        [
+            [matrix[0][0], matrix[1][0], matrix[2][0]],
+            [matrix[0][1], matrix[1][1], matrix[2][1]],
+            [matrix[0][2], matrix[1][2], matrix[2][2]],
+        ],
+        vector,
+    )
 }
 
 fn lowest_offset_y(offsets: &[[i64; 3]; 8]) -> i64 {
-    let mut minimum = offsets[0][1];
-    for offset in &offsets[1..] {
-        minimum = minimum.min(offset[1]);
-    }
-    minimum
+    offsets
+        .iter()
+        .map(|offset| offset[1])
+        .min()
+        .unwrap_or_default()
 }
 
 fn resolve_plane_contact(
     state: &mut BoxPlaneState3d,
     body: PhysicsBody3d,
     config: BoxPlaneConfig3d,
-    offsets: [[i64; 3]; 8],
+    offsets: &[[i64; 3]; 8],
     minimum_y: i64,
     lowest_world_y: i64,
 ) -> Result<BoxPlaneContact3d, BoxPlaneError3d> {
@@ -463,7 +455,7 @@ fn resolve_plane_contact(
         .checked_add(correction)
         .ok_or(BoxPlaneError3d::ArithmeticOverflow)?;
 
-    let (contact_offset, manifold_vertices) = lowest_manifold_offset(&offsets, minimum_y)?;
+    let (contact_offset, manifold_vertices) = lowest_manifold_offset(offsets, minimum_y)?;
     let point = Position::new3(
         state
             .center
@@ -477,13 +469,13 @@ fn resolve_plane_contact(
             .checked_add(contact_offset[2])
             .ok_or(BoxPlaneError3d::ArithmeticOverflow)?,
     );
-    let contact_velocity = contact_velocity(*state, contact_offset)?;
-    let impulse = if contact_velocity[1] < 0 {
+    let contact_y_velocity = contact_velocity(*state, contact_offset)?[1];
+    let impulse = if contact_y_velocity < 0 {
         normal_impulse(
             body,
             state.angular.orientation,
             contact_offset,
-            contact_velocity[1],
+            contact_y_velocity,
             config,
         )?
     } else {
@@ -506,16 +498,13 @@ fn lowest_manifold_offset(
 ) -> Result<([i64; 3], u8), BoxPlaneError3d> {
     let mut sum = [0_i128; 3];
     let mut count = 0_u8;
-    for offset in offsets {
-        if offset[1] != minimum_y {
-            continue;
-        }
+    for offset in offsets.iter().filter(|offset| offset[1] == minimum_y) {
         count = count
             .checked_add(1)
             .ok_or(BoxPlaneError3d::ArithmeticOverflow)?;
-        for axis in 0..3 {
-            sum[axis] = sum[axis]
-                .checked_add(i128::from(offset[axis]))
+        for (total, component) in sum.iter_mut().zip(*offset) {
+            *total = total
+                .checked_add(i128::from(component))
                 .ok_or(BoxPlaneError3d::ArithmeticOverflow)?;
         }
     }
@@ -554,7 +543,6 @@ fn contact_velocity(
         checked_mul(i128::from(omega.y), i128::from(offset[0]))?,
     )?;
     let scale = i128::from(ANGULAR_VELOCITY_SCALE);
-
     Ok([
         add_linear_rotation(state.linear_velocity.x, rotation_x, scale)?,
         add_linear_rotation(state.linear_velocity.y, rotation_y, scale)?,
@@ -582,21 +570,15 @@ fn normal_impulse(
     config: BoxPlaneConfig3d,
 ) -> Result<i64, BoxPlaneError3d> {
     let inertia = box_inertia(body)?;
-    let local = rotate_inverse(
-        orientation,
-        [-contact_offset[2], 0, contact_offset[0]],
-    )?;
+    let local = rotate_inverse(orientation, [-contact_offset[2], 0, contact_offset[0]])?;
     let mut rotational_term_scaled = 0_i128;
-    for axis in 0..3 {
-        let inverse_inertia = inverse_inertia_scaled(
-            inertia.principal_numerators[axis],
-            inertia.denominator,
-        )?;
-        let component = i128::from(local[axis]);
-        let component_squared = checked_mul(component, component)?;
+    for (axis, component) in local.into_iter().enumerate() {
+        let inverse_inertia =
+            inverse_inertia_scaled(inertia.principal_numerators[axis], inertia.denominator)?;
+        let component = i128::from(component);
         rotational_term_scaled = checked_add(
             rotational_term_scaled,
-            checked_mul(component_squared, inverse_inertia)?,
+            checked_mul(checked_mul(component, component)?, inverse_inertia)?,
         )?;
     }
 
@@ -605,7 +587,6 @@ fn normal_impulse(
     if effective_inverse_mass <= 0 {
         return Err(BoxPlaneError3d::ArithmeticOverflow);
     }
-
     let restitution = body
         .material
         .restitution_milli
@@ -627,8 +608,8 @@ fn inverse_inertia_scaled(
     if principal_numerator == 0 {
         return Err(BoxPlaneError3d::ArithmeticOverflow);
     }
-    let principal = i128::try_from(principal_numerator)
-        .map_err(|_| BoxPlaneError3d::ArithmeticOverflow)?;
+    let principal =
+        i128::try_from(principal_numerator).map_err(|_| BoxPlaneError3d::ArithmeticOverflow)?;
     Ok(checked_mul(RESPONSE_SCALE, i128::from(denominator))? / principal)
 }
 
@@ -654,19 +635,20 @@ fn apply_normal_impulse(
     let local_impulse = rotate_inverse(state.angular.orientation, angular_impulse_world)?;
     let inertia = box_inertia(body)?;
     let mut local_delta = [0_i64; 3];
-    for axis in 0..3 {
-        let inverse_inertia = inverse_inertia_scaled(
-            inertia.principal_numerators[axis],
-            inertia.denominator,
-        )?;
+    for (axis, (target, component)) in local_delta
+        .iter_mut()
+        .zip(local_impulse)
+        .enumerate()
+    {
+        let inverse_inertia =
+            inverse_inertia_scaled(inertia.principal_numerators[axis], inertia.denominator)?;
         let numerator = checked_mul(
-            checked_mul(i128::from(local_impulse[axis]), inverse_inertia)?,
+            checked_mul(i128::from(component), inverse_inertia)?,
             i128::from(ANGULAR_VELOCITY_SCALE),
         )?;
-        local_delta[axis] = i64::try_from(div_round_nearest(numerator, RESPONSE_SCALE)?)
+        *target = i64::try_from(div_round_nearest(numerator, RESPONSE_SCALE)?)
             .map_err(|_| BoxPlaneError3d::ArithmeticOverflow)?;
     }
-
     let world_delta = rotate_with_matrix(rotation_matrix(state.angular.orientation)?, local_delta)?;
     state.angular.angular_velocity = AngularVelocity3d::new(
         add_angular_axis(state.angular.angular_velocity.x, world_delta[0])?,
@@ -724,8 +706,7 @@ mod tests {
     use super::*;
 
     fn body() -> PhysicsBody3d {
-        PhysicsBody3d::dynamic(EntityId(1), [10, 10, 10])
-            .with_material(PhysicsMaterial::new(0, 0))
+        PhysicsBody3d::dynamic(EntityId(1), [10, 10, 10]).with_material(PhysicsMaterial::new(0, 0))
     }
 
     fn config() -> BoxPlaneConfig3d {
@@ -750,7 +731,10 @@ mod tests {
         let contact = step.contact.expect("box should touch the plane");
         assert_eq!(contact.manifold_vertices, 4);
         assert!(contact.normal_impulse_units > 0);
-        assert_eq!(step.state.angular.angular_velocity, AngularVelocity3d::default());
+        assert_eq!(
+            step.state.angular.angular_velocity,
+            AngularVelocity3d::default()
+        );
         assert_eq!(step.state.center.y, 10);
     }
 
@@ -773,12 +757,9 @@ mod tests {
 
     #[test]
     fn identity_vertices_match_axis_aligned_box() {
-        let vertices = oriented_box_vertices(
-            Position::new3(2, 3, 4),
-            [1, 2, 3],
-            Orientation3d::IDENTITY,
-        )
-        .expect("valid box");
+        let vertices =
+            oriented_box_vertices(Position::new3(2, 3, 4), [1, 2, 3], Orientation3d::IDENTITY)
+                .expect("valid box");
         assert_eq!(vertices[0], Position::new3(1, 1, 1));
         assert_eq!(vertices[7], Position::new3(3, 5, 7));
     }
