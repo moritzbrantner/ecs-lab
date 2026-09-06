@@ -8,6 +8,7 @@ use ecs_workload::{EntityId, EntitySnapshot, Operation, Position, Velocity, Worl
 
 use crate::{
     solver::axis_fits_exact_f32,
+    swept_broad_phase::{SweptBroadPhaseBody, swept_candidate_pairs},
     types::{
         ContactNormal3d, PhysicsBody3d, PhysicsConfig3d, PhysicsContact3d, PhysicsError3d,
         PhysicsStep3d, PhysicsStep3dStats,
@@ -21,14 +22,15 @@ const MAX_STABILIZATION_PASSES: usize = 8;
 
 /// Produces one deterministic three-dimensional AABB physics step on one global continuous timeline.
 ///
-/// Gravity is applied to every dynamic body first. The solver searches every pair containing at least
-/// one dynamic body for swept-AABB time of impact over the remaining `(x, y, z, t)` interval. All pair
-/// axes and all pairs at the globally earliest exact time are collected into one contact set before any
-/// response. Contact-set entries are ordered by entity pair and then X -> Y -> Z. Coupled normals are
-/// resolved through a bounded deterministic iteration: material restitution is allowed only on the first
-/// response pass, later passes are non-restorative constraint correction, and friction is applied once
-/// after normal convergence. Q32.32 positions remain private intra-step state and are quantized back to
-/// ordinary integer ECS positions before mutations are returned.
+/// Gravity is applied to every dynamic body first. A conservative swept spatial hash reduces the pair
+/// set before exact swept-AABB time-of-impact testing; when the grid cannot represent the range cheaply,
+/// the solver falls back to the naive all-pairs reference path. All pair axes and all pairs at the
+/// globally earliest exact time are collected into one contact set before any response. Contact-set
+/// entries are ordered by entity pair and then X -> Y -> Z. Coupled normals are resolved through a
+/// bounded deterministic iteration: material restitution is allowed only on the first response pass,
+/// later passes are non-restorative constraint correction, and friction is applied once after normal
+/// convergence. Q32.32 positions remain private intra-step state and are quantized back to ordinary
+/// integer ECS positions before mutations are returned.
 ///
 /// # Errors
 ///
@@ -317,6 +319,15 @@ impl BodyState {
             Err(PhysicsError3d::CoordinateOutOfRange(self.entity))
         }
     }
+
+    const fn swept_broad_phase_body(self) -> SweptBroadPhaseBody {
+        SweptBroadPhaseBody {
+            kind: self.kind,
+            center_scaled: self.position.values,
+            half_extents: self.half_extents,
+            velocity: [self.velocity.x, self.velocity.y, self.velocity.z],
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -438,6 +449,30 @@ impl SweepEventSet {
     }
 }
 
+fn broad_phase_pairs(states: &[BodyState], remaining_subticks: i128) -> Vec<(usize, usize)> {
+    let bodies = states
+        .iter()
+        .copied()
+        .map(BodyState::swept_broad_phase_body)
+        .collect::<Vec<_>>();
+    if let Some(pairs) = swept_candidate_pairs(&bodies, remaining_subticks, SUBTICK_SCALE) {
+        return pairs;
+    }
+
+    let mut pairs = Vec::new();
+    for left_index in 0..states.len() {
+        for right_index in (left_index + 1)..states.len() {
+            if states[left_index].kind == BodyKind::Fixed
+                && states[right_index].kind == BodyKind::Fixed
+            {
+                continue;
+            }
+            pairs.push((left_index, right_index));
+        }
+    }
+    pairs
+}
+
 fn find_earliest_event_set(
     states: &[BodyState],
     remaining_subticks: i128,
@@ -446,36 +481,29 @@ fn find_earliest_event_set(
     let mut earliest_time: Option<TimeFraction> = None;
     let mut earliest_hits = Vec::new();
 
-    for left_index in 0..states.len() {
-        for right_index in (left_index + 1)..states.len() {
-            if states[left_index].kind == BodyKind::Fixed
-                && states[right_index].kind == BodyKind::Fixed
-            {
-                continue;
-            }
-            step_stats.ccd_candidate_pairs = step_stats.ccd_candidate_pairs.saturating_add(1);
-            let pair_hits = sweep_pair(states, left_index, right_index, remaining_subticks)?;
-            let Some(candidate) = pair_hits.first() else {
-                continue;
-            };
+    for (left_index, right_index) in broad_phase_pairs(states, remaining_subticks) {
+        step_stats.ccd_candidate_pairs = step_stats.ccd_candidate_pairs.saturating_add(1);
+        let pair_hits = sweep_pair(states, left_index, right_index, remaining_subticks)?;
+        let Some(candidate) = pair_hits.first() else {
+            continue;
+        };
 
-            match earliest_time {
-                None => {
+        match earliest_time {
+            None => {
+                earliest_time = Some(candidate.time);
+                earliest_hits = pair_hits;
+            }
+            Some(current) => match candidate
+                .time
+                .checked_cmp(current, states[left_index].entity)?
+            {
+                Ordering::Less => {
                     earliest_time = Some(candidate.time);
                     earliest_hits = pair_hits;
                 }
-                Some(current) => match candidate
-                    .time
-                    .checked_cmp(current, states[left_index].entity)?
-                {
-                    Ordering::Less => {
-                        earliest_time = Some(candidate.time);
-                        earliest_hits = pair_hits;
-                    }
-                    Ordering::Equal => earliest_hits.extend(pair_hits),
-                    Ordering::Greater => {}
-                },
-            }
+                Ordering::Equal => earliest_hits.extend(pair_hits),
+                Ordering::Greater => {}
+            },
         }
     }
 
