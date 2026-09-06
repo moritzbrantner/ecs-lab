@@ -10,10 +10,15 @@ const PHYSICS_DEMO_MAX_STEPS: u32 = PHYSICS_DEMO_FPS * PHYSICS_DEMO_SECONDS;
 
 static PHYSICS_DEMO_STATE: OnceLock<Mutex<Option<PhysicsDemoState>>> = OnceLock::new();
 
+struct PhysicsDemoFrame {
+    frame: BroadPhaseFrame3d,
+    pair_words: Vec<u32>,
+}
+
 struct PhysicsDemoState {
     scenario: BouncingRoom3dScenario,
     world: ReferenceWorld,
-    frames: Vec<BroadPhaseFrame3d>,
+    frames: Vec<PhysicsDemoFrame>,
     spatial_scale: i64,
 }
 
@@ -23,7 +28,7 @@ impl PhysicsDemoState {
         let spatial_scale = scenario.spatial_scale();
         let mut world = ReferenceWorld::new();
         world.replay(scenario.setup()).ok()?;
-        let initial_frame = scenario.broad_phase_frame(&world.snapshot()).ok()?;
+        let initial_frame = build_demo_frame(&scenario, &world, spatial_scale)?;
         Some(Self {
             scenario,
             world,
@@ -32,7 +37,7 @@ impl PhysicsDemoState {
         })
     }
 
-    fn ensure_frame(&mut self, steps: u32) -> Option<&BroadPhaseFrame3d> {
+    fn ensure_frame(&mut self, steps: u32) -> Option<&PhysicsDemoFrame> {
         if steps > PHYSICS_DEMO_MAX_STEPS {
             return None;
         }
@@ -42,11 +47,21 @@ impl PhysicsDemoState {
             for operation in physics.operations() {
                 self.world.apply(*operation).ok()?;
             }
-            let frame = self.scenario.broad_phase_frame(&self.world.snapshot()).ok()?;
+            let frame = build_demo_frame(&self.scenario, &self.world, self.spatial_scale)?;
             self.frames.push(frame);
         }
         self.frames.get(target)
     }
+}
+
+fn build_demo_frame(
+    scenario: &BouncingRoom3dScenario,
+    world: &ReferenceWorld,
+    spatial_scale: i64,
+) -> Option<PhysicsDemoFrame> {
+    let frame = scenario.broad_phase_frame(&world.snapshot()).ok()?;
+    let pair_words = frame.pair_words_at_spatial_scale(spatial_scale)?;
+    Some(PhysicsDemoFrame { frame, pair_words })
 }
 
 fn demo_state() -> &'static Mutex<Option<PhysicsDemoState>> {
@@ -65,7 +80,12 @@ fn frame_body(body_index: u32, steps: u32) -> Option<(BroadPhaseBody3d, i64)> {
     let mut state = demo_state().lock().ok()?;
     let state = ensure_state(&mut state)?;
     let spatial_scale = state.spatial_scale;
-    let body = state.ensure_frame(steps)?.bodies().get(index).copied()?;
+    let body = state
+        .ensure_frame(steps)?
+        .frame
+        .bodies()
+        .get(index)
+        .copied()?;
     Some((body, spatial_scale))
 }
 
@@ -98,7 +118,7 @@ pub extern "C" fn physics_demo_body_count(steps: u32) -> u32 {
     let Some(frame) = state.ensure_frame(steps) else {
         return 0;
     };
-    u32::try_from(frame.bodies().len()).unwrap_or_default()
+    u32::try_from(frame.frame.bodies().len()).unwrap_or_default()
 }
 
 #[unsafe(no_mangle)]
@@ -183,7 +203,7 @@ pub extern "C" fn physics_demo_pair_word_count(steps: u32) -> u32 {
     let Some(frame) = state.ensure_frame(steps) else {
         return 0;
     };
-    u32::try_from(frame.pair_words().len()).unwrap_or_default()
+    u32::try_from(frame.pair_words.len()).unwrap_or_default()
 }
 
 #[unsafe(no_mangle)]
@@ -200,7 +220,7 @@ pub extern "C" fn physics_demo_pair_word(word_index: u32, steps: u32) -> u32 {
     let Some(frame) = state.ensure_frame(steps) else {
         return 0;
     };
-    frame.pair_words().get(index).copied().unwrap_or(0)
+    frame.pair_words.get(index).copied().unwrap_or(0)
 }
 
 #[unsafe(no_mangle)]
@@ -211,7 +231,14 @@ pub extern "C" fn physics_demo_overlap_count(steps: u32) -> u32 {
     let Some(state) = ensure_state(&mut state) else {
         return 0;
     };
-    state.ensure_frame(steps).map_or(0, BroadPhaseFrame3d::overlap_count)
+    let Some(frame) = state.ensure_frame(steps) else {
+        return 0;
+    };
+    frame
+        .pair_words
+        .iter()
+        .map(|word| word.count_ones())
+        .sum()
 }
 
 #[cfg(test)]
@@ -236,6 +263,9 @@ mod tests {
 
         let one_second_z = physics_demo_position_z(0, 60);
         assert!((one_second_z - initial_z).abs() > 1.0);
-        assert_eq!(physics_demo_position_z(0, 6), physics_demo_position_z(0, 6));
+
+        let first_repeat = physics_demo_position_z(0, 6);
+        let second_repeat = physics_demo_position_z(0, 6);
+        assert_eq!(first_repeat, second_repeat);
     }
 }
