@@ -7,6 +7,7 @@ use crate::{
     AngularError3d, AngularState3d, AngularVelocity3d, BoxBoxStabilizationError3d, BoxPlaneError3d,
     PhysicsBody3d, RigidBoxState3d, integrate_orientation, oriented_box_vertices,
     stabilize_box_box_contact,
+    swept_broad_phase::{BroadPhaseBounds3d, aabb_candidate_pairs},
 };
 
 const MAX_SOLVER_PASSES: u8 = 16;
@@ -145,20 +146,22 @@ impl From<BoxBoxStabilizationError3d> for RigidBoxWorldError3d {
     }
 }
 
-/// Advances a small deterministic world of oriented rigid cuboids by one rational timestep.
+/// Advances a deterministic world of oriented rigid cuboids by one rational timestep.
 ///
 /// The step intentionally mirrors the staging of the existing continuous AABB solver without replacing
-/// it: integrate each dynamic body once, use Rust-computed oriented vertices for a conservative AABB
-/// candidate cull, then run exact OBB SAT response/stabilization in stable entity order for a bounded
-/// number of passes. Each pass resolves dynamic pairs before fixed-boundary pairs, so a stack contact
-/// cannot finish the frame by pushing a lower body back through the ground. A ground plane can therefore
-/// be represented as an ordinary fixed OBB and shares the exact same collision truth as tower blocks and
-/// projectiles.
+/// it: integrate each dynamic body once, derive conservative world-space AABBs from Rust-computed OBB
+/// vertices, feed those bounds through the same deterministic spatial-hash kernel used by the dense
+/// continuous path, then run exact OBB SAT response/stabilization in stable entity order. If the hash
+/// cannot represent the current range cheaply and exactly, the world falls back to all pairs rather than
+/// dropping collision truth.
 ///
-/// This is a discrete 60 Hz-oriented rigid-body path. It does not claim rotational CCD, and its candidate
-/// cull is not a replacement for the existing swept spatial-hash broad phase used by the dense room. The
-/// intended next consumer is the bounded trebuchet/tower fixture where object count is small and exact
-/// Rust-owned angular geometry matters more than broad-phase scale.
+/// Each solver pass resolves dynamic pairs before fixed-boundary pairs, so a stack contact cannot finish
+/// the frame by pushing a lower body back through the ground. A ground plane can therefore be represented
+/// as an ordinary fixed OBB and shares the exact same collision truth as tower blocks and projectiles.
+///
+/// This remains a discrete 60 Hz-oriented rigid-body path and does not claim rotational CCD. The spatial
+/// hash is only a conservative candidate cull; exact OBB overlap, contact response, orientation, and
+/// stabilization remain Rust-owned narrow-phase truth.
 ///
 /// # Errors
 ///
@@ -181,44 +184,40 @@ pub fn step_rigid_box_world(
                 .iter()
                 .map(oriented_bounds)
                 .collect::<Result<Vec<_>, _>>()?;
-            for left_index in 0..next.len() {
-                for right_index in left_index + 1..next.len() {
-                    let left_fixed = next[left_index].body.kind == BodyKind::Fixed;
-                    let right_fixed = next[right_index].body.kind == BodyKind::Fixed;
-                    if left_fixed && right_fixed {
-                        continue;
-                    }
-                    if (left_fixed || right_fixed) != fixed_boundary_phase {
-                        continue;
-                    }
-                    if !bounds_overlap(bounds[left_index], bounds[right_index]) {
-                        continue;
-                    }
-                    stats.candidate_pairs = stats
-                        .candidate_pairs
+            let pair_indices = spatial_candidate_pairs(&next, &bounds);
+            for (left_index, right_index) in pair_indices {
+                let left_fixed = next[left_index].body.kind == BodyKind::Fixed;
+                let right_fixed = next[right_index].body.kind == BodyKind::Fixed;
+                if (left_fixed || right_fixed) != fixed_boundary_phase {
+                    continue;
+                }
+                if !bounds_overlap(bounds[left_index], bounds[right_index]) {
+                    continue;
+                }
+                stats.candidate_pairs = stats
+                    .candidate_pairs
+                    .checked_add(1)
+                    .ok_or(RigidBoxWorldError3d::ArithmeticOverflow)?;
+
+                let (left_slice, right_slice) = next.split_at_mut(right_index);
+                let left = &mut left_slice[left_index];
+                let right = &mut right_slice[0];
+                let resolved =
+                    stabilize_box_box_contact(left.state, left.body, right.state, right.body)?;
+                if let Some(contact) = resolved.contact {
+                    stats.contacts = stats
+                        .contacts
                         .checked_add(1)
                         .ok_or(RigidBoxWorldError3d::ArithmeticOverflow)?;
-
-                    let (left_slice, right_slice) = next.split_at_mut(right_index);
-                    let left = &mut left_slice[left_index];
-                    let right = &mut right_slice[0];
-                    let resolved =
-                        stabilize_box_box_contact(left.state, left.body, right.state, right.body)?;
-                    if let Some(contact) = resolved.contact {
-                        stats.contacts = stats
-                            .contacts
+                    if contact.normal_impulse_units != 0 {
+                        stats.impulsive_contacts = stats
+                            .impulsive_contacts
                             .checked_add(1)
                             .ok_or(RigidBoxWorldError3d::ArithmeticOverflow)?;
-                        if contact.normal_impulse_units != 0 {
-                            stats.impulsive_contacts = stats
-                                .impulsive_contacts
-                                .checked_add(1)
-                                .ok_or(RigidBoxWorldError3d::ArithmeticOverflow)?;
-                        }
                     }
-                    left.state = resolved.left;
-                    right.state = resolved.right;
                 }
+                left.state = resolved.left;
+                right.state = resolved.right;
             }
         }
     }
@@ -433,6 +432,37 @@ fn oriented_bounds(rigid_box: &RigidBox3d) -> Result<OrientedBounds3d, RigidBoxW
     Ok(OrientedBounds3d { minimum, maximum })
 }
 
+fn spatial_candidate_pairs(
+    boxes: &[RigidBox3d],
+    bounds: &[OrientedBounds3d],
+) -> Vec<(usize, usize)> {
+    let broad_phase_bounds = boxes
+        .iter()
+        .zip(bounds)
+        .map(|(rigid_box, bounds)| BroadPhaseBounds3d {
+            kind: rigid_box.body.kind,
+            minimum: bounds.minimum,
+            maximum: bounds.maximum,
+        })
+        .collect::<Vec<_>>();
+    aabb_candidate_pairs(&broad_phase_bounds).unwrap_or_else(|| all_pair_indices(boxes))
+}
+
+fn all_pair_indices(boxes: &[RigidBox3d]) -> Vec<(usize, usize)> {
+    let mut pairs = Vec::new();
+    for left_index in 0..boxes.len() {
+        for right_index in (left_index + 1)..boxes.len() {
+            if boxes[left_index].body.kind == BodyKind::Fixed
+                && boxes[right_index].body.kind == BodyKind::Fixed
+            {
+                continue;
+            }
+            pairs.push((left_index, right_index));
+        }
+    }
+    pairs
+}
+
 fn bounds_overlap(left: OrientedBounds3d, right: OrientedBounds3d) -> bool {
     (0..3).all(|axis| {
         left.maximum[axis] >= right.minimum[axis] && right.maximum[axis] >= left.minimum[axis]
@@ -457,7 +487,7 @@ fn div_round_nearest(numerator: i128, denominator: i128) -> Result<i128, RigidBo
 mod tests {
     use ecs_physics::PhysicsMaterial;
 
-    use crate::{AngularState3d, AngularVelocity3d, Orientation3d};
+    use crate::{AngularState3d, AngularVelocity3d, ORIENTATION_SCALE, Orientation3d};
 
     use super::*;
 
@@ -574,5 +604,40 @@ mod tests {
 
         assert_eq!(step.stats.candidate_pairs, 0);
         assert_eq!(step.stats.contacts, 0);
+    }
+
+    #[test]
+    fn spatial_hash_retains_rotated_oriented_aabb_overlap() {
+        let mut rotated = block(1, 0, 10 * i64::from(SCALE));
+        rotated.state.angular.orientation = Orientation3d::new(
+            0,
+            0,
+            ORIENTATION_SCALE / 2,
+            ORIENTATION_SCALE / 2,
+        );
+        let boxes = vec![
+            rotated,
+            block(2, 2 * i64::from(SCALE), 10 * i64::from(SCALE)),
+            block(3, 30 * i64::from(SCALE), 10 * i64::from(SCALE)),
+        ];
+        let bounds = boxes
+            .iter()
+            .map(oriented_bounds)
+            .collect::<Result<Vec<_>, _>>()
+            .expect("valid oriented bounds");
+        let candidates = spatial_candidate_pairs(&boxes, &bounds);
+
+        for left in 0..boxes.len() {
+            for right in (left + 1)..boxes.len() {
+                if bounds_overlap(bounds[left], bounds[right]) {
+                    assert!(
+                        candidates.contains(&(left, right)),
+                        "oriented overlap {left}-{right} was dropped by the spatial hash"
+                    );
+                }
+            }
+        }
+        assert!(candidates.len() < boxes.len() * (boxes.len() - 1) / 2);
+        assert!(!candidates.contains(&(0, 2)));
     }
 }
