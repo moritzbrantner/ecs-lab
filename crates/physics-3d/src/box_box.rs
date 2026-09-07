@@ -117,13 +117,20 @@ impl From<OrientedBoxError3d> for BoxBoxError3d {
 ///
 /// The existing swept-AABB path remains the broad phase. This function consumes the Rust-owned SAT
 /// contact seed, reduces the support sets to one stable contact point, measures relative velocity at that
-/// point including angular motion, and applies one equal-and-opposite normal impulse. Dynamic↔dynamic
-/// pairs keep the midpoint of their support centroids. For dynamic↔fixed contacts with unequal support
-/// footprints, the tighter support feature anchors the tangent location and is projected onto the shared
-/// support mid-plane. That prevents a very large boundary face (for example a floor slab) from moving the
-/// impulse toward the boundary's own center and inventing torque on an otherwise centered resting box.
-/// Because the impulse is applied at the contact point, genuine off-center hits still change both linear
-/// and angular velocity for dynamic bodies through their principal cuboid inertia.
+/// point including angular motion, and applies one equal-and-opposite normal impulse. Parallel,
+/// world-axis-aligned face supports are first clipped to their actual rectangular overlap so an overhanging
+/// body receives its impulse inside the shared patch rather than at either full-face center. Other
+/// dynamic↔dynamic pairs keep the midpoint of their support centroids. For dynamic↔fixed contacts with
+/// unequal support footprints, the tighter support feature remains the bounded fallback anchor and is
+/// projected onto the shared support mid-plane. That prevents a very large boundary face (for example a
+/// floor slab) from moving the impulse toward the boundary's own center and inventing torque on an
+/// otherwise centered resting box.
+///
+/// Exact zero-depth contacts tied across more than one SAT axis are deliberately observation-only in this
+/// discrete response seam. At an edge/corner coincidence there is no unique normal yet, so applying the
+/// first stable tied axis would turn deterministic feature ordering into arbitrary torque. Once a unique
+/// axis wins or the pair has real penetration, ordinary coupled linear/angular response applies. This
+/// avoids solver-created pre-impact spin without suppressing genuine penetrating edge/corner response.
 ///
 /// This is deliberately a narrow response seam rather than a complete rigid-body world step: it does not
 /// integrate gravity/position/orientation, perform rotational CCD, iterate a multi-contact island, or add
@@ -201,10 +208,12 @@ pub fn resolve_box_box_contact(
         checked_sub(i128::from(right_velocity[2]), i128::from(left_velocity[2]))?,
     ];
     let normal_velocity = checked_dot(relative_velocity, seed.axis)?;
+    let ambiguous_zero_depth_touch = seed.overlap_numerator == 0 && seed.minimum_axis_ties > 1;
 
     let mut left = left_state;
     let mut right = right_state;
-    let normal_impulse_units = if normal_velocity < 0
+    let normal_impulse_units = if !ambiguous_zero_depth_touch
+        && normal_velocity < 0
         && (left_body.kind == BodyKind::Dynamic || right_body.kind == BodyKind::Dynamic)
     {
         let impulse = normal_impulse(
@@ -306,6 +315,18 @@ fn reduced_contact_point(
     axis: [i128; 3],
     axis_length_squared: u128,
 ) -> Result<Position, BoxBoxError3d> {
+    if let Some(point) = axis_aligned_face_overlap_centroid(
+        left_vertices,
+        left_mask,
+        left_support,
+        right_vertices,
+        right_mask,
+        right_support,
+        axis,
+    )? {
+        return Ok(point);
+    }
+
     if left_body.kind == right_body.kind {
         return midpoint(left_support, right_support);
     }
@@ -324,6 +345,127 @@ fn reduced_contact_point(
         axis,
         axis_length_squared,
     )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn axis_aligned_face_overlap_centroid(
+    left_vertices: &[Position; 8],
+    left_mask: u8,
+    left_support: Position,
+    right_vertices: &[Position; 8],
+    right_mask: u8,
+    right_support: Position,
+    axis: [i128; 3],
+) -> Result<Option<Position>, BoxBoxError3d> {
+    if left_mask.count_ones() != 4 || right_mask.count_ones() != 4 {
+        return Ok(None);
+    }
+    let Some(normal_axis) = coordinate_axis(axis) else {
+        return Ok(None);
+    };
+    let tangent_axes = match normal_axis {
+        0 => [1, 2],
+        1 => [0, 2],
+        2 => [0, 1],
+        _ => return Ok(None),
+    };
+    if !support_is_axis_aligned_rectangle(left_vertices, left_mask, tangent_axes)
+        || !support_is_axis_aligned_rectangle(right_vertices, right_mask, tangent_axes)
+    {
+        return Ok(None);
+    }
+
+    let mut coordinate = [0_i64; 3];
+    coordinate[normal_axis] = midpoint_axis(
+        position_component(left_support, normal_axis),
+        position_component(right_support, normal_axis),
+    )?;
+    for tangent_axis in tangent_axes {
+        let (left_minimum, left_maximum) = support_interval(left_vertices, left_mask, tangent_axis)?;
+        let (right_minimum, right_maximum) =
+            support_interval(right_vertices, right_mask, tangent_axis)?;
+        let overlap_minimum = left_minimum.max(right_minimum);
+        let overlap_maximum = left_maximum.min(right_maximum);
+        if overlap_minimum > overlap_maximum {
+            return Ok(None);
+        }
+        coordinate[tangent_axis] = midpoint_axis(overlap_minimum, overlap_maximum)?;
+    }
+    Ok(Some(Position::new3(
+        coordinate[0],
+        coordinate[1],
+        coordinate[2],
+    )))
+}
+
+fn coordinate_axis(axis: [i128; 3]) -> Option<usize> {
+    let mut found = None;
+    for (index, component) in axis.into_iter().enumerate() {
+        if component == 0 {
+            continue;
+        }
+        if found.is_some() {
+            return None;
+        }
+        found = Some(index);
+    }
+    found
+}
+
+fn support_is_axis_aligned_rectangle(
+    vertices: &[Position; 8],
+    mask: u8,
+    tangent_axes: [usize; 2],
+) -> bool {
+    tangent_axes.into_iter().all(|axis| {
+        let mut unique = [0_i64; 4];
+        let mut unique_count = 0_usize;
+        for (index, vertex) in vertices.iter().enumerate() {
+            if mask & (1_u8 << index) == 0 {
+                continue;
+            }
+            let value = position_component(*vertex, axis);
+            if unique[..unique_count].contains(&value) {
+                continue;
+            }
+            if unique_count == unique.len() {
+                return false;
+            }
+            unique[unique_count] = value;
+            unique_count += 1;
+        }
+        unique_count == 2
+    })
+}
+
+fn support_interval(
+    vertices: &[Position; 8],
+    mask: u8,
+    axis: usize,
+) -> Result<(i64, i64), BoxBoxError3d> {
+    let mut minimum = None;
+    let mut maximum = None;
+    for (index, vertex) in vertices.iter().enumerate() {
+        if mask & (1_u8 << index) == 0 {
+            continue;
+        }
+        let value = position_component(*vertex, axis);
+        minimum = Some(minimum.map_or(value, |current: i64| current.min(value)));
+        maximum = Some(maximum.map_or(value, |current: i64| current.max(value)));
+    }
+    match (minimum, maximum) {
+        (Some(minimum), Some(maximum)) => Ok((minimum, maximum)),
+        _ => Err(BoxBoxError3d::ArithmeticOverflow),
+    }
+}
+
+fn position_component(position: Position, axis: usize) -> i64 {
+    match axis {
+        0 => position.x,
+        1 => position.y,
+        2 => position.z,
+        _ => 0,
+    }
 }
 
 fn support_spread_squared(
@@ -867,6 +1009,51 @@ mod tests {
             AngularVelocity3d::default()
         );
         assert_eq!(step.left, floor);
+    }
+
+    #[test]
+    fn overhanging_fixed_support_uses_the_shared_face_patch() {
+        let floor_body = PhysicsBody3d::fixed(EntityId(1), [100, 10, 100]);
+        let block_body = dynamic_body(2);
+        let floor = state(Position::new3(0, 0, 0), Velocity::new3(0, 0, 0));
+        let block = state(Position::new3(105, 19, 0), Velocity::new3(0, -60, 0));
+        let step = resolve_box_box_contact(floor, floor_body, block, block_body)
+            .expect("valid overhanging support contact");
+        let contact = step.contact.expect("overhang should contact floor");
+
+        assert_eq!(contact.axis, [0, 1, 0]);
+        assert_eq!(contact.point.x, 98);
+        assert!(contact.point.x <= 100);
+        assert!(contact.normal_impulse_units > 0);
+        assert_ne!(step.right.angular.angular_velocity.z, 0);
+    }
+
+    #[test]
+    fn exact_diagonal_edge_touch_does_not_choose_an_arbitrary_torque_axis() {
+        let left = state(Position::new3(0, 0, 0), Velocity::new3(0, 0, 0));
+        let right = state(Position::new3(0, 20, 20), Velocity::new3(0, -60, 0));
+        let step = resolve_box_box_contact(left, dynamic_body(1), right, dynamic_body(2))
+            .expect("valid exact edge touch");
+        let contact = step.contact.expect("edge touch remains contact evidence");
+
+        assert_eq!(contact.overlap_numerator, 0);
+        assert_eq!(contact.normal_impulse_units, 0);
+        assert_eq!(step.left, left);
+        assert_eq!(step.right, right);
+    }
+
+    #[test]
+    fn penetrating_diagonal_contact_still_generates_real_torque() {
+        let left = state(Position::new3(0, 0, 0), Velocity::new3(0, 0, 0));
+        let right = state(Position::new3(0, 19, 19), Velocity::new3(0, -60, 0));
+        let step = resolve_box_box_contact(left, dynamic_body(1), right, dynamic_body(2))
+            .expect("valid penetrating diagonal contact");
+        let contact = step.contact.expect("penetration should contact");
+
+        assert!(contact.overlap_numerator > 0);
+        assert!(contact.normal_impulse_units > 0);
+        assert_ne!(step.left.angular.angular_velocity.x, 0);
+        assert_ne!(step.right.angular.angular_velocity.x, 0);
     }
 
     #[test]
