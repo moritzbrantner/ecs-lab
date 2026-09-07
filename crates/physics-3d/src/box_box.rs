@@ -4,7 +4,10 @@ use ecs_physics::{BodyKind, MATERIAL_SCALE, PhysicsMaterial};
 use ecs_workload::{EntityId, Position, Velocity};
 
 use crate::{
-    angular::{ANGULAR_VELOCITY_SCALE, AngularError3d, AngularState3d, AngularVelocity3d, ORIENTATION_SCALE, Orientation3d, box_inertia},
+    angular::{
+        ANGULAR_VELOCITY_SCALE, AngularError3d, AngularState3d, AngularVelocity3d,
+        ORIENTATION_SCALE, Orientation3d, box_inertia,
+    },
     box_plane::{BoxPlaneError3d, oriented_box_vertices},
     oriented_box::{ObbAxisFeature3d, OrientedBox3d, OrientedBoxError3d, obb_contact_seed},
     types::PhysicsBody3d,
@@ -89,7 +92,9 @@ impl fmt::Display for BoxBoxError3d {
             ),
             Self::Angular(error) => write!(formatter, "OBB angular response failed: {error}"),
             Self::Geometry(error) => write!(formatter, "OBB contact geometry failed: {error}"),
-            Self::ArithmeticOverflow => write!(formatter, "OBB contact response arithmetic overflowed"),
+            Self::ArithmeticOverflow => {
+                write!(formatter, "OBB contact response arithmetic overflowed")
+            }
         }
     }
 }
@@ -303,10 +308,7 @@ fn position_delta(center: Position, point: Position) -> Result<[i64; 3], BoxBoxE
     ])
 }
 
-fn contact_velocity(
-    state: RigidBoxState3d,
-    offset: [i64; 3],
-) -> Result<[i64; 3], BoxBoxError3d> {
+fn contact_velocity(state: RigidBoxState3d, offset: [i64; 3]) -> Result<[i64; 3], BoxBoxError3d> {
     let omega = state.angular.angular_velocity;
     let rotation_x = checked_sub(
         checked_mul(i128::from(omega.y), i128::from(offset[2]))?,
@@ -501,7 +503,10 @@ fn cross_component(
 
 fn checked_dot(left: [i128; 3], right: [i128; 3]) -> Result<i128, BoxBoxError3d> {
     checked_add(
-        checked_add(checked_mul(left[0], right[0])?, checked_mul(left[1], right[1])?)?,
+        checked_add(
+            checked_mul(left[0], right[0])?,
+            checked_mul(left[1], right[1])?,
+        )?,
         checked_mul(left[2], right[2])?,
     )
 }
@@ -536,9 +541,7 @@ fn rotate_forward(
     rotate_with_matrix(rotation_matrix(orientation.normalized()?)?, vector)
 }
 
-fn rotation_matrix(
-    orientation: Orientation3d,
-) -> Result<[[i128; 3]; 3], BoxBoxError3d> {
+fn rotation_matrix(orientation: Orientation3d) -> Result<[[i128; 3]; 3], BoxBoxError3d> {
     let x = i128::from(orientation.x);
     let y = i128::from(orientation.y);
     let z = i128::from(orientation.z);
@@ -581,7 +584,10 @@ fn rotate_with_matrix(
     let mut output = [0_i128; 3];
     for (target, row) in output.iter_mut().zip(matrix) {
         let sum = checked_add(
-            checked_add(checked_mul(row[0], vector[0])?, checked_mul(row[1], vector[1])?)?,
+            checked_add(
+                checked_mul(row[0], vector[0])?,
+                checked_mul(row[1], vector[1])?,
+            )?,
             checked_mul(row[2], vector[2])?,
         )?;
         *target = div_round_nearest(sum, scale)?;
@@ -666,8 +672,14 @@ mod tests {
         assert!(contact.normal_impulse_units > 0);
         assert_eq!(step.left.linear_velocity.x, 30);
         assert_eq!(step.right.linear_velocity.x, 30);
-        assert_eq!(step.left.angular.angular_velocity, AngularVelocity3d::default());
-        assert_eq!(step.right.angular.angular_velocity, AngularVelocity3d::default());
+        assert_eq!(
+            step.left.angular.angular_velocity,
+            AngularVelocity3d::default()
+        );
+        assert_eq!(
+            step.right.angular.angular_velocity,
+            AngularVelocity3d::default()
+        );
     }
 
     #[test]
@@ -692,10 +704,15 @@ mod tests {
         let right_body = PhysicsBody3d::fixed(EntityId(2), [10, 10, 10]);
         let left = state(Position::new3(0, 0, 0), Velocity::new3(60, 0, 0));
         let right = state(Position::new3(19, 0, 0), Velocity::new3(0, 0, 0));
-        let step = resolve_box_box_contact(left, left_body, right, right_body)
-            .expect("valid wall impact");
+        let step =
+            resolve_box_box_contact(left, left_body, right, right_body).expect("valid wall impact");
 
-        assert!(step.contact.expect("wall should contact").normal_impulse_units > 0);
+        assert!(
+            step.contact
+                .expect("wall should contact")
+                .normal_impulse_units
+                > 0
+        );
         assert_eq!(step.left.linear_velocity.x, -60);
         assert_eq!(step.right, right);
     }
