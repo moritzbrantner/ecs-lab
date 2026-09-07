@@ -59,12 +59,11 @@ pub fn stabilize_box_box_contact(
 
     let left_offset = position_delta(left_state.center, contact.point)?;
     let right_offset = position_delta(right_state.center, contact.point)?;
-    let relative_velocity = relative_contact_velocity(step.left, left_offset, step.right, right_offset)?;
-    let Some(tangent) = tangent_direction(
-        relative_velocity,
-        contact.axis,
-        contact.axis_length_squared,
-    )? else {
+    let relative_velocity =
+        relative_contact_velocity(step.left, left_offset, step.right, right_offset)?;
+    let Some(tangent) =
+        tangent_direction(relative_velocity, contact.axis, contact.axis_length_squared)?
+    else {
         return Ok(step);
     };
     let tangent_length_squared = vector_length_squared(tangent)?;
@@ -173,9 +172,18 @@ fn contact_velocity(state: RigidBoxState3d, offset: [i64; 3]) -> Result3d<[i128;
     )?;
     let scale = i128::from(ANGULAR_VELOCITY_SCALE);
     Ok([
-        checked_add(i128::from(state.linear_velocity.x), div_round_nearest(rotation_x, scale)?)?,
-        checked_add(i128::from(state.linear_velocity.y), div_round_nearest(rotation_y, scale)?)?,
-        checked_add(i128::from(state.linear_velocity.z), div_round_nearest(rotation_z, scale)?)?,
+        checked_add(
+            i128::from(state.linear_velocity.x),
+            div_round_nearest(rotation_x, scale)?,
+        )?,
+        checked_add(
+            i128::from(state.linear_velocity.y),
+            div_round_nearest(rotation_y, scale)?,
+        )?,
+        checked_add(
+            i128::from(state.linear_velocity.z),
+            div_round_nearest(rotation_z, scale)?,
+        )?,
     ])
 }
 
@@ -213,8 +221,8 @@ fn primitive_vector(vector: [i128; 3]) -> Result3d<Option<[i128; 3]>> {
     if divisor == 0 {
         return Ok(None);
     }
-    let divisor = i128::try_from(divisor)
-        .map_err(|_| BoxBoxStabilizationError3d::ArithmeticOverflow)?;
+    let divisor =
+        i128::try_from(divisor).map_err(|_| BoxBoxStabilizationError3d::ArithmeticOverflow)?;
     Ok(Some([
         vector[0] / divisor,
         vector[1] / divisor,
@@ -281,7 +289,7 @@ fn coulomb_clamp(
             .checked_sub(low)
             .ok_or(BoxBoxStabilizationError3d::ArithmeticOverflow)?;
         let midpoint = low
-            .checked_add((distance + 1) / 2)
+            .checked_add(distance.div_ceil(2))
             .ok_or(BoxBoxStabilizationError3d::ArithmeticOverflow)?;
         if within_coulomb_bound(
             midpoint,
@@ -296,8 +304,8 @@ fn coulomb_clamp(
         }
     }
 
-    let bounded = i128::try_from(low)
-        .map_err(|_| BoxBoxStabilizationError3d::ArithmeticOverflow)?;
+    let bounded =
+        i128::try_from(low).map_err(|_| BoxBoxStabilizationError3d::ArithmeticOverflow)?;
     if desired_impulse_units < 0 {
         checked_neg(bounded)
     } else {
@@ -629,7 +637,10 @@ mod tests {
         )
         .expect("valid separating overlap");
 
-        assert_eq!(step.contact.expect("contact evidence").normal_impulse_units, 0);
+        assert_eq!(
+            step.contact.expect("contact evidence").normal_impulse_units,
+            0
+        );
         assert_eq!(step.left.linear_velocity, left.linear_velocity);
         assert_eq!(step.right.linear_velocity, right.linear_velocity);
     }
