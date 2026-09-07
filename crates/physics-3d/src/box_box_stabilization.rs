@@ -3,9 +3,7 @@ use std::fmt;
 use ecs_physics::BodyKind;
 use ecs_workload::{EntityId, Position};
 
-use crate::{
-    BoxBoxError3d, BoxBoxStep3d, PhysicsBody3d, RigidBoxState3d, resolve_box_box_contact,
-};
+use crate::{BoxBoxError3d, BoxBoxStep3d, PhysicsBody3d, RigidBoxState3d, resolve_box_box_contact};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BoxBoxStabilizationError3d {
@@ -132,12 +130,9 @@ fn minimum_translation_vector(
     }
 
     Ok([
-        i64::try_from(correction[0])
-            .map_err(|_| BoxBoxStabilizationError3d::ArithmeticOverflow)?,
-        i64::try_from(correction[1])
-            .map_err(|_| BoxBoxStabilizationError3d::ArithmeticOverflow)?,
-        i64::try_from(correction[2])
-            .map_err(|_| BoxBoxStabilizationError3d::ArithmeticOverflow)?,
+        i64::try_from(correction[0]).map_err(|_| BoxBoxStabilizationError3d::ArithmeticOverflow)?,
+        i64::try_from(correction[1]).map_err(|_| BoxBoxStabilizationError3d::ArithmeticOverflow)?,
+        i64::try_from(correction[2]).map_err(|_| BoxBoxStabilizationError3d::ArithmeticOverflow)?,
     ])
 }
 
@@ -207,9 +202,7 @@ fn project_pair(
     }
 }
 
-fn negate_vector(
-    vector: [i64; 3],
-) -> Result<[i64; 3], BoxBoxStabilizationError3d> {
+fn negate_vector(vector: [i64; 3]) -> Result<[i64; 3], BoxBoxStabilizationError3d> {
     Ok([
         vector[0]
             .checked_neg()
