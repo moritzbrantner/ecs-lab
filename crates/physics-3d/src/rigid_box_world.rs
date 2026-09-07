@@ -609,12 +609,8 @@ mod tests {
     #[test]
     fn spatial_hash_retains_rotated_oriented_aabb_overlap() {
         let mut rotated = block(1, 0, 10 * i64::from(SCALE));
-        rotated.state.angular.orientation = Orientation3d::new(
-            0,
-            0,
-            ORIENTATION_SCALE / 2,
-            ORIENTATION_SCALE / 2,
-        );
+        rotated.state.angular.orientation =
+            Orientation3d::new(0, 0, ORIENTATION_SCALE / 2, ORIENTATION_SCALE / 2);
         let boxes = vec![
             rotated,
             block(2, 2 * i64::from(SCALE), 10 * i64::from(SCALE)),
