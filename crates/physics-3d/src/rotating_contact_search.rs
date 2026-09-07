@@ -111,12 +111,12 @@ impl From<AngularError3d> for RotatingContactSearchError3d {
 impl From<RigidBoxFreeFlightError3d> for RotatingContactSearchError3d {
     fn from(value: RigidBoxFreeFlightError3d) -> Self {
         match value {
-            RigidBoxFreeFlightError3d::NegativeTimestepNumerator(value) => Self::World(
-                RigidBoxWorldError3d::NegativeTimestepNumerator(value),
-            ),
-            RigidBoxFreeFlightError3d::NonPositiveTimestepDenominator(value) => Self::World(
-                RigidBoxWorldError3d::NonPositiveTimestepDenominator(value),
-            ),
+            RigidBoxFreeFlightError3d::NegativeTimestepNumerator(value) => {
+                Self::World(RigidBoxWorldError3d::NegativeTimestepNumerator(value))
+            }
+            RigidBoxFreeFlightError3d::NonPositiveTimestepDenominator(value) => {
+                Self::World(RigidBoxWorldError3d::NonPositiveTimestepDenominator(value))
+            }
             RigidBoxFreeFlightError3d::Angular(error) => Self::Angular(error),
             RigidBoxFreeFlightError3d::InvalidFraction { .. }
             | RigidBoxFreeFlightError3d::ArithmeticOverflow => Self::ArithmeticOverflow,
