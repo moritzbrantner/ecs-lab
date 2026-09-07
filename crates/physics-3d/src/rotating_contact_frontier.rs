@@ -51,9 +51,18 @@ impl fmt::Display for RotatingContactFrontierError3d {
             Self::ArithmeticOverflow => {
                 write!(formatter, "rotating contact frontier arithmetic overflowed")
             }
-            Self::Search(error) => write!(formatter, "rotating contact frontier search failed: {error}"),
-            Self::Angular(error) => write!(formatter, "rotating contact frontier angular sampling failed: {error}"),
-            Self::Geometry(error) => write!(formatter, "rotating contact frontier geometry failed: {error}"),
+            Self::Search(error) => write!(
+                formatter,
+                "rotating contact frontier search failed: {error}"
+            ),
+            Self::Angular(error) => write!(
+                formatter,
+                "rotating contact frontier angular sampling failed: {error}"
+            ),
+            Self::Geometry(error) => write!(
+                formatter,
+                "rotating contact frontier geometry failed: {error}"
+            ),
         }
     }
 }
@@ -101,8 +110,7 @@ pub fn advance_to_earliest_rotating_contact_set(
     frame_config: RigidBoxWorldConfig3d,
     search_config: RotatingContactSearchConfig3d,
 ) -> Result<Option<RotatingContactFrontier3d>, RotatingContactFrontierError3d> {
-    let Some(contact_set) =
-        earliest_rotating_contact_set(boxes, frame_config, search_config)?
+    let Some(contact_set) = earliest_rotating_contact_set(boxes, frame_config, search_config)?
     else {
         return Ok(None);
     };
@@ -138,9 +146,12 @@ fn verify_contact_set(
         let left_index = *indices
             .get(&expected.left)
             .ok_or(RotatingContactFrontierError3d::MissingEntity(expected.left))?;
-        let right_index = *indices
-            .get(&expected.right)
-            .ok_or(RotatingContactFrontierError3d::MissingEntity(expected.right))?;
+        let right_index =
+            *indices
+                .get(&expected.right)
+                .ok_or(RotatingContactFrontierError3d::MissingEntity(
+                    expected.right,
+                ))?;
         let left = boxes[left_index];
         let right = boxes[right_index];
         let actual = obb_contact_seed(
@@ -359,11 +370,7 @@ mod tests {
 
     #[test]
     fn frontier_reconstructs_one_shared_equal_time_world() {
-        let boxes = [
-            rotating_rod(),
-            obstacle(2, 10, 10),
-            obstacle(3, -10, -10),
-        ];
+        let boxes = [rotating_rod(), obstacle(2, 10, 10), obstacle(3, -10, -10)];
         let frontier = advance_to_earliest_rotating_contact_set(
             &boxes,
             frame_config(),
