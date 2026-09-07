@@ -81,7 +81,7 @@ pub fn stabilize_box_box_contact(
     };
     apply_tangent_response(
         &mut step,
-        TangentResponse3d {
+        &TangentResponse3d {
             left_body,
             right_body,
             left_offset,
@@ -184,7 +184,10 @@ fn dominant_slip_tangent(
     }
 }
 
-fn apply_tangent_response(step: &mut BoxBoxStep3d, response: TangentResponse3d) -> Result3d<()> {
+fn apply_tangent_response(
+    step: &mut BoxBoxStep3d,
+    response: &TangentResponse3d,
+) -> Result3d<()> {
     let TangentResponse3d {
         left_body,
         right_body,
@@ -193,7 +196,7 @@ fn apply_tangent_response(step: &mut BoxBoxStep3d, response: TangentResponse3d) 
         tangent,
         contact,
         friction_milli,
-    } = response;
+    } = *response;
     let tangent_length_squared = vector_length_squared(tangent)?;
     let relative_velocity =
         relative_contact_velocity(step.left, left_offset, step.right, right_offset)?;
