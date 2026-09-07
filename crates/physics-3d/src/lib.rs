@@ -9,6 +9,7 @@ mod impact;
 mod interactions;
 mod liquid;
 mod oriented_box;
+mod rigid_box_world;
 mod scenario;
 #[allow(dead_code)]
 mod solver;
@@ -44,6 +45,10 @@ pub use interactions::{
 pub use liquid::{LiquidError3d, LiquidVolume3d, liquid_operations};
 pub use oriented_box::{
     ObbAxisFeature3d, ObbContactSeed3d, OrientedBox3d, OrientedBoxError3d, obb_contact_seed,
+};
+pub use rigid_box_world::{
+    RigidBox3d, RigidBoxWorldConfig3d, RigidBoxWorldError3d, RigidBoxWorldStats3d,
+    RigidBoxWorldStep3d, step_rigid_box_world,
 };
 pub use scenario::{BouncingRoom3dScenario, BroadPhaseBody3d, BroadPhaseFrame3d, ScenarioError3d};
 pub use types::{
