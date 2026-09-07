@@ -18,6 +18,7 @@ const RESPONSE_SCALE: i128 = 1_i128 << 50;
 
 type Result3d<T> = Result<T, BoxBoxStabilizationError3d>;
 
+#[derive(Clone, Copy)]
 struct TangentResponse3d {
     left_body: PhysicsBody3d,
     right_body: PhysicsBody3d,
