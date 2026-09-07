@@ -404,7 +404,7 @@ pub extern "C" fn webgpu_pair_word(index: u32) -> u32 {
     let Ok(index) = usize::try_from(index) else {
         return 0;
     };
-    frame.pair_words().get(index).copied().unwrap_or(0)
+    frame.pair_words.get(index).copied().unwrap_or(0)
 }
 
 #[unsafe(no_mangle)]
