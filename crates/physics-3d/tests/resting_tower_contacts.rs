@@ -60,8 +60,8 @@ fn scene(layers: usize, rows: usize, columns: usize) -> Vec<RigidBox3d> {
     boxes
 }
 
-fn spinning_after_one_step(boxes: Vec<RigidBox3d>) -> Vec<(u32, AngularVelocity3d)> {
-    step_rigid_box_world(&boxes, config())
+fn spinning_after_one_step(boxes: &[RigidBox3d]) -> Vec<(u32, AngularVelocity3d)> {
+    step_rigid_box_world(boxes, config())
         .expect("valid resting-contact fixture")
         .boxes
         .into_iter()
@@ -72,7 +72,8 @@ fn spinning_after_one_step(boxes: Vec<RigidBox3d>) -> Vec<(u32, AngularVelocity3
 
 #[test]
 fn one_block_on_wide_floor_stays_angularly_quiet() {
-    let spinning = spinning_after_one_step(vec![fixed_floor(), tower_block(1, 0, 0, 0)]);
+    let boxes = vec![fixed_floor(), tower_block(1, 0, 0, 0)];
+    let spinning = spinning_after_one_step(&boxes);
     assert!(spinning.is_empty(), "unexpected spin: {spinning:?}");
 }
 
@@ -87,18 +88,20 @@ fn one_vertical_column_stays_angularly_quiet() {
             0,
         ));
     }
-    let spinning = spinning_after_one_step(boxes);
+    let spinning = spinning_after_one_step(&boxes);
     assert!(spinning.is_empty(), "unexpected spin: {spinning:?}");
 }
 
 #[test]
 fn one_layer_grid_stays_angularly_quiet() {
-    let spinning = spinning_after_one_step(scene(1, 5, 3));
+    let boxes = scene(1, 5, 3);
+    let spinning = spinning_after_one_step(&boxes);
     assert!(spinning.is_empty(), "unexpected spin: {spinning:?}");
 }
 
 #[test]
 fn two_layer_grid_stays_angularly_quiet() {
-    let spinning = spinning_after_one_step(scene(2, 5, 3));
+    let boxes = scene(2, 5, 3);
+    let spinning = spinning_after_one_step(&boxes);
     assert!(spinning.is_empty(), "unexpected spin: {spinning:?}");
 }
