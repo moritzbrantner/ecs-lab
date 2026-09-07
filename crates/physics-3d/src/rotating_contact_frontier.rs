@@ -1,12 +1,12 @@
 use std::{collections::BTreeMap, fmt};
 
-use ecs_physics::BodyKind;
-use ecs_workload::{EntityId, Position, Velocity};
+use ecs_workload::EntityId;
 
 use crate::{
-    AngularError3d, OrientedBox3d, OrientedBoxError3d, RigidBox3d, RigidBoxWorldConfig3d,
-    RotatingContactSearchConfig3d, RotatingContactSearchError3d, RotatingContactSet3d,
-    earliest_rotating_contact_set, integrate_orientation, obb_contact_seed,
+    AngularError3d, OrientedBox3d, OrientedBoxError3d, RigidBox3d, RigidBoxFreeFlightConfig3d,
+    RigidBoxFreeFlightError3d, RigidBoxWorldConfig3d, RotatingContactSearchConfig3d,
+    RotatingContactSearchError3d, RotatingContactSet3d, earliest_rotating_contact_set,
+    obb_contact_seed, sample_rigid_box_world_free_flight,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -81,6 +81,18 @@ impl From<AngularError3d> for RotatingContactFrontierError3d {
     }
 }
 
+impl From<RigidBoxFreeFlightError3d> for RotatingContactFrontierError3d {
+    fn from(value: RigidBoxFreeFlightError3d) -> Self {
+        match value {
+            RigidBoxFreeFlightError3d::Angular(error) => Self::Angular(error),
+            RigidBoxFreeFlightError3d::NegativeTimestepNumerator(_)
+            | RigidBoxFreeFlightError3d::NonPositiveTimestepDenominator(_)
+            | RigidBoxFreeFlightError3d::InvalidFraction { .. }
+            | RigidBoxFreeFlightError3d::ArithmeticOverflow => Self::ArithmeticOverflow,
+        }
+    }
+}
+
 impl From<OrientedBoxError3d> for RotatingContactFrontierError3d {
     fn from(value: OrientedBoxError3d) -> Self {
         Self::Geometry(value)
@@ -90,10 +102,10 @@ impl From<OrientedBoxError3d> for RotatingContactFrontierError3d {
 /// Advances all bodies from one common start state to the earliest sampled rotating contact frontier.
 ///
 /// The contact search first discovers one equal-time sampled set. This function then re-samples every
-/// body directly from the original frame start at that set's exact rational fraction, producing a single
-/// authoritative pre-response world state. Every set pair is recomputed against that shared state and
-/// must match the contact seed returned by the search; drift fails closed rather than handing inconsistent
-/// geometry to a response stage.
+/// body directly from the original frame start at that set's exact rational fraction through the same
+/// canonical rigid-box free-flight primitive used by search. The result is one authoritative pre-response
+/// world state. Every set pair is recomputed against that shared state and must match the contact seed
+/// returned by the search; drift fails closed rather than handing inconsistent geometry to a response stage.
 ///
 /// No response, penetration projection, damping, or remaining-frame integration occurs here. This seam
 /// only turns independently discovered timing evidence into one shared pre-impact world state. Because
@@ -102,9 +114,9 @@ impl From<OrientedBoxError3d> for RotatingContactFrontierError3d {
 ///
 /// # Errors
 ///
-/// Returns [`RotatingContactFrontierError3d`] for search failures, checked sampling arithmetic, missing
-/// entities, invalid OBB geometry, or any mismatch between the contact set and the reconstructed shared
-/// frontier state.
+/// Returns [`RotatingContactFrontierError3d`] for search failures, checked canonical free-flight sampling,
+/// missing entities, invalid OBB geometry, or any mismatch between the contact set and the reconstructed
+/// shared frontier state.
 pub fn advance_to_earliest_rotating_contact_set(
     boxes: &[RigidBox3d],
     frame_config: RigidBoxWorldConfig3d,
@@ -119,11 +131,16 @@ pub fn advance_to_earliest_rotating_contact_set(
     let remaining_numerator = denominator
         .checked_sub(numerator)
         .ok_or(RotatingContactFrontierError3d::ArithmeticOverflow)?;
-    let sampled = boxes
-        .iter()
-        .copied()
-        .map(|body| sample_body(body, frame_config, numerator, denominator))
-        .collect::<Result<Vec<_>, _>>()?;
+    let sampled = sample_rigid_box_world_free_flight(
+        boxes,
+        RigidBoxFreeFlightConfig3d {
+            gravity: frame_config.gravity,
+            timestep_numerator: frame_config.timestep_numerator,
+            timestep_denominator: frame_config.timestep_denominator,
+        },
+        numerator,
+        denominator,
+    )?;
     verify_contact_set(&sampled, &contact_set)?;
 
     Ok(Some(RotatingContactFrontier3d {
@@ -178,131 +195,6 @@ fn verify_contact_set(
         }
     }
     Ok(())
-}
-
-fn sample_body(
-    mut body: RigidBox3d,
-    frame_config: RigidBoxWorldConfig3d,
-    fraction_numerator: u32,
-    fraction_denominator: u32,
-) -> Result<RigidBox3d, RotatingContactFrontierError3d> {
-    if fraction_denominator == 0 {
-        return Err(RotatingContactFrontierError3d::ArithmeticOverflow);
-    }
-    if body.body.kind == BodyKind::Fixed || fraction_numerator == 0 {
-        return Ok(body);
-    }
-    let fraction_numerator = i32::try_from(fraction_numerator)
-        .map_err(|_| RotatingContactFrontierError3d::ArithmeticOverflow)?;
-    let fraction_denominator = i32::try_from(fraction_denominator)
-        .map_err(|_| RotatingContactFrontierError3d::ArithmeticOverflow)?;
-    let timestep_numerator = frame_config
-        .timestep_numerator
-        .checked_mul(fraction_numerator)
-        .ok_or(RotatingContactFrontierError3d::ArithmeticOverflow)?;
-    let timestep_denominator = frame_config
-        .timestep_denominator
-        .checked_mul(fraction_denominator)
-        .ok_or(RotatingContactFrontierError3d::ArithmeticOverflow)?;
-
-    let velocity = Velocity::new3(
-        integrate_velocity_axis(
-            body.state.linear_velocity.x,
-            frame_config.gravity.x,
-            timestep_numerator,
-            timestep_denominator,
-        )?,
-        integrate_velocity_axis(
-            body.state.linear_velocity.y,
-            frame_config.gravity.y,
-            timestep_numerator,
-            timestep_denominator,
-        )?,
-        integrate_velocity_axis(
-            body.state.linear_velocity.z,
-            frame_config.gravity.z,
-            timestep_numerator,
-            timestep_denominator,
-        )?,
-    );
-    let center = Position::new3(
-        integrate_position_axis(
-            body.state.center.x,
-            velocity.x,
-            timestep_numerator,
-            timestep_denominator,
-        )?,
-        integrate_position_axis(
-            body.state.center.y,
-            velocity.y,
-            timestep_numerator,
-            timestep_denominator,
-        )?,
-        integrate_position_axis(
-            body.state.center.z,
-            velocity.z,
-            timestep_numerator,
-            timestep_denominator,
-        )?,
-    );
-    body.state.center = center;
-    body.state.linear_velocity = velocity;
-    body.state.angular.orientation = integrate_orientation(
-        body.state.angular.orientation,
-        body.state.angular.angular_velocity,
-        timestep_numerator,
-        timestep_denominator,
-    )?;
-    Ok(body)
-}
-
-fn integrate_velocity_axis(
-    velocity: i32,
-    acceleration: i32,
-    numerator: i32,
-    denominator: i32,
-) -> Result<i32, RotatingContactFrontierError3d> {
-    let acceleration_step = i128::from(acceleration)
-        .checked_mul(i128::from(numerator))
-        .ok_or(RotatingContactFrontierError3d::ArithmeticOverflow)?;
-    let delta = div_round_nearest(acceleration_step, i128::from(denominator))?;
-    let next = i128::from(velocity)
-        .checked_add(delta)
-        .ok_or(RotatingContactFrontierError3d::ArithmeticOverflow)?;
-    i32::try_from(next).map_err(|_| RotatingContactFrontierError3d::ArithmeticOverflow)
-}
-
-fn integrate_position_axis(
-    position: i64,
-    velocity: i32,
-    numerator: i32,
-    denominator: i32,
-) -> Result<i64, RotatingContactFrontierError3d> {
-    let velocity_step = i128::from(velocity)
-        .checked_mul(i128::from(numerator))
-        .ok_or(RotatingContactFrontierError3d::ArithmeticOverflow)?;
-    let delta = div_round_nearest(velocity_step, i128::from(denominator))?;
-    let next = i128::from(position)
-        .checked_add(delta)
-        .ok_or(RotatingContactFrontierError3d::ArithmeticOverflow)?;
-    i64::try_from(next).map_err(|_| RotatingContactFrontierError3d::ArithmeticOverflow)
-}
-
-fn div_round_nearest(
-    numerator: i128,
-    denominator: i128,
-) -> Result<i128, RotatingContactFrontierError3d> {
-    if denominator <= 0 {
-        return Err(RotatingContactFrontierError3d::ArithmeticOverflow);
-    }
-    let half = denominator / 2;
-    let adjusted = if numerator >= 0 {
-        numerator.checked_add(half)
-    } else {
-        numerator.checked_sub(half)
-    }
-    .ok_or(RotatingContactFrontierError3d::ArithmeticOverflow)?;
-    Ok(adjusted / denominator)
 }
 
 #[cfg(test)]
