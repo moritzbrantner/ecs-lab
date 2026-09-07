@@ -1,7 +1,7 @@
 use ecs_physics::PhysicsMaterial;
 use ecs_physics_3d::{
     AngularState3d, AngularVelocity3d, Orientation3d, PhysicsBody3d, RigidBox3d, RigidBoxState3d,
-    RigidBoxWorldConfig3d, step_rigid_box_world,
+    RigidBoxWorldConfig3d, stabilize_box_box_contact, step_rigid_box_world,
 };
 use ecs_workload::{EntityId, Position, Velocity};
 
@@ -70,6 +70,39 @@ fn spinning_after_one_step(boxes: &[RigidBox3d]) -> Vec<(u32, AngularVelocity3d)
         .collect()
 }
 
+fn integrate_gravity_for_fixture(boxes: &mut [RigidBox3d]) {
+    for body in boxes.iter_mut().skip(1) {
+        body.state.linear_velocity = Velocity::new3(0, -600, 0);
+        body.state.center.y -= 10;
+    }
+}
+
+fn resolve_phase(boxes: &mut [RigidBox3d], fixed_boundary: bool) -> Option<(u32, u32)> {
+    for left_index in 0..boxes.len() {
+        for right_index in (left_index + 1)..boxes.len() {
+            let includes_floor = left_index == 0;
+            if includes_floor != fixed_boundary {
+                continue;
+            }
+            let (left_slice, right_slice) = boxes.split_at_mut(right_index);
+            let left = &mut left_slice[left_index];
+            let right = &mut right_slice[0];
+            let before_left = left.state.angular.angular_velocity;
+            let before_right = right.state.angular.angular_velocity;
+            let resolved = stabilize_box_box_contact(left.state, left.body, right.state, right.body)
+                .expect("valid diagnostic contact pair");
+            left.state = resolved.left;
+            right.state = resolved.right;
+            if left.state.angular.angular_velocity != before_left
+                || right.state.angular.angular_velocity != before_right
+            {
+                return Some((left.body.entity.0, right.body.entity.0));
+            }
+        }
+    }
+    None
+}
+
 #[test]
 fn one_block_on_wide_floor_stays_angularly_quiet() {
     let boxes = vec![fixed_floor(), tower_block(1, 0, 0, 0)];
@@ -104,4 +137,14 @@ fn two_layer_grid_stays_angularly_quiet() {
     let boxes = scene(2, 5, 3);
     let spinning = spinning_after_one_step(&boxes);
     assert!(spinning.is_empty(), "unexpected spin: {spinning:?}");
+}
+
+#[test]
+fn resting_grid_does_not_create_a_spin_contact_after_floor_support() {
+    let mut boxes = scene(1, 5, 3);
+    integrate_gravity_for_fixture(&mut boxes);
+    assert_eq!(resolve_phase(&mut boxes, false), None);
+    assert_eq!(resolve_phase(&mut boxes, true), None);
+    let first_spin_pair = resolve_phase(&mut boxes, false);
+    assert_eq!(first_spin_pair, None, "first spin pair: {first_spin_pair:?}");
 }
