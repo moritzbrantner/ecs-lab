@@ -312,14 +312,18 @@ fn reduced_contact_point(
 
     let left_spread = support_spread_squared(left_vertices, left_mask, left_support)?;
     let right_spread = support_spread_squared(right_vertices, right_mask, right_support)?;
-    let anchor = if left_spread < right_spread {
-        left_support
-    } else if right_spread < left_spread {
-        right_support
-    } else {
-        return midpoint(left_support, right_support);
+    let anchor = match left_spread.cmp(&right_spread) {
+        std::cmp::Ordering::Less => left_support,
+        std::cmp::Ordering::Greater => right_support,
+        std::cmp::Ordering::Equal => return midpoint(left_support, right_support),
     };
-    project_to_support_midplane(anchor, left_support, right_support, axis, axis_length_squared)
+    project_to_support_midplane(
+        anchor,
+        left_support,
+        right_support,
+        axis,
+        axis_length_squared,
+    )
 }
 
 fn support_spread_squared(
