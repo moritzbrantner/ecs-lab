@@ -6,6 +6,7 @@ mod controller;
 mod impact;
 mod interactions;
 mod liquid;
+mod oriented_box;
 mod scenario;
 #[allow(dead_code)]
 mod solver;
@@ -35,6 +36,9 @@ pub use interactions::{
     pair_interaction, sensor_events,
 };
 pub use liquid::{LiquidError3d, LiquidVolume3d, liquid_operations};
+pub use oriented_box::{
+    ObbAxisFeature3d, ObbContactSeed3d, OrientedBox3d, OrientedBoxError3d, obb_contact_seed,
+};
 pub use scenario::{BouncingRoom3dScenario, BroadPhaseBody3d, BroadPhaseFrame3d, ScenarioError3d};
 pub use types::{
     ContactNormal3d, PhysicsBody3d, PhysicsConfig3d, PhysicsContact3d, PhysicsError3d,
