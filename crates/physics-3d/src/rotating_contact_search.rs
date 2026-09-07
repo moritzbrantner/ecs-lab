@@ -665,10 +665,14 @@ mod tests {
             .map(|contact| (contact.left, contact.right))
             .collect::<Vec<_>>();
 
-        assert_eq!(pairs, vec![(EntityId(1), EntityId(2)), (EntityId(1), EntityId(3))]);
+        assert_eq!(
+            pairs,
+            vec![(EntityId(1), EntityId(2)), (EntityId(1), EntityId(3))]
+        );
         assert!(set.contact_numerator > 0);
         assert!(set.contacts.iter().all(|contact| {
-            contact.contact_numerator == set.contact_numerator && contact.denominator == set.denominator
+            contact.contact_numerator == set.contact_numerator
+                && contact.denominator == set.denominator
         }));
     }
 
