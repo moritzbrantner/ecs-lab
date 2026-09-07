@@ -89,8 +89,9 @@ fn resolve_phase(boxes: &mut [RigidBox3d], fixed_boundary: bool) -> Option<(u32,
             let right = &mut right_slice[0];
             let before_left = left.state.angular.angular_velocity;
             let before_right = right.state.angular.angular_velocity;
-            let resolved = stabilize_box_box_contact(left.state, left.body, right.state, right.body)
-                .expect("valid diagnostic contact pair");
+            let resolved =
+                stabilize_box_box_contact(left.state, left.body, right.state, right.body)
+                    .expect("valid diagnostic contact pair");
             left.state = resolved.left;
             right.state = resolved.right;
             if left.state.angular.angular_velocity != before_left
@@ -146,5 +147,8 @@ fn resting_grid_does_not_create_a_spin_contact_after_floor_support() {
     assert_eq!(resolve_phase(&mut boxes, false), None);
     assert_eq!(resolve_phase(&mut boxes, true), None);
     let first_spin_pair = resolve_phase(&mut boxes, false);
-    assert_eq!(first_spin_pair, None, "first spin pair: {first_spin_pair:?}");
+    assert_eq!(
+        first_spin_pair, None,
+        "first spin pair: {first_spin_pair:?}"
+    );
 }
