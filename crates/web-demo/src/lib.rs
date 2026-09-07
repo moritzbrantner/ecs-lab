@@ -533,4 +533,5 @@ mod tests {
     }
 }
 
+mod dice_demo;
 mod physics_demo;
