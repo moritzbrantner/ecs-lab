@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="Run ECS Lab's deterministic three-dimensional Rust physics at a true 60 Hz solver rate with swept AABB collision detection, material response, rotation-aware box-plane torque, tumbling dice evidence, WebGPU rendering, and exact browser inspection."
+      content="Run ECS Lab's deterministic three-dimensional Rust physics at a true 60 Hz solver rate with swept AABB collision detection, oriented rigid-box angular motion, a trebuchet tower-destruction scene, WebGPU rendering, and exact browser inspection."
     />
     <title>ECS Lab — 3D physics demo</title>
     <link rel="stylesheet" href="../styles.css" />
@@ -23,12 +23,14 @@
           and back room. Rust advances the authoritative simulation at 60 fixed solver steps per second,
           sweeps fixed and moving AABB pairs through X/Y/Z/time inside every 1/60-second frame, collects
           every pair and tied axis at the earliest exact impact time, and resolves that contact set
-          deterministically before the next frame. A separate rotation-aware dice fixture now demonstrates
-          Rust-owned orientation, off-center contact impulses, and angular velocity without pretending the
-          existing AABB room is already an oriented-box solver.
+          deterministically before the next frame. Separate oriented-box fixtures now demonstrate
+          Rust-owned angular motion: first a single tumbling die, then a heavy trebuchet projectile
+          crashing through a stacked masonry tower whose ordinary blocks acquire spin from box-to-box
+          impacts and secondary collisions.
         </p>
         <nav class="actions" aria-label="Project links">
           <a class="button primary" href="#physics-playground">Open the 3D room</a>
+          <a class="button" href="#tower-impact">Destroy the tower</a>
           <a class="button" href="#tumbling-dice">Tumble a die</a>
           <a class="button" href="#material-response">Compare bounciness</a>
           <a class="button" href="../">Back to ECS Lab</a>
@@ -123,14 +125,56 @@
         </div>
       </section>
 
+      <section class="method dice-lab" id="tower-impact" aria-labelledby="tower-title">
+        <div class="section-copy">
+          <p class="eyebrow">Multi-body angular rigid-box scene</p>
+          <h2 id="tower-title">A trebuchet projectile crashes through a tower and makes ordinary blocks tumble</h2>
+          <p>
+            Thirty masonry blocks start stacked in two layers with exactly zero angular velocity. A heavy
+            projectile approaches on a gravity-driven arc and hits the middle of the structure. Rust owns
+            every box orientation, OBB contact, off-center impulse, penetration correction, and secondary
+            collision. The floor is itself a fixed oriented box and is resolved after dynamic contacts in
+            each bounded solver pass, so upper blocks cannot finish a frame by pushing lower blocks through
+            the ground. The browser receives only the exact eight collision vertices for each body and
+            projects them into this view.
+          </p>
+        </div>
+
+        <div class="dice-workbench">
+          <canvas
+            class="dice-stage"
+            id="tower-canvas"
+            width="960"
+            height="560"
+            aria-label="Wireframe scene of a Rust-simulated trebuchet projectile crashing through a stacked masonry tower"
+          ></canvas>
+          <div class="dice-transport">
+            <button class="compact-button" id="tower-reset" type="button">Reset</button>
+            <button class="compact-button" id="tower-step" type="button">Step +1</button>
+            <button class="compact-button" id="tower-run" type="button">Run impact</button>
+            <label class="frame-control dice-frame-control" for="tower-frame">
+              <span>Tower frame · 1/60 s</span>
+              <strong id="tower-frame-label">0</strong>
+              <input id="tower-frame" type="range" min="0" max="480" value="0" step="1" />
+            </label>
+          </div>
+          <p class="dice-status" id="tower-status" aria-live="polite">
+            Loading the Rust-owned tower, projectile, and oriented collision vertices…
+          </p>
+          <p class="scenario-legend">
+            30 initially non-spinning blocks · two-layer tower · ballistic projectile · OBB SAT narrow phase · contact-point angular impulses · fixed-boundary-last stabilization · exact Rust vertices
+          </p>
+        </div>
+      </section>
+
       <section class="method dice-lab" id="tumbling-dice" aria-labelledby="dice-title">
         <div class="section-copy">
-          <p class="eyebrow">Angular rigid-body slice</p>
+          <p class="eyebrow">Single-body angular regression</p>
           <h2 id="dice-title">A tilted box acquires real spin from an off-center floor impact</h2>
           <p>
-            This fixture starts with a tilted cuboid and zero angular velocity. Every 1/60-second step is
-            computed in Rust. The actual oriented corners determine which vertex or edge reaches the
-            plane; the resulting contact impulse acts away from the center of mass and therefore changes
+            This focused fixture starts with a tilted cuboid and zero angular velocity. Every 1/60-second
+            step is computed in Rust. The actual oriented corners determine which vertex or edge reaches
+            the plane; the resulting contact impulse acts away from the center of mass and therefore changes
             angular velocity through the cuboid inertia tensor. The browser draws the eight exact vertices
             exported by that same Rust collision geometry rather than rotating a decorative cube itself.
           </p>
@@ -186,11 +230,12 @@
           <h2 id="boundary-title">Every displayed frame is a Rust physics state</h2>
           <p>
             Rust owns the 60 Hz fixed-step progression, relative-motion swept pair tests, exact fractional
-            TOI comparison inside each frame, global earliest contact-set collection, bounded coupled
-            response, deterministic fixed-point quantization, angular orientation integration, and the
-            rotation-aware dice contact response. The Wasm adapter normalizes coordinates only for display.
-            Mouse input changes the room camera; playback and manual frame selection never integrate
-            velocity, resolve contacts, rotate collision geometry, or invent intermediate physics states.
+            TOI comparison inside the dense room, global earliest contact-set collection, bounded coupled
+            response, deterministic fixed-point quantization, quaternion orientation integration, OBB SAT
+            narrow phase, contact-point angular impulses, and the tower/dice oriented collision geometry.
+            The Wasm adapter normalizes coordinates only for display. Mouse input changes the room camera;
+            playback and manual frame selection never integrate velocity, resolve contacts, rotate collision
+            geometry, or invent intermediate physics states.
           </p>
         </div>
       </section>
@@ -198,6 +243,7 @@
     <script type="module" src="./app.js"></script>
     <script type="module" src="./temporal.js"></script>
     <script type="module" src="./playback.js"></script>
+    <script type="module" src="./tower.js"></script>
     <script type="module" src="./dice.js"></script>
     <script type="module" src="./materials.js"></script>
   </body>
