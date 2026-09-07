@@ -5,10 +5,12 @@ use crate::{
     angular::{
         ANGULAR_VELOCITY_SCALE, AngularVelocity3d, ORIENTATION_SCALE, Orientation3d, box_inertia,
     },
-    box_box::{BoxBoxStep3d, RigidBoxState3d},
+    box_box::{BoxBoxContact3d, BoxBoxStep3d, RigidBoxState3d},
     box_box_stabilization::{
         BoxBoxStabilizationError3d, stabilize_box_box_contact as stabilize_without_friction,
     },
+    box_plane::oriented_box_vertices,
+    oriented_box::ObbAxisFeature3d,
     types::PhysicsBody3d,
 };
 
@@ -19,10 +21,11 @@ type Result3d<T> = Result<T, BoxBoxStabilizationError3d>;
 /// Resolves and stabilizes one OBB pair, then applies one deterministic Coulomb-limited tangent impulse.
 ///
 /// The underlying normal response and discrete penetration projection remain unchanged. Friction uses the
-/// same original Rust-owned contact point and SAT normal as the normal impulse, measures the post-normal
-/// relative contact velocity including spin, derives one primitive tangent directly from that slip, and
-/// applies equal-and-opposite impulses to both linear and angular velocity. The Coulomb bound compares
-/// squared impulse magnitudes, so no floating-point normalization or square root becomes solver truth.
+/// same original Rust-owned contact point and SAT feature as the normal impulse, measures the post-normal
+/// relative contact velocity including spin, and chooses the dominant slip direction from the exact box
+/// edges that span the contact tangent plane. Keeping the tangent on those bounded geometry edges avoids
+/// inventing an enormous projected integer direction as boxes rotate. The Coulomb bound compares squared
+/// impulse magnitudes, so no floating-point normalization or square root becomes solver truth.
 ///
 /// The existing swept-AABB path is still only a conservative broad phase for the dense room. This helper
 /// changes the bounded OBB response seam used by the angular rigid-box world; it does not claim rotational
@@ -30,8 +33,8 @@ type Result3d<T> = Result<T, BoxBoxStabilizationError3d>;
 ///
 /// # Errors
 ///
-/// Returns [`BoxBoxStabilizationError3d`] for invalid pair ordering/response, out-of-range friction, or
-/// checked arithmetic overflow.
+/// Returns [`BoxBoxStabilizationError3d`] for invalid pair ordering/response, out-of-range friction,
+/// malformed contact geometry, or checked arithmetic overflow.
 pub fn stabilize_box_box_contact(
     left_state: RigidBoxState3d,
     left_body: PhysicsBody3d,
@@ -61,15 +64,135 @@ pub fn stabilize_box_box_contact(
     let right_offset = position_delta(right_state.center, contact.point)?;
     let relative_velocity =
         relative_contact_velocity(step.left, left_offset, step.right, right_offset)?;
-    let Some(tangent) =
-        tangent_direction(relative_velocity, contact.axis, contact.axis_length_squared)?
-    else {
+    let tangents = contact_tangents(left_state, left_body, right_state, right_body, contact)?;
+    let Some(tangent) = dominant_slip_tangent(relative_velocity, tangents)? else {
         return Ok(step);
     };
+    apply_tangent_response(
+        &mut step,
+        left_body,
+        right_body,
+        left_offset,
+        right_offset,
+        tangent,
+        contact,
+        friction_milli,
+    )?;
+    Ok(step)
+}
+
+fn validate_friction(body: PhysicsBody3d) -> Result3d<()> {
+    if body.material.friction_milli > MATERIAL_SCALE {
+        return Err(BoxBoxStabilizationError3d::ArithmeticOverflow);
+    }
+    Ok(())
+}
+
+fn contact_tangents(
+    left_state: RigidBoxState3d,
+    left_body: PhysicsBody3d,
+    right_state: RigidBoxState3d,
+    right_body: PhysicsBody3d,
+    contact: BoxBoxContact3d,
+) -> Result3d<[[i128; 3]; 2]> {
+    let left_edges = oriented_edges(left_state, left_body)?;
+    let right_edges = oriented_edges(right_state, right_body)?;
+    match contact.feature {
+        ObbAxisFeature3d::LeftFace(axis) => face_tangents(left_edges, axis),
+        ObbAxisFeature3d::RightFace(axis) => face_tangents(right_edges, axis),
+        ObbAxisFeature3d::EdgeEdge {
+            left_axis,
+            right_axis,
+        } => Ok([
+            indexed_edge(left_edges, left_axis)?,
+            indexed_edge(right_edges, right_axis)?,
+        ]),
+    }
+}
+
+fn oriented_edges(
+    state: RigidBoxState3d,
+    body: PhysicsBody3d,
+) -> Result3d<[[i128; 3]; 3]> {
+    let vertices = oriented_box_vertices(
+        state.center,
+        body.half_extents,
+        state.angular.orientation,
+    )
+    .map_err(|_| BoxBoxStabilizationError3d::ArithmeticOverflow)?;
+    Ok([
+        edge_delta(vertices[0], vertices[1])?,
+        edge_delta(vertices[0], vertices[2])?,
+        edge_delta(vertices[0], vertices[4])?,
+    ])
+}
+
+fn edge_delta(left: Position, right: Position) -> Result3d<[i128; 3]> {
+    Ok([
+        i128::from(right.x)
+            .checked_sub(i128::from(left.x))
+            .ok_or(BoxBoxStabilizationError3d::ArithmeticOverflow)?,
+        i128::from(right.y)
+            .checked_sub(i128::from(left.y))
+            .ok_or(BoxBoxStabilizationError3d::ArithmeticOverflow)?,
+        i128::from(right.z)
+            .checked_sub(i128::from(left.z))
+            .ok_or(BoxBoxStabilizationError3d::ArithmeticOverflow)?,
+    ])
+}
+
+fn face_tangents(edges: [[i128; 3]; 3], axis: u8) -> Result3d<[[i128; 3]; 2]> {
+    match axis {
+        0 => Ok([edges[1], edges[2]]),
+        1 => Ok([edges[2], edges[0]]),
+        2 => Ok([edges[0], edges[1]]),
+        _ => Err(BoxBoxStabilizationError3d::ArithmeticOverflow),
+    }
+}
+
+fn indexed_edge(edges: [[i128; 3]; 3], axis: u8) -> Result3d<[i128; 3]> {
+    edges
+        .get(usize::from(axis))
+        .copied()
+        .ok_or(BoxBoxStabilizationError3d::ArithmeticOverflow)
+}
+
+fn dominant_slip_tangent(
+    relative_velocity: [i128; 3],
+    tangents: [[i128; 3]; 2],
+) -> Result3d<Option<[i128; 3]>> {
+    let first = primitive_vector(tangents[0])?
+        .ok_or(BoxBoxStabilizationError3d::ArithmeticOverflow)?;
+    let second = primitive_vector(tangents[1])?
+        .ok_or(BoxBoxStabilizationError3d::ArithmeticOverflow)?;
+    let first_slip = checked_dot(relative_velocity, first)?;
+    let second_slip = checked_dot(relative_velocity, second)?;
+    if first_slip == 0 && second_slip == 0 {
+        return Ok(None);
+    }
+    if first_slip.unsigned_abs() >= second_slip.unsigned_abs() {
+        Ok(Some(first))
+    } else {
+        Ok(Some(second))
+    }
+}
+
+fn apply_tangent_response(
+    step: &mut BoxBoxStep3d,
+    left_body: PhysicsBody3d,
+    right_body: PhysicsBody3d,
+    left_offset: [i64; 3],
+    right_offset: [i64; 3],
+    tangent: [i128; 3],
+    contact: BoxBoxContact3d,
+    friction_milli: u16,
+) -> Result3d<()> {
     let tangent_length_squared = vector_length_squared(tangent)?;
+    let relative_velocity =
+        relative_contact_velocity(step.left, left_offset, step.right, right_offset)?;
     let tangent_velocity = checked_dot(relative_velocity, tangent)?;
     if tangent_velocity == 0 {
-        return Ok(step);
+        return Ok(());
     }
 
     let effective_inverse_mass = checked_add(
@@ -89,7 +212,7 @@ pub fn stabilize_box_box_contact(
         )?,
     )?;
     if effective_inverse_mass <= 0 {
-        return Ok(step);
+        return Ok(());
     }
 
     let opposing_velocity = tangent_velocity
@@ -107,20 +230,13 @@ pub fn stabilize_box_box_contact(
         friction_milli,
     )?;
     if tangent_impulse_units == 0 {
-        return Ok(step);
+        return Ok(());
     }
 
     let left_impulse = scale_axis(tangent, checked_neg(tangent_impulse_units)?)?;
     let right_impulse = scale_axis(tangent, tangent_impulse_units)?;
     apply_body_impulse(&mut step.left, left_body, left_offset, left_impulse)?;
     apply_body_impulse(&mut step.right, right_body, right_offset, right_impulse)?;
-    Ok(step)
-}
-
-fn validate_friction(body: PhysicsBody3d) -> Result3d<()> {
-    if body.material.friction_milli > MATERIAL_SCALE {
-        return Err(BoxBoxStabilizationError3d::ArithmeticOverflow);
-    }
     Ok(())
 }
 
@@ -187,36 +303,10 @@ fn contact_velocity(state: RigidBoxState3d, offset: [i64; 3]) -> Result3d<[i128;
     ])
 }
 
-fn tangent_direction(
-    relative_velocity: [i128; 3],
-    normal: [i128; 3],
-    normal_length_squared: u128,
-) -> Result3d<Option<[i128; 3]>> {
-    let length_squared = i128::try_from(normal_length_squared)
-        .map_err(|_| BoxBoxStabilizationError3d::ArithmeticOverflow)?;
-    if length_squared <= 0 {
-        return Err(BoxBoxStabilizationError3d::ArithmeticOverflow);
-    }
-    let normal_velocity = checked_dot(relative_velocity, normal)?;
-    let mut tangent = [0_i128; 3];
-    for axis in 0..3 {
-        tangent[axis] = checked_sub(
-            checked_mul(relative_velocity[axis], length_squared)?,
-            checked_mul(normal[axis], normal_velocity)?,
-        )?;
-    }
-    primitive_vector(tangent)
-}
-
 fn primitive_vector(vector: [i128; 3]) -> Result3d<Option<[i128; 3]>> {
     let mut divisor = 0_u128;
     for component in vector {
-        let magnitude = component
-            .checked_abs()
-            .ok_or(BoxBoxStabilizationError3d::ArithmeticOverflow)?;
-        let magnitude = u128::try_from(magnitude)
-            .map_err(|_| BoxBoxStabilizationError3d::ArithmeticOverflow)?;
-        divisor = gcd(divisor, magnitude);
+        divisor = gcd(divisor, component.unsigned_abs());
     }
     if divisor == 0 {
         return Ok(None);
@@ -241,11 +331,7 @@ fn gcd(mut left: u128, mut right: u128) -> u128 {
 
 fn vector_length_squared(vector: [i128; 3]) -> Result3d<u128> {
     vector.into_iter().try_fold(0_u128, |sum, component| {
-        let magnitude = component
-            .checked_abs()
-            .ok_or(BoxBoxStabilizationError3d::ArithmeticOverflow)?;
-        let magnitude = u128::try_from(magnitude)
-            .map_err(|_| BoxBoxStabilizationError3d::ArithmeticOverflow)?;
+        let magnitude = component.unsigned_abs();
         let square = magnitude
             .checked_mul(magnitude)
             .ok_or(BoxBoxStabilizationError3d::ArithmeticOverflow)?;
@@ -264,11 +350,7 @@ fn coulomb_clamp(
     if desired_impulse_units == 0 || normal_impulse_units <= 0 || friction_milli == 0 {
         return Ok(0);
     }
-    let desired_magnitude = desired_impulse_units
-        .checked_abs()
-        .ok_or(BoxBoxStabilizationError3d::ArithmeticOverflow)?;
-    let desired_magnitude = u128::try_from(desired_magnitude)
-        .map_err(|_| BoxBoxStabilizationError3d::ArithmeticOverflow)?;
+    let desired_magnitude = desired_impulse_units.unsigned_abs();
     let normal_magnitude = u128::try_from(normal_impulse_units)
         .map_err(|_| BoxBoxStabilizationError3d::ArithmeticOverflow)?;
 
