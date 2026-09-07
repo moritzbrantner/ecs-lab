@@ -116,8 +116,7 @@ pub fn step_rigid_box_world_sampled_rotating(
 ) -> Result<SampledRotatingFrameStep3d, SampledRotatingFrameError3d> {
     validate_frame_config(config)?;
 
-    let Some(frontier) =
-        advance_to_earliest_rotating_contact_set(boxes, config, search_config)?
+    let Some(frontier) = advance_to_earliest_rotating_contact_set(boxes, config, search_config)?
     else {
         let step = step_rigid_box_world_substepped(boxes, config, substep_policy)?;
         return Ok(SampledRotatingFrameStep3d {
@@ -151,9 +150,7 @@ pub fn step_rigid_box_world_sampled_rotating(
     })
 }
 
-fn validate_frame_config(
-    config: RigidBoxWorldConfig3d,
-) -> Result<(), SampledRotatingFrameError3d> {
+fn validate_frame_config(config: RigidBoxWorldConfig3d) -> Result<(), SampledRotatingFrameError3d> {
     if config.timestep_numerator < 0 {
         return Err(SampledRotatingFrameError3d::NegativeTimestepNumerator(
             config.timestep_numerator,
@@ -237,10 +234,7 @@ fn damp_world_once(
     Ok(())
 }
 
-fn damp_axis(
-    value: i32,
-    damping_milli: u16,
-) -> Result<i32, SampledRotatingFrameError3d> {
+fn damp_axis(value: i32, damping_milli: u16) -> Result<i32, SampledRotatingFrameError3d> {
     let numerator = i128::from(value)
         .checked_mul(i128::from(damping_milli))
         .ok_or(SampledRotatingFrameError3d::ArithmeticOverflow)?;
@@ -352,7 +346,10 @@ mod tests {
         assert!(step.first_contact_set.is_some());
         assert!(step.first_response_passes > 0);
         assert_eq!(step.boxes[1], fixed);
-        assert_ne!(step.boxes[0].state.angular.orientation, frontier_orientation);
+        assert_ne!(
+            step.boxes[0].state.angular.orientation,
+            frontier_orientation
+        );
     }
 
     #[test]
@@ -440,7 +437,9 @@ mod tests {
                 RotatingContactSearchConfig3d::default(),
                 AngularSubstepPolicy3d::default(),
             ),
-            Err(SampledRotatingFrameError3d::NonPositiveTimestepDenominator(0))
+            Err(SampledRotatingFrameError3d::NonPositiveTimestepDenominator(
+                0
+            ))
         );
         assert_eq!(
             step_rigid_box_world_sampled_rotating(
