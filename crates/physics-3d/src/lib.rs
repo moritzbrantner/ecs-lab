@@ -1,4 +1,5 @@
 mod angular;
+mod box_box;
 mod box_plane;
 mod colliders;
 mod continuous_solver;
@@ -16,6 +17,9 @@ mod types;
 pub use angular::{
     ANGULAR_VELOCITY_SCALE, AngularError3d, AngularState3d, AngularVelocity3d, BoxInertia3d,
     ORIENTATION_SCALE, Orientation3d, box_inertia, contact_angular_impulse, integrate_orientation,
+};
+pub use box_box::{
+    BoxBoxContact3d, BoxBoxError3d, BoxBoxStep3d, RigidBoxState3d, resolve_box_box_contact,
 };
 pub use box_plane::{
     BoxPlaneConfig3d, BoxPlaneContact3d, BoxPlaneError3d, BoxPlaneState3d, BoxPlaneStep3d,
