@@ -112,9 +112,14 @@ impl fmt::Display for RigidBoxWorldError3d {
                 formatter,
                 "rigid-box world solver passes must be 1..={MAX_SOLVER_PASSES}, got {value}"
             ),
-            Self::Angular(error) => write!(formatter, "rigid-box world angular integration failed: {error}"),
+            Self::Angular(error) => write!(
+                formatter,
+                "rigid-box world angular integration failed: {error}"
+            ),
             Self::Geometry(error) => write!(formatter, "rigid-box world geometry failed: {error}"),
-            Self::Stabilization(error) => write!(formatter, "rigid-box world contact failed: {error}"),
+            Self::Stabilization(error) => {
+                write!(formatter, "rigid-box world contact failed: {error}")
+            }
             Self::ArithmeticOverflow => write!(formatter, "rigid-box world arithmetic overflowed"),
         }
     }
@@ -191,12 +196,8 @@ pub fn step_rigid_box_world(
                 let (left_slice, right_slice) = next.split_at_mut(right_index);
                 let left = &mut left_slice[left_index];
                 let right = &mut right_slice[0];
-                let resolved = stabilize_box_box_contact(
-                    left.state,
-                    left.body,
-                    right.state,
-                    right.body,
-                )?;
+                let resolved =
+                    stabilize_box_box_contact(left.state, left.body, right.state, right.body)?;
                 if let Some(contact) = resolved.contact {
                     stats.contacts = stats
                         .contacts
@@ -262,9 +263,7 @@ fn validate_world(
         let left = window[0].body.entity;
         let right = window[1].body.entity;
         if left >= right {
-            return Err(RigidBoxWorldError3d::NonCanonicalEntityOrder(
-                left, right,
-            ));
+            return Err(RigidBoxWorldError3d::NonCanonicalEntityOrder(left, right));
         }
     }
     for rigid_box in boxes {
@@ -429,15 +428,11 @@ fn oriented_bounds(rigid_box: &RigidBox3d) -> Result<OrientedBounds3d, RigidBoxW
 
 fn bounds_overlap(left: OrientedBounds3d, right: OrientedBounds3d) -> bool {
     (0..3).all(|axis| {
-        left.maximum[axis] >= right.minimum[axis]
-            && right.maximum[axis] >= left.minimum[axis]
+        left.maximum[axis] >= right.minimum[axis] && right.maximum[axis] >= left.minimum[axis]
     })
 }
 
-fn div_round_nearest(
-    numerator: i128,
-    denominator: i128,
-) -> Result<i128, RigidBoxWorldError3d> {
+fn div_round_nearest(numerator: i128, denominator: i128) -> Result<i128, RigidBoxWorldError3d> {
     if denominator <= 0 {
         return Err(RigidBoxWorldError3d::ArithmeticOverflow);
     }
@@ -505,7 +500,10 @@ mod tests {
             boxes = step_rigid_box_world(&boxes, config(-10 * SCALE))
                 .expect("valid stacked world")
                 .boxes;
-            for rigid_box in boxes.iter().filter(|value| value.body.kind == BodyKind::Dynamic) {
+            for rigid_box in boxes
+                .iter()
+                .filter(|value| value.body.kind == BodyKind::Dynamic)
+            {
                 let vertices = oriented_box_vertices(
                     rigid_box.state.center,
                     rigid_box.body.half_extents,
