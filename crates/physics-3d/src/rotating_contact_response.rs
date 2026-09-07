@@ -1,4 +1,7 @@
-use std::{collections::{BTreeMap, BTreeSet}, fmt};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt,
+};
 
 use ecs_workload::EntityId;
 
@@ -37,7 +40,10 @@ pub enum RotatingContactResponseError3d {
 impl fmt::Display for RotatingContactResponseError3d {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::EmptyContactSet => write!(formatter, "rotating contact response requires a non-empty contact set"),
+            Self::EmptyContactSet => write!(
+                formatter,
+                "rotating contact response requires a non-empty contact set"
+            ),
             Self::NonCanonicalPair(left, right) => write!(
                 formatter,
                 "rotating contact response expects ascending entity ids, got {} then {}",
@@ -70,7 +76,9 @@ impl fmt::Display for RotatingContactResponseError3d {
             Self::Stabilization(error) => {
                 write!(formatter, "rotating contact response failed: {error}")
             }
-            Self::ArithmeticOverflow => write!(formatter, "rotating contact response arithmetic overflowed"),
+            Self::ArithmeticOverflow => {
+                write!(formatter, "rotating contact response arithmetic overflowed")
+            }
         }
     }
 }
@@ -92,9 +100,7 @@ struct StateDelta3d {
 
 impl StateDelta3d {
     fn is_zero(self) -> bool {
-        self.center == [0; 3]
-            && self.linear_velocity == [0; 3]
-            && self.angular_velocity == [0; 3]
+        self.center == [0; 3] && self.linear_velocity == [0; 3] && self.angular_velocity == [0; 3]
     }
 
     fn accumulate(&mut self, other: Self) -> Result<(), RotatingContactResponseError3d> {
@@ -174,12 +180,13 @@ pub fn resolve_rotating_contact_frontier(
             let left_index = *indices
                 .get(&expected.left)
                 .ok_or(RotatingContactResponseError3d::MissingEntity(expected.left))?;
-            let right_index = *indices
-                .get(&expected.right)
-                .ok_or(RotatingContactResponseError3d::MissingEntity(expected.right))?;
+            let right_index = *indices.get(&expected.right).ok_or(
+                RotatingContactResponseError3d::MissingEntity(expected.right),
+            )?;
             let left = snapshot[left_index];
             let right = snapshot[right_index];
-            let resolved = stabilize_box_box_contact(left.state, left.body, right.state, right.body)?;
+            let resolved =
+                stabilize_box_box_contact(left.state, left.body, right.state, right.body)?;
             let left_delta = state_delta(left.state, resolved.left, left.body.entity)?;
             let right_delta = state_delta(right.state, resolved.right, right.body.entity)?;
             pair_changed |= !left_delta.is_zero() || !right_delta.is_zero();
@@ -298,20 +305,14 @@ fn apply_state_delta(
     ))
 }
 
-fn add_i64_delta(
-    value: i64,
-    delta: i128,
-) -> Result<i64, RotatingContactResponseError3d> {
+fn add_i64_delta(value: i64, delta: i128) -> Result<i64, RotatingContactResponseError3d> {
     let result = i128::from(value)
         .checked_add(delta)
         .ok_or(RotatingContactResponseError3d::ArithmeticOverflow)?;
     i64::try_from(result).map_err(|_| RotatingContactResponseError3d::ArithmeticOverflow)
 }
 
-fn add_i32_delta(
-    value: i32,
-    delta: i128,
-) -> Result<i32, RotatingContactResponseError3d> {
+fn add_i32_delta(value: i32, delta: i128) -> Result<i32, RotatingContactResponseError3d> {
     let result = i128::from(value)
         .checked_add(delta)
         .ok_or(RotatingContactResponseError3d::ArithmeticOverflow)?;
@@ -383,11 +384,7 @@ mod tests {
     }
 
     fn simultaneous_frontier() -> RotatingContactFrontier3d {
-        let boxes = [
-            rotating_rod(),
-            obstacle(2, 10, 10),
-            obstacle(3, -10, -10),
-        ];
+        let boxes = [rotating_rod(), obstacle(2, 10, 10), obstacle(3, -10, -10)];
         advance_to_earliest_rotating_contact_set(
             &boxes,
             frame_config(),
@@ -421,13 +418,16 @@ mod tests {
         let denominator = frontier.contact_set.denominator;
         let contact_numerator = frontier.contact_set.contact_numerator;
 
-        let response = resolve_rotating_contact_frontier(frontier, 8)
-            .expect("valid coupled response");
+        let response =
+            resolve_rotating_contact_frontier(frontier, 8).expect("valid coupled response");
 
         assert_eq!(response.boxes[1], fixed_left);
         assert_eq!(response.boxes[2], fixed_right);
         assert_eq!(response.remaining_numerator, remaining);
-        assert_eq!(response.remaining_numerator + contact_numerator, denominator);
+        assert_eq!(
+            response.remaining_numerator + contact_numerator,
+            denominator
+        );
         assert!(response.passes_used > 0);
     }
 
@@ -437,8 +437,8 @@ mod tests {
         let orientation = frontier.boxes[0].state.angular.orientation;
         let angular_velocity = frontier.boxes[0].state.angular.angular_velocity;
 
-        let response = resolve_rotating_contact_frontier(frontier, 8)
-            .expect("valid coupled response");
+        let response =
+            resolve_rotating_contact_frontier(frontier, 8).expect("valid coupled response");
 
         assert_eq!(response.boxes[0].state.angular.orientation, orientation);
         assert_ne!(
