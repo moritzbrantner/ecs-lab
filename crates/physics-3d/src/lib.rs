@@ -86,8 +86,7 @@ pub use rotational_sweep::{
     rotational_sweep_bounds, rotational_sweep_candidate_pairs,
 };
 pub use sampled_rotating_frame::{
-    SampledRotatingFrameError3d, SampledRotatingFrameStep3d,
-    step_rigid_box_world_sampled_rotating,
+    SampledRotatingFrameError3d, SampledRotatingFrameStep3d, step_rigid_box_world_sampled_rotating,
 };
 pub use scenario::{BouncingRoom3dScenario, BroadPhaseBody3d, BroadPhaseFrame3d, ScenarioError3d};
 pub use types::{
