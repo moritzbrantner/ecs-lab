@@ -253,7 +253,7 @@ fn div_round_nearest(
 
 #[cfg(test)]
 mod tests {
-    use ecs_physics::{BodyKind, MATERIAL_SCALE};
+    use ecs_physics::MATERIAL_SCALE;
     use ecs_workload::{EntityId, Position};
 
     use crate::{
