@@ -3,9 +3,8 @@ use std::fmt;
 use ecs_physics::{BodyKind, MATERIAL_SCALE};
 
 use crate::{
-    ANGULAR_VELOCITY_SCALE, RigidBox3d, RigidBoxWorldConfig3d, RigidBoxWorldError3d,
-    RigidBoxWorldStats3d, RigidBoxWorldStep3d,
-    rigid_box_world::step_rigid_box_world as step_rigid_box_world_once,
+    RigidBox3d, RigidBoxWorldConfig3d, RigidBoxWorldError3d, RigidBoxWorldStats3d,
+    RigidBoxWorldStep3d, rigid_box_world::step_rigid_box_world as step_rigid_box_world_once,
 };
 
 /// Maximum bounded angular substeps accepted by this approximation layer.
@@ -17,7 +16,7 @@ pub const DEFAULT_MAX_ANGULAR_SUBSTEPS: u8 = 8;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct AngularSubstepPolicy3d {
-    /// Maximum L1 angular displacement per substep in [`ANGULAR_VELOCITY_SCALE`] units of one radian.
+    /// Maximum L1 angular displacement per substep in [`crate::ANGULAR_VELOCITY_SCALE`] units of one radian.
     pub max_angular_step_units: u32,
     /// Maximum number of equal rational substeps allowed for one requested world frame.
     pub max_substeps: u8,
@@ -91,10 +90,9 @@ pub fn required_angular_substeps(
 ) -> Result<u8, AngularSubstepError3d> {
     validate_policy(policy)?;
     if config.timestep_numerator < 0 {
-        return Err(RigidBoxWorldError3d::NegativeTimestepNumerator(
-            config.timestep_numerator,
-        )
-        .into());
+        return Err(
+            RigidBoxWorldError3d::NegativeTimestepNumerator(config.timestep_numerator).into(),
+        );
     }
     if config.timestep_denominator <= 0 {
         return Err(RigidBoxWorldError3d::NonPositiveTimestepDenominator(
@@ -225,7 +223,10 @@ fn angular_l1_units(rigid_box: &RigidBox3d) -> Option<u128> {
 mod tests {
     use ecs_workload::{EntityId, Position, Velocity};
 
-    use crate::{AngularState3d, AngularVelocity3d, Orientation3d, PhysicsBody3d, RigidBoxState3d};
+    use crate::{
+        ANGULAR_VELOCITY_SCALE, AngularState3d, AngularVelocity3d, Orientation3d, PhysicsBody3d,
+        RigidBoxState3d,
+    };
 
     use super::*;
 
@@ -263,13 +264,11 @@ mod tests {
             Position::new3(0, 20, 0),
             AngularVelocity3d::new(10_000, 20_000, -10_000),
         )];
-        let expected = step_rigid_box_world_once(&boxes, config()).expect("valid direct world step");
-        let actual = step_rigid_box_world_substepped(
-            &boxes,
-            config(),
-            AngularSubstepPolicy3d::default(),
-        )
-        .expect("slow spin should remain one step");
+        let expected =
+            step_rigid_box_world_once(&boxes, config()).expect("valid direct world step");
+        let actual =
+            step_rigid_box_world_substepped(&boxes, config(), AngularSubstepPolicy3d::default())
+                .expect("slow spin should remain one step");
 
         assert_eq!(
             required_angular_substeps(&boxes, config(), AngularSubstepPolicy3d::default())
@@ -334,10 +333,7 @@ mod tests {
                 RigidBoxState3d::new(
                     Position::new3(0, 15, 0),
                     Velocity::new3(0, 0, 0),
-                    AngularState3d::new(
-                        Orientation3d::IDENTITY,
-                        AngularVelocity3d::default(),
-                    ),
+                    AngularState3d::new(Orientation3d::IDENTITY, AngularVelocity3d::default()),
                 ),
             ),
         ];
@@ -354,6 +350,9 @@ mod tests {
 
         assert_eq!(direct.stats.contacts, 0);
         assert!(substepped.stats.contacts > 0);
-        assert_ne!(substepped.boxes[0].state.center, direct.boxes[0].state.center);
+        assert_ne!(
+            substepped.boxes[0].state.center,
+            direct.boxes[0].state.center
+        );
     }
 }
