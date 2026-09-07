@@ -1,3 +1,6 @@
+#[path = "tower_demo.rs"]
+mod tower_demo;
+
 use std::sync::{Mutex, OnceLock};
 
 use ecs_physics::PhysicsMaterial;
