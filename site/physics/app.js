@@ -101,6 +101,22 @@ function readRustFrame(step) {
     halfX: wasmExports.physics_demo_half_extent_x(bodyIndex, step),
     halfY: wasmExports.physics_demo_half_extent_y(bodyIndex, step),
     halfZ: wasmExports.physics_demo_half_extent_z(bodyIndex, step),
+    orientation: [
+      wasmExports.physics_demo_orientation_x(bodyIndex, step),
+      wasmExports.physics_demo_orientation_y(bodyIndex, step),
+      wasmExports.physics_demo_orientation_z(bodyIndex, step),
+      wasmExports.physics_demo_orientation_w(bodyIndex, step),
+    ],
+    broadMin: [
+      wasmExports.physics_demo_broad_min_x(bodyIndex, step),
+      wasmExports.physics_demo_broad_min_y(bodyIndex, step),
+      wasmExports.physics_demo_broad_min_z(bodyIndex, step),
+    ],
+    broadMax: [
+      wasmExports.physics_demo_broad_max_x(bodyIndex, step),
+      wasmExports.physics_demo_broad_max_y(bodyIndex, step),
+      wasmExports.physics_demo_broad_max_z(bodyIndex, step),
+    ],
     fixed: wasmExports.physics_demo_is_fixed(bodyIndex, step) === 1,
     mass: wasmExports.physics_demo_mass_units(bodyIndex, step),
     restitution: wasmExports.physics_demo_restitution_milli(bodyIndex, step),
@@ -123,6 +139,7 @@ function interpolateFrame(left, right, amount) {
       x: lerp(entity.x, target.x, amount),
       y: lerp(entity.y, target.y, amount),
       z: lerp(entity.z, target.z, amount),
+      orientation: interpolateQuaternion(entity.orientation, target.orientation, amount),
     };
   });
   return { step: lerp(left.step, right.step, amount), entities, pairWords: left.pairWords };
@@ -130,6 +147,21 @@ function interpolateFrame(left, right, amount) {
 
 function lerp(left, right, amount) {
   return left + (right - left) * amount;
+}
+
+function interpolateQuaternion(left, right, amount) {
+  const quaternionDot =
+    left[0] * right[0] +
+    left[1] * right[1] +
+    left[2] * right[2] +
+    left[3] * right[3];
+  const sign = quaternionDot < 0 ? -1 : 1;
+  const mixed = left.map((value, index) => lerp(value, right[index] * sign, amount));
+  const length = Math.hypot(...mixed);
+  if (length === 0) {
+    return [0, 0, 0, 1];
+  }
+  return mixed.map((value) => value / length);
 }
 
 function clamp(value, minimum, maximum) {
@@ -155,13 +187,13 @@ function pairContacts(frame) {
 function updateCollisionStatus(frame) {
   const contacts = pairContacts(frame);
   if (contacts.length === 0) {
-    collisionStatus.textContent = `Rust 3D frame ${frame.step}: no AABB contact.`;
+    collisionStatus.textContent = `Rust 3D frame ${frame.step}: no oriented broad-phase overlap.`;
     return;
   }
   const visible = contacts.slice(0, 6);
   const remainder = contacts.length - visible.length;
   const suffix = remainder > 0 ? ` · +${remainder} more` : "";
-  collisionStatus.textContent = `Rust 3D frame ${frame.step}: ${contacts.length} contacts · ${visible.join(", ")}${suffix}.`;
+  collisionStatus.textContent = `Rust 3D frame ${frame.step}: ${contacts.length} oriented broad-phase overlaps · ${visible.join(", ")}${suffix}.`;
 }
 
 function isCutawayBoundary(entity) {
@@ -321,13 +353,13 @@ function packAabbs(entities) {
   const values = new Float32Array(entities.length * 8);
   entities.forEach((entity, index) => {
     const offset = index * 8;
-    values[offset] = entity.x - entity.halfX;
-    values[offset + 1] = entity.y - entity.halfY;
-    values[offset + 2] = entity.z - entity.halfZ;
+    values[offset] = entity.broadMin[0];
+    values[offset + 1] = entity.broadMin[1];
+    values[offset + 2] = entity.broadMin[2];
     values[offset + 3] = 0;
-    values[offset + 4] = entity.x + entity.halfX;
-    values[offset + 5] = entity.y + entity.halfY;
-    values[offset + 6] = entity.z + entity.halfZ;
+    values[offset + 4] = entity.broadMax[0];
+    values[offset + 5] = entity.broadMax[1];
+    values[offset + 6] = entity.broadMax[2];
     values[offset + 7] = 0;
   });
   return values;
@@ -343,11 +375,11 @@ async function verifyWebGpu(frame, revision) {
     return;
   }
   if (!webgpuEnabled.checked) {
-    webgpuStatus.textContent = "WebGPU collision verification is off; Rust remains authoritative.";
+    webgpuStatus.textContent = "WebGPU broad-phase verification is off; Rust remains authoritative.";
     return;
   }
 
-  webgpuStatus.textContent = `Verifying Rust 3D AABBs for step ${frame.step} with WebGPU…`;
+  webgpuStatus.textContent = `Verifying Rust-oriented broad-phase AABBs for step ${frame.step} with WebGPU…`;
   try {
     const measurement = await runWebGpuAabbPairs(packAabbs(frame.entities), frame.entities.length);
     if (revision !== renderRevision) {
@@ -355,10 +387,10 @@ async function verifyWebGpu(frame, revision) {
     }
     if (!exactWordsMatch(frame.pairWords, measurement.bitset)) {
       webgpuStatus.textContent =
-        "WebGPU 3D pair mismatch: GPU evidence was rejected and Rust remains authoritative.";
+        "WebGPU broad-phase pair mismatch: GPU evidence was rejected and Rust remains authoritative.";
       return;
     }
-    webgpuStatus.textContent = `WebGPU exact 3D pair parity · ${measurement.totalMs.toFixed(2)} ms including setup/readback.`;
+    webgpuStatus.textContent = `WebGPU exact broad-phase pair parity · ${measurement.totalMs.toFixed(2)} ms including setup/readback.`;
   } catch (error) {
     if (revision !== renderRevision) {
       return;
@@ -524,6 +556,16 @@ async function loadWasm() {
     "physics_demo_half_extent_x",
     "physics_demo_half_extent_y",
     "physics_demo_half_extent_z",
+    "physics_demo_orientation_x",
+    "physics_demo_orientation_y",
+    "physics_demo_orientation_z",
+    "physics_demo_orientation_w",
+    "physics_demo_broad_min_x",
+    "physics_demo_broad_min_y",
+    "physics_demo_broad_min_z",
+    "physics_demo_broad_max_x",
+    "physics_demo_broad_max_y",
+    "physics_demo_broad_max_z",
     "physics_demo_is_fixed",
     "physics_demo_mass_units",
     "physics_demo_restitution_milli",
@@ -561,6 +603,7 @@ const RENDER_SHADER = /* wgsl */ `
 struct Body {
   center: vec4<f32>,
   half: vec4<f32>,
+  orientation: vec4<f32>,
   color: vec4<f32>,
 }
 
@@ -578,13 +621,19 @@ struct VertexOutput {
 @group(0) @binding(0) var<uniform> view_projection: mat4x4<f32>;
 @group(0) @binding(1) var<storage, read> bodies: array<Body>;
 
+fn rotate_by_quaternion(vector: vec3<f32>, orientation: vec4<f32>) -> vec3<f32> {
+  let twice_cross = 2.0 * cross(orientation.xyz, vector);
+  return vector + orientation.w * twice_cross + cross(orientation.xyz, twice_cross);
+}
+
 @vertex
 fn vs_main(input: VertexInput, @builtin(instance_index) instance: u32) -> VertexOutput {
   let body = bodies[instance];
-  let world = body.center.xyz + input.position * body.half.xyz;
+  let local = input.position * body.half.xyz;
+  let world = body.center.xyz + rotate_by_quaternion(local, body.orientation);
   var output: VertexOutput;
   output.clip_position = view_projection * vec4<f32>(world, 1.0);
-  output.normal = input.normal;
+  output.normal = rotate_by_quaternion(input.normal, body.orientation);
   output.color = body.color;
   return output;
 }
@@ -625,7 +674,7 @@ async function createWebGpuRenderer(canvas) {
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
   });
   const bodyBuffer = device.createBuffer({
-    size: MAX_BODIES * 48,
+    size: MAX_BODIES * 64,
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
   });
   const module = device.createShaderModule({ code: RENDER_SHADER });
@@ -679,12 +728,13 @@ async function createWebGpuRenderer(canvas) {
 
       const viewProjection = cameraViewProjection(cameraValue, width / height);
       device.queue.writeBuffer(uniformBuffer, 0, viewProjection);
-      const bodyData = new Float32Array(entities.length * 12);
+      const bodyData = new Float32Array(entities.length * 16);
       entities.forEach((entity, index) => {
-        const offset = index * 12;
+        const offset = index * 16;
         bodyData.set([entity.x, entity.y, entity.z, 0], offset);
         bodyData.set([entity.halfX, entity.halfY, entity.halfZ, 0], offset + 4);
-        bodyData.set(bodyColor(entity), offset + 8);
+        bodyData.set(entity.orientation, offset + 8);
+        bodyData.set(bodyColor(entity), offset + 12);
       });
       device.queue.writeBuffer(bodyBuffer, 0, bodyData);
 
@@ -755,16 +805,31 @@ function bodyColor(entity) {
   return DYNAMIC_COLORS[entity.id % DYNAMIC_COLORS.length];
 }
 
+function rotateByQuaternion([x, y, z], [qx, qy, qz, qw]) {
+  const tx = 2 * (qy * z - qz * y);
+  const ty = 2 * (qz * x - qx * z);
+  const tz = 2 * (qx * y - qy * x);
+  return [
+    x + qw * tx + (qy * tz - qz * ty),
+    y + qw * ty + (qz * tx - qx * tz),
+    z + qw * tz + (qx * ty - qy * tx),
+  ];
+}
+
 function drawWireBox(context, entity, matrix, width, height, dark) {
   const corners = [
     [-1, -1, -1], [1, -1, -1], [1, 1, -1], [-1, 1, -1],
     [-1, -1, 1], [1, -1, 1], [1, 1, 1], [-1, 1, 1],
-  ].map(([x, y, z]) => projectPoint(
-    [entity.x + x * entity.halfX, entity.y + y * entity.halfY, entity.z + z * entity.halfZ],
-    matrix,
-    width,
-    height,
-  ));
+  ].map(([x, y, z]) => {
+    const local = [x * entity.halfX, y * entity.halfY, z * entity.halfZ];
+    const rotated = rotateByQuaternion(local, entity.orientation);
+    return projectPoint(
+      [entity.x + rotated[0], entity.y + rotated[1], entity.z + rotated[2]],
+      matrix,
+      width,
+      height,
+    );
+  });
   const edges = [[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]];
   context.beginPath();
   for (const [left, right] of edges) {
@@ -902,12 +967,12 @@ async function main() {
 
     const dynamicCount = frames[0].entities.filter((entity) => !entity.fixed).length;
     runtimeStatus.textContent =
-      `Rust/Wasm ready. ${dynamicCount} dynamic bodies; ecs-physics-3d owns X/Y/Z integration, six-sided room response, mass, restitution, two-axis friction, and exact 3D pair evidence.`;
+      `Rust/Wasm ready. ${dynamicCount} dynamic bodies; ecs-physics-3d owns linear/angular integration, discrete OBB SAT/contact response, mass/material response, orientation, and oriented broad-phase evidence. The browser only projects exported state; this demo does not claim rotational CCD.`;
     if (!("gpu" in navigator)) {
       webgpuEnabled.disabled = true;
       webgpuStatus.textContent = "WebGPU is unavailable; Rust physics and the Canvas 3D fallback remain usable.";
     } else {
-      webgpuStatus.textContent = "WebGPU is available for 3D rendering and optional exact pair verification.";
+      webgpuStatus.textContent = "WebGPU is available for 3D rendering and optional broad-phase pair verification.";
       if (new URLSearchParams(window.location.search).get("webgpu") === "1") {
         webgpuEnabled.checked = true;
       }
