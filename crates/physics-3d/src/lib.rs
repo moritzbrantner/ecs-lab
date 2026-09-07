@@ -17,6 +17,7 @@ mod rotating_contact_frontier;
 mod rotating_contact_response;
 mod rotating_contact_search;
 mod rotational_sweep;
+mod sampled_rotating_frame;
 mod scenario;
 #[allow(dead_code)]
 mod solver;
@@ -83,6 +84,10 @@ pub use rotating_contact_search::{
 pub use rotational_sweep::{
     RotationalSweepBounds3d, RotationalSweepError3d, RotationalSweepPair3d,
     rotational_sweep_bounds, rotational_sweep_candidate_pairs,
+};
+pub use sampled_rotating_frame::{
+    SampledRotatingFrameError3d, SampledRotatingFrameStep3d,
+    step_rigid_box_world_sampled_rotating,
 };
 pub use scenario::{BouncingRoom3dScenario, BroadPhaseBody3d, BroadPhaseFrame3d, ScenarioError3d};
 pub use types::{
