@@ -2,9 +2,8 @@ use std::sync::{Mutex, OnceLock};
 
 use ecs_physics::PhysicsMaterial;
 use ecs_physics_3d::{
-    AngularState3d, AngularVelocity3d, Orientation3d, PhysicsBody3d, RigidBox3d,
-    RigidBoxState3d, RigidBoxWorldConfig3d, RigidBoxWorldStats3d, oriented_box_vertices,
-    step_rigid_box_world,
+    AngularState3d, AngularVelocity3d, Orientation3d, PhysicsBody3d, RigidBox3d, RigidBoxState3d,
+    RigidBoxWorldConfig3d, RigidBoxWorldStats3d, oriented_box_vertices, step_rigid_box_world,
 };
 use ecs_workload::{EntityId, Position, Velocity};
 
@@ -87,10 +86,7 @@ fn initial_boxes() -> Option<Vec<RigidBox3d>> {
                     RigidBoxState3d::new(
                         Position::new3(layer_x, row_y, column_z),
                         Velocity::new3(0, 0, 0),
-                        AngularState3d::new(
-                            Orientation3d::IDENTITY,
-                            AngularVelocity3d::default(),
-                        ),
+                        AngularState3d::new(Orientation3d::IDENTITY, AngularVelocity3d::default()),
                     ),
                 ));
                 entity = entity.checked_add(1)?;
@@ -104,7 +100,11 @@ fn floor_body() -> RigidBox3d {
     RigidBox3d::new(
         PhysicsBody3d::fixed(
             EntityId(u32::try_from(FLOOR_INDEX).unwrap_or_default()),
-            [30 * TOWER_EXTENT_SCALE, TOWER_EXTENT_SCALE, 12 * TOWER_EXTENT_SCALE],
+            [
+                30 * TOWER_EXTENT_SCALE,
+                TOWER_EXTENT_SCALE,
+                12 * TOWER_EXTENT_SCALE,
+            ],
         )
         .with_material(PhysicsMaterial::new(50, 850)),
         RigidBoxState3d::new(
@@ -265,7 +265,8 @@ mod tests {
                 .filter(|rigid_box| !rigid_box.state.angular.angular_velocity.is_zero())
                 .count();
             maximum_spinning_blocks = maximum_spinning_blocks.max(spinning_blocks);
-            projectile_passed_front_face |= frame.boxes[PROJECTILE_INDEX].state.center.x > TOWER_SCALE;
+            projectile_passed_front_face |=
+                frame.boxes[PROJECTILE_INDEX].state.center.x > TOWER_SCALE;
         }
 
         assert!(projectile_passed_front_face);
