@@ -22,8 +22,15 @@ pub struct RotationalSweepPair3d {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RotationalSweepError3d {
-    BodyCountMismatch { start: usize, end: usize },
-    EntityMismatch { index: usize, start: EntityId, end: EntityId },
+    BodyCountMismatch {
+        start: usize,
+        end: usize,
+    },
+    EntityMismatch {
+        index: usize,
+        start: EntityId,
+        end: EntityId,
+    },
     BodyKindMismatch(EntityId),
     ShapeMismatch(EntityId),
     InvalidHalfExtents(EntityId),
@@ -86,7 +93,11 @@ pub fn rotational_sweep_bounds(
 ) -> Result<RotationalSweepBounds3d, RotationalSweepError3d> {
     validate_same_body(start, end, 0)?;
     let radius = orientation_independent_radius(start)?;
-    let start_center = [start.state.center.x, start.state.center.y, start.state.center.z];
+    let start_center = [
+        start.state.center.x,
+        start.state.center.y,
+        start.state.center.z,
+    ];
     let end_center = [end.state.center.x, end.state.center.y, end.state.center.z];
     let mut minimum = [0_i64; 3];
     let mut maximum = [0_i64; 3];
@@ -134,7 +145,8 @@ pub fn rotational_sweep_candidate_pairs(
     }
 
     let mut bounds = Vec::with_capacity(start.len());
-    for (index, (start_body, end_body)) in start.iter().copied().zip(end.iter().copied()).enumerate()
+    for (index, (start_body, end_body)) in
+        start.iter().copied().zip(end.iter().copied()).enumerate()
     {
         validate_same_body(start_body, end_body, index)?;
         let sweep = rotational_sweep_bounds(start_body, end_body)?;
@@ -168,9 +180,7 @@ fn validate_same_body(
         });
     }
     if start.body.kind != end.body.kind {
-        return Err(RotationalSweepError3d::BodyKindMismatch(
-            start.body.entity,
-        ));
+        return Err(RotationalSweepError3d::BodyKindMismatch(start.body.entity));
     }
     if start.body.half_extents != end.body.half_extents {
         return Err(RotationalSweepError3d::ShapeMismatch(start.body.entity));
@@ -189,10 +199,8 @@ fn orientation_independent_radius(body: RigidBox3d) -> Result<i64, RotationalSwe
         .half_extents
         .into_iter()
         .map(|extent| u128::from(extent.unsigned_abs()).pow(2))
-        .try_fold(0_u128, |sum, squared| sum.checked_add(squared))
-        .ok_or(RotationalSweepError3d::ArithmeticOverflow(
-            body.body.entity,
-        ))?;
+        .try_fold(0_u128, u128::checked_add)
+        .ok_or(RotationalSweepError3d::ArithmeticOverflow(body.body.entity))?;
     let floor = integer_sqrt(squared);
     let radius = if floor
         .checked_mul(floor)
@@ -202,9 +210,7 @@ fn orientation_independent_radius(body: RigidBox3d) -> Result<i64, RotationalSwe
     } else {
         floor
             .checked_add(1)
-            .ok_or(RotationalSweepError3d::ArithmeticOverflow(
-                body.body.entity,
-            ))?
+            .ok_or(RotationalSweepError3d::ArithmeticOverflow(body.body.entity))?
     };
     i64::try_from(radius).map_err(|_| RotationalSweepError3d::ArithmeticOverflow(body.body.entity))
 }
@@ -216,7 +222,7 @@ fn integer_sqrt(value: u128) -> u128 {
     let mut low = 1_u128;
     let mut high = value.div_ceil(2);
     while low < high {
-        let middle = low + (high - low + 1) / 2;
+        let middle = low + (high - low).div_ceil(2);
         if middle <= value / middle {
             low = middle;
         } else {
@@ -230,7 +236,8 @@ fn all_pair_indices(boxes: &[RigidBox3d]) -> Vec<(usize, usize)> {
     let mut pairs = Vec::new();
     for left in 0..boxes.len() {
         for right in (left + 1)..boxes.len() {
-            if boxes[left].body.kind == BodyKind::Fixed && boxes[right].body.kind == BodyKind::Fixed {
+            if boxes[left].body.kind == BodyKind::Fixed && boxes[right].body.kind == BodyKind::Fixed
+            {
                 continue;
             }
             pairs.push((left, right));
