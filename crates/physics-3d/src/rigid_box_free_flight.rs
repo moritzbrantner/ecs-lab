@@ -16,10 +16,7 @@ pub struct RigidBoxFreeFlightConfig3d {
 pub enum RigidBoxFreeFlightError3d {
     NegativeTimestepNumerator(i32),
     NonPositiveTimestepDenominator(i32),
-    InvalidFraction {
-        numerator: u32,
-        denominator: u32,
-    },
+    InvalidFraction { numerator: u32, denominator: u32 },
     Angular(AngularError3d),
     ArithmeticOverflow,
 }
@@ -42,8 +39,13 @@ impl fmt::Display for RigidBoxFreeFlightError3d {
                 formatter,
                 "rigid-box free-flight fraction must satisfy 0 <= numerator <= denominator with denominator > 0, got {numerator}/{denominator}"
             ),
-            Self::Angular(error) => write!(formatter, "rigid-box free-flight angular sampling failed: {error}"),
-            Self::ArithmeticOverflow => write!(formatter, "rigid-box free-flight arithmetic overflowed"),
+            Self::Angular(error) => write!(
+                formatter,
+                "rigid-box free-flight angular sampling failed: {error}"
+            ),
+            Self::ArithmeticOverflow => {
+                write!(formatter, "rigid-box free-flight arithmetic overflowed")
+            }
         }
     }
 }
@@ -171,12 +173,7 @@ pub fn sample_rigid_box_world_free_flight(
         .iter()
         .copied()
         .map(|body| {
-            sample_rigid_box_free_flight(
-                body,
-                config,
-                fraction_numerator,
-                fraction_denominator,
-            )
+            sample_rigid_box_free_flight(body, config, fraction_numerator, fraction_denominator)
         })
         .collect()
 }
@@ -364,8 +361,7 @@ mod tests {
         assert_eq!(world[1].body.entity, EntityId(2));
         assert_eq!(
             world[0],
-            sample_rigid_box_free_flight(first, config(), 1, 2)
-                .expect("valid individual sample")
+            sample_rigid_box_free_flight(first, config(), 1, 2).expect("valid individual sample")
         );
         assert_eq!(world[1], second);
     }
