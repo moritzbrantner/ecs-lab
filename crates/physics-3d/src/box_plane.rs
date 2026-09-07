@@ -347,16 +347,34 @@ fn oriented_box_offsets(
         return Err(BoxPlaneError3d::InvalidHalfExtents);
     }
     let matrix = rotation_matrix(orientation.normalized()?)?;
+    let basis_vectors = [
+        rotate_with_matrix(matrix, [i64::from(half_extents[0]), 0, 0])?,
+        rotate_with_matrix(matrix, [0, i64::from(half_extents[1]), 0])?,
+        rotate_with_matrix(matrix, [0, 0, i64::from(half_extents[2])])?,
+    ];
     let mut offsets = [[0_i64; 3]; 8];
     for (offset, signs) in offsets.iter_mut().zip(CORNER_SIGNS) {
-        let local = [
-            signs[0] * i64::from(half_extents[0]),
-            signs[1] * i64::from(half_extents[1]),
-            signs[2] * i64::from(half_extents[2]),
-        ];
-        *offset = rotate_with_matrix(matrix, local)?;
+        *offset = combine_basis_vectors(basis_vectors, signs)?;
     }
     Ok(offsets)
+}
+
+fn combine_basis_vectors(
+    basis_vectors: [[i64; 3]; 3],
+    signs: [i64; 3],
+) -> Result<[i64; 3], BoxPlaneError3d> {
+    let mut output = [0_i64; 3];
+    for (basis_vector, sign) in basis_vectors.into_iter().zip(signs) {
+        for (target, component) in output.iter_mut().zip(basis_vector) {
+            let signed = component
+                .checked_mul(sign)
+                .ok_or(BoxPlaneError3d::ArithmeticOverflow)?;
+            *target = target
+                .checked_add(signed)
+                .ok_or(BoxPlaneError3d::ArithmeticOverflow)?;
+        }
+    }
+    Ok(output)
 }
 
 fn rotation_matrix(orientation: Orientation3d) -> Result<[[i128; 3]; 3], BoxPlaneError3d> {
@@ -825,6 +843,10 @@ mod tests {
         }
     }
 
+    fn vertex_delta(from: Position, to: Position) -> [i64; 3] {
+        [to.x - from.x, to.y - from.y, to.z - from.z]
+    }
+
     #[test]
     fn flat_face_impact_has_four_contact_vertices_and_no_torque() {
         let state = BoxPlaneState3d::new(
@@ -919,6 +941,35 @@ mod tests {
                 .expect("valid box");
         assert_eq!(vertices[0], Position::new3(1, 1, 1));
         assert_eq!(vertices[7], Position::new3(3, 5, 7));
+    }
+
+    #[test]
+    fn quantized_oriented_vertices_preserve_parallel_edges() {
+        let orientation = Orientation3d::new(
+            123_456_789,
+            234_567_890,
+            -345_678_901,
+            ORIENTATION_SCALE,
+        )
+        .normalized()
+        .expect("valid arbitrary orientation");
+        let vertices = oriented_box_vertices(Position::new3(0, 0, 0), [12, 19, 1], orientation)
+            .expect("valid oriented box");
+
+        let x_edge = vertex_delta(vertices[0], vertices[1]);
+        assert_eq!(x_edge, vertex_delta(vertices[2], vertices[3]));
+        assert_eq!(x_edge, vertex_delta(vertices[4], vertices[5]));
+        assert_eq!(x_edge, vertex_delta(vertices[6], vertices[7]));
+
+        let y_edge = vertex_delta(vertices[0], vertices[2]);
+        assert_eq!(y_edge, vertex_delta(vertices[1], vertices[3]));
+        assert_eq!(y_edge, vertex_delta(vertices[4], vertices[6]));
+        assert_eq!(y_edge, vertex_delta(vertices[5], vertices[7]));
+
+        let z_edge = vertex_delta(vertices[0], vertices[4]);
+        assert_eq!(z_edge, vertex_delta(vertices[1], vertices[5]));
+        assert_eq!(z_edge, vertex_delta(vertices[2], vertices[6]));
+        assert_eq!(z_edge, vertex_delta(vertices[3], vertices[7]));
     }
 
     #[test]
