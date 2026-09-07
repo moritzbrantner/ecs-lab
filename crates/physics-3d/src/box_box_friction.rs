@@ -18,6 +18,16 @@ const RESPONSE_SCALE: i128 = 1_i128 << 50;
 
 type Result3d<T> = Result<T, BoxBoxStabilizationError3d>;
 
+struct TangentResponse3d {
+    left_body: PhysicsBody3d,
+    right_body: PhysicsBody3d,
+    left_offset: [i64; 3],
+    right_offset: [i64; 3],
+    tangent: [i128; 3],
+    contact: BoxBoxContact3d,
+    friction_milli: u16,
+}
+
 /// Resolves and stabilizes one OBB pair, then applies one deterministic Coulomb-limited tangent impulse.
 ///
 /// The underlying normal response and discrete penetration projection remain unchanged. Friction uses the
@@ -70,13 +80,15 @@ pub fn stabilize_box_box_contact(
     };
     apply_tangent_response(
         &mut step,
-        left_body,
-        right_body,
-        left_offset,
-        right_offset,
-        tangent,
-        contact,
-        friction_milli,
+        TangentResponse3d {
+            left_body,
+            right_body,
+            left_offset,
+            right_offset,
+            tangent,
+            contact,
+            friction_milli,
+        },
     )?;
     Ok(step)
 }
@@ -110,16 +122,10 @@ fn contact_tangents(
     }
 }
 
-fn oriented_edges(
-    state: RigidBoxState3d,
-    body: PhysicsBody3d,
-) -> Result3d<[[i128; 3]; 3]> {
-    let vertices = oriented_box_vertices(
-        state.center,
-        body.half_extents,
-        state.angular.orientation,
-    )
-    .map_err(|_| BoxBoxStabilizationError3d::ArithmeticOverflow)?;
+fn oriented_edges(state: RigidBoxState3d, body: PhysicsBody3d) -> Result3d<[[i128; 3]; 3]> {
+    let vertices =
+        oriented_box_vertices(state.center, body.half_extents, state.angular.orientation)
+            .map_err(|_| BoxBoxStabilizationError3d::ArithmeticOverflow)?;
     Ok([
         edge_delta(vertices[0], vertices[1])?,
         edge_delta(vertices[0], vertices[2])?,
@@ -161,10 +167,10 @@ fn dominant_slip_tangent(
     relative_velocity: [i128; 3],
     tangents: [[i128; 3]; 2],
 ) -> Result3d<Option<[i128; 3]>> {
-    let first = primitive_vector(tangents[0])?
-        .ok_or(BoxBoxStabilizationError3d::ArithmeticOverflow)?;
-    let second = primitive_vector(tangents[1])?
-        .ok_or(BoxBoxStabilizationError3d::ArithmeticOverflow)?;
+    let first =
+        primitive_vector(tangents[0])?.ok_or(BoxBoxStabilizationError3d::ArithmeticOverflow)?;
+    let second =
+        primitive_vector(tangents[1])?.ok_or(BoxBoxStabilizationError3d::ArithmeticOverflow)?;
     let first_slip = checked_dot(relative_velocity, first)?;
     let second_slip = checked_dot(relative_velocity, second)?;
     if first_slip == 0 && second_slip == 0 {
@@ -177,16 +183,16 @@ fn dominant_slip_tangent(
     }
 }
 
-fn apply_tangent_response(
-    step: &mut BoxBoxStep3d,
-    left_body: PhysicsBody3d,
-    right_body: PhysicsBody3d,
-    left_offset: [i64; 3],
-    right_offset: [i64; 3],
-    tangent: [i128; 3],
-    contact: BoxBoxContact3d,
-    friction_milli: u16,
-) -> Result3d<()> {
+fn apply_tangent_response(step: &mut BoxBoxStep3d, response: TangentResponse3d) -> Result3d<()> {
+    let TangentResponse3d {
+        left_body,
+        right_body,
+        left_offset,
+        right_offset,
+        tangent,
+        contact,
+        friction_milli,
+    } = response;
     let tangent_length_squared = vector_length_squared(tangent)?;
     let relative_velocity =
         relative_contact_velocity(step.left, left_offset, step.right, right_offset)?;
