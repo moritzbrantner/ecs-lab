@@ -945,14 +945,10 @@ mod tests {
 
     #[test]
     fn quantized_oriented_vertices_preserve_parallel_edges() {
-        let orientation = Orientation3d::new(
-            123_456_789,
-            234_567_890,
-            -345_678_901,
-            ORIENTATION_SCALE,
-        )
-        .normalized()
-        .expect("valid arbitrary orientation");
+        let orientation =
+            Orientation3d::new(123_456_789, 234_567_890, -345_678_901, ORIENTATION_SCALE)
+                .normalized()
+                .expect("valid arbitrary orientation");
         let vertices = oriented_box_vertices(Position::new3(0, 0, 0), [12, 19, 1], orientation)
             .expect("valid oriented box");
 
