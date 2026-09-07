@@ -326,12 +326,12 @@ mod tests {
                 1,
                 [20, 2, 2],
                 Position::new3(0, 0, 0),
-                AngularVelocity3d::new(0, 0, 600 * ANGULAR_VELOCITY_SCALE),
+                AngularVelocity3d::new(0, 0, 230 * ANGULAR_VELOCITY_SCALE),
             ),
             RigidBox3d::new(
                 PhysicsBody3d::fixed(EntityId(2), [2, 2, 2]),
                 RigidBoxState3d::new(
-                    Position::new3(0, 15, 0),
+                    Position::new3(10, 10, 0),
                     Velocity::new3(0, 0, 0),
                     AngularState3d::new(Orientation3d::IDENTITY, AngularVelocity3d::default()),
                 ),
@@ -342,7 +342,7 @@ mod tests {
             &boxes,
             config(),
             AngularSubstepPolicy3d {
-                max_angular_step_units: 2_000_000,
+                max_angular_step_units: 800_000,
                 max_substeps: 8,
             },
         )
