@@ -381,7 +381,8 @@ fn axis_aligned_face_overlap_centroid(
         position_component(right_support, normal_axis),
     )?;
     for tangent_axis in tangent_axes {
-        let (left_minimum, left_maximum) = support_interval(left_vertices, left_mask, tangent_axis)?;
+        let (left_minimum, left_maximum) =
+            support_interval(left_vertices, left_mask, tangent_axis)?;
         let (right_minimum, right_maximum) =
             support_interval(right_vertices, right_mask, tangent_axis)?;
         let overlap_minimum = left_minimum.max(right_minimum);
