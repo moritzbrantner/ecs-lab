@@ -1,7 +1,7 @@
 use ecs_physics::PhysicsMaterial;
 use ecs_physics_3d::{
-    AngularState3d, AngularVelocity3d, Orientation3d, PhysicsBody3d, RigidBox3d,
-    RigidBoxState3d, RigidBoxWorldConfig3d, step_rigid_box_world,
+    AngularState3d, AngularVelocity3d, Orientation3d, PhysicsBody3d, RigidBox3d, RigidBoxState3d,
+    RigidBoxWorldConfig3d, step_rigid_box_world,
 };
 use ecs_workload::{EntityId, Position, Velocity};
 
