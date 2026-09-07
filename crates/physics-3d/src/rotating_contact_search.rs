@@ -39,6 +39,16 @@ pub struct RotatingContactBracket3d {
     pub contact: ObbContactSeed3d,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RotatingContactSet3d {
+    /// Globally earliest sampled contact fraction numerator for this set.
+    pub contact_numerator: u32,
+    /// Shared search-grid denominator for every bracket in [`Self::contacts`].
+    pub denominator: u32,
+    /// Canonically ordered pair brackets that share the earliest sampled contact fraction.
+    pub contacts: Vec<RotatingContactBracket3d>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RotatingContactSearchError3d {
     NonCanonicalPair(EntityId, EntityId),
@@ -254,6 +264,44 @@ pub fn search_rotating_contacts(
     }
     contacts.sort_by_key(|contact| (contact.contact_numerator, contact.left, contact.right));
     Ok(contacts)
+}
+
+/// Collects the globally earliest sampled rotating contacts into one stable contact-set frontier.
+///
+/// [`search_rotating_contacts`] already normalizes every bracket to the same configured search grid and
+/// orders results by sampled contact fraction followed by entity pair. This function retains only the
+/// leading equal-time group so a later solver can advance once and resolve all sampled simultaneous
+/// constraints together instead of applying pair-order-dependent response while discovering contacts.
+///
+/// No impulse, projection, or remaining-frame integration happens here. The set is still bounded sampled
+/// evidence rather than exact rotational time-of-impact evidence.
+///
+/// # Errors
+///
+/// Returns [`RotatingContactSearchError3d`] for the same malformed world/search inputs and geometry errors
+/// as [`search_rotating_contacts`].
+pub fn earliest_rotating_contact_set(
+    boxes: &[RigidBox3d],
+    frame_config: RigidBoxWorldConfig3d,
+    search_config: RotatingContactSearchConfig3d,
+) -> Result<Option<RotatingContactSet3d>, RotatingContactSearchError3d> {
+    let contacts = search_rotating_contacts(boxes, frame_config, search_config)?;
+    let Some(first) = contacts.first().copied() else {
+        return Ok(None);
+    };
+    let contact_numerator = first.contact_numerator;
+    let denominator = first.denominator;
+    let contacts = contacts
+        .into_iter()
+        .take_while(|contact| {
+            contact.contact_numerator == contact_numerator && contact.denominator == denominator
+        })
+        .collect();
+    Ok(Some(RotatingContactSet3d {
+        contact_numerator,
+        denominator,
+        contacts,
+    }))
 }
 
 fn validate_configs(
@@ -594,6 +642,53 @@ mod tests {
                 <= (window[1].contact_numerator, window[1].left, window[1].right)
         }));
         assert!(first.iter().all(|contact| contact.right != EntityId(4)));
+    }
+
+    #[test]
+    fn earliest_contact_set_groups_symmetric_simultaneous_pairs() {
+        let boxes = [
+            rotating_rod(),
+            obstacle(2, 10, 10),
+            obstacle(3, -10, -10),
+            obstacle(4, 120, 120),
+        ];
+        let set = earliest_rotating_contact_set(
+            &boxes,
+            frame_config(),
+            RotatingContactSearchConfig3d::default(),
+        )
+        .expect("valid earliest contact-set search")
+        .expect("symmetric rod contacts should be sampled");
+        let pairs = set
+            .contacts
+            .iter()
+            .map(|contact| (contact.left, contact.right))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            pairs,
+            vec![(EntityId(1), EntityId(2)), (EntityId(1), EntityId(3))]
+        );
+        assert!(set.contact_numerator > 0);
+        assert!(set.contacts.iter().all(|contact| {
+            contact.contact_numerator == set.contact_numerator
+                && contact.denominator == set.denominator
+        }));
+    }
+
+    #[test]
+    fn earliest_contact_set_is_none_without_sampled_contacts() {
+        let boxes = [rotating_rod(), obstacle(2, 120, 120)];
+
+        assert_eq!(
+            earliest_rotating_contact_set(
+                &boxes,
+                frame_config(),
+                RotatingContactSearchConfig3d::default(),
+            )
+            .expect("valid empty contact-set search"),
+            None
+        );
     }
 
     #[test]
