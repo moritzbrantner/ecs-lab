@@ -150,8 +150,10 @@ impl From<BoxBoxStabilizationError3d> for RigidBoxWorldError3d {
 /// The step intentionally mirrors the staging of the existing continuous AABB solver without replacing
 /// it: integrate each dynamic body once, use Rust-computed oriented vertices for a conservative AABB
 /// candidate cull, then run exact OBB SAT response/stabilization in stable entity order for a bounded
-/// number of passes. A ground plane can therefore be represented as an ordinary fixed OBB and shares the
-/// exact same collision truth as tower blocks and projectiles.
+/// number of passes. Each pass resolves dynamic pairs before fixed-boundary pairs, so a stack contact
+/// cannot finish the frame by pushing a lower body back through the ground. A ground plane can therefore
+/// be represented as an ordinary fixed OBB and shares the exact same collision truth as tower blocks and
+/// projectiles.
 ///
 /// This is a discrete 60 Hz-oriented rigid-body path. It does not claim rotational CCD, and its candidate
 /// cull is not a replacement for the existing swept spatial-hash broad phase used by the dense room. The
@@ -174,44 +176,49 @@ pub fn step_rigid_box_world(
 
     let mut stats = RigidBoxWorldStats3d::default();
     for _ in 0..config.solver_passes {
-        let bounds = next
-            .iter()
-            .map(oriented_bounds)
-            .collect::<Result<Vec<_>, _>>()?;
-        for left_index in 0..next.len() {
-            for right_index in left_index + 1..next.len() {
-                if next[left_index].body.kind == BodyKind::Fixed
-                    && next[right_index].body.kind == BodyKind::Fixed
-                {
-                    continue;
-                }
-                if !bounds_overlap(bounds[left_index], bounds[right_index]) {
-                    continue;
-                }
-                stats.candidate_pairs = stats
-                    .candidate_pairs
-                    .checked_add(1)
-                    .ok_or(RigidBoxWorldError3d::ArithmeticOverflow)?;
-
-                let (left_slice, right_slice) = next.split_at_mut(right_index);
-                let left = &mut left_slice[left_index];
-                let right = &mut right_slice[0];
-                let resolved =
-                    stabilize_box_box_contact(left.state, left.body, right.state, right.body)?;
-                if let Some(contact) = resolved.contact {
-                    stats.contacts = stats
-                        .contacts
+        for fixed_boundary_phase in [false, true] {
+            let bounds = next
+                .iter()
+                .map(oriented_bounds)
+                .collect::<Result<Vec<_>, _>>()?;
+            for left_index in 0..next.len() {
+                for right_index in left_index + 1..next.len() {
+                    let left_fixed = next[left_index].body.kind == BodyKind::Fixed;
+                    let right_fixed = next[right_index].body.kind == BodyKind::Fixed;
+                    if left_fixed && right_fixed {
+                        continue;
+                    }
+                    if (left_fixed || right_fixed) != fixed_boundary_phase {
+                        continue;
+                    }
+                    if !bounds_overlap(bounds[left_index], bounds[right_index]) {
+                        continue;
+                    }
+                    stats.candidate_pairs = stats
+                        .candidate_pairs
                         .checked_add(1)
                         .ok_or(RigidBoxWorldError3d::ArithmeticOverflow)?;
-                    if contact.normal_impulse_units != 0 {
-                        stats.impulsive_contacts = stats
-                            .impulsive_contacts
+
+                    let (left_slice, right_slice) = next.split_at_mut(right_index);
+                    let left = &mut left_slice[left_index];
+                    let right = &mut right_slice[0];
+                    let resolved =
+                        stabilize_box_box_contact(left.state, left.body, right.state, right.body)?;
+                    if let Some(contact) = resolved.contact {
+                        stats.contacts = stats
+                            .contacts
                             .checked_add(1)
                             .ok_or(RigidBoxWorldError3d::ArithmeticOverflow)?;
+                        if contact.normal_impulse_units != 0 {
+                            stats.impulsive_contacts = stats
+                                .impulsive_contacts
+                                .checked_add(1)
+                                .ok_or(RigidBoxWorldError3d::ArithmeticOverflow)?;
+                        }
                     }
+                    left.state = resolved.left;
+                    right.state = resolved.right;
                 }
-                left.state = resolved.left;
-                right.state = resolved.right;
             }
         }
     }
