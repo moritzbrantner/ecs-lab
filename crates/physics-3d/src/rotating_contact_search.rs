@@ -73,11 +73,19 @@ impl fmt::Display for RotatingContactSearchError3d {
                 formatter,
                 "rotating contact refinements must be 0..={MAX_ROTATING_CONTACT_REFINEMENTS}, got {value}"
             ),
-            Self::ArithmeticOverflow => write!(formatter, "rotating contact search arithmetic overflowed"),
-            Self::Angular(error) => write!(formatter, "rotating contact angular sampling failed: {error}"),
+            Self::ArithmeticOverflow => {
+                write!(formatter, "rotating contact search arithmetic overflowed")
+            }
+            Self::Angular(error) => write!(
+                formatter,
+                "rotating contact angular sampling failed: {error}"
+            ),
             Self::Geometry(error) => write!(formatter, "rotating contact geometry failed: {error}"),
             Self::Sweep(error) => write!(formatter, "rotating contact sweep failed: {error}"),
-            Self::World(error) => write!(formatter, "rotating contact world configuration failed: {error}"),
+            Self::World(error) => write!(
+                formatter,
+                "rotating contact world configuration failed: {error}"
+            ),
         }
     }
 }
@@ -148,13 +156,9 @@ pub fn bracket_rotating_contact(
     let mut bracket = None;
     for sample in 1..=search_config.coarse_samples {
         let numerator = u32::from(sample);
-        if let Some(contact) = sampled_contact(
-            left,
-            right,
-            frame_config,
-            numerator,
-            coarse_denominator,
-        )? {
+        if let Some(contact) =
+            sampled_contact(left, right, frame_config, numerator, coarse_denominator)?
+        {
             bracket = Some((numerator - 1, numerator, coarse_denominator, contact));
             break;
         }
@@ -248,13 +252,7 @@ pub fn search_rotating_contacts(
             contacts.push(contact);
         }
     }
-    contacts.sort_by_key(|contact| {
-        (
-            contact.contact_numerator,
-            contact.left,
-            contact.right,
-        )
-    });
+    contacts.sort_by_key(|contact| (contact.contact_numerator, contact.left, contact.right));
     Ok(contacts)
 }
 
@@ -306,12 +304,7 @@ fn sampled_contact(
     fraction_numerator: u32,
     fraction_denominator: u32,
 ) -> Result<Option<ObbContactSeed3d>, RotatingContactSearchError3d> {
-    let left = sampled_body(
-        left,
-        frame_config,
-        fraction_numerator,
-        fraction_denominator,
-    )?;
+    let left = sampled_body(left, frame_config, fraction_numerator, fraction_denominator)?;
     let right = sampled_body(
         right,
         frame_config,
