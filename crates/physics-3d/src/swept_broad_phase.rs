@@ -59,9 +59,7 @@ pub(crate) fn swept_candidate_pairs(
 /// This is the reusable discrete counterpart to [`swept_candidate_pairs`]. The supplied bounds remain
 /// authoritative: the hash only removes pairs that cannot share a covered grid cell. `None` requests an
 /// all-pairs fallback when coordinates or cell coverage exceed the exact/cheap grid contract.
-pub(crate) fn aabb_candidate_pairs(
-    bounds: &[BroadPhaseBounds3d],
-) -> Option<Vec<(usize, usize)>> {
+pub(crate) fn aabb_candidate_pairs(bounds: &[BroadPhaseBounds3d]) -> Option<Vec<(usize, usize)>> {
     if bounds.len() < 2 {
         return Some(Vec::new());
     }
@@ -230,11 +228,7 @@ mod tests {
         }
     }
 
-    fn bounds(
-        kind: BodyKind,
-        minimum: [i64; 3],
-        maximum: [i64; 3],
-    ) -> BroadPhaseBounds3d {
+    fn bounds(kind: BodyKind, minimum: [i64; 3], maximum: [i64; 3]) -> BroadPhaseBounds3d {
         BroadPhaseBounds3d {
             kind,
             minimum,
@@ -244,8 +238,7 @@ mod tests {
 
     fn overlaps(left: BroadPhaseBounds3d, right: BroadPhaseBounds3d) -> bool {
         (0..3).all(|axis| {
-            left.maximum[axis] >= right.minimum[axis]
-                && right.maximum[axis] >= left.minimum[axis]
+            left.maximum[axis] >= right.minimum[axis] && right.maximum[axis] >= left.minimum[axis]
         })
     }
 
