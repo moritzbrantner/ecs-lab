@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{collections::VecDeque, fmt};
 
 use ecs_physics::{BodyKind, MATERIAL_SCALE};
 
@@ -6,8 +6,11 @@ use crate::{
     AngularSubstepError3d, AngularSubstepPolicy3d, AngularVelocity3d, RigidBox3d,
     RigidBoxWorldConfig3d, RotatingContactFrontierError3d, RotatingContactResponseError3d,
     RotatingContactSearchConfig3d, RotatingContactSet3d, advance_to_earliest_rotating_contact_set,
-    resolve_rotating_contact_frontier, step_rigid_box_world_substepped,
+    required_angular_substeps, resolve_rotating_contact_frontier, step_rigid_box_world_substepped,
 };
+
+/// Maximum number of bounded post-frontier remainder segments accepted for one requested frame.
+pub const MAX_SAMPLED_REMAINDER_SEGMENTS: u16 = 64;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SampledRotatingFrameStep3d {
@@ -17,6 +20,8 @@ pub struct SampledRotatingFrameStep3d {
     pub first_contact_set: Option<RotatingContactSet3d>,
     /// Coupled response passes evaluated at the first sampled frontier.
     pub first_response_passes: u8,
+    /// Bounded post-frontier remainder segments executed after the sampled response.
+    pub remainder_segments: u16,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -24,6 +29,7 @@ pub enum SampledRotatingFrameError3d {
     NegativeTimestepNumerator(i32),
     NonPositiveTimestepDenominator(i32),
     DampingOutOfRange(u16),
+    RemainderSegmentLimit { maximum: u16 },
     Frontier(RotatingContactFrontierError3d),
     Response(RotatingContactResponseError3d),
     Remainder(AngularSubstepError3d),
@@ -44,6 +50,10 @@ impl fmt::Display for SampledRotatingFrameError3d {
             Self::DampingOutOfRange(value) => write!(
                 formatter,
                 "sampled rotating frame angular damping must be 0..={MATERIAL_SCALE}, got {value}"
+            ),
+            Self::RemainderSegmentLimit { maximum } => write!(
+                formatter,
+                "sampled rotating frame remainder exceeded the bounded {maximum}-segment budget"
             ),
             Self::Frontier(error) => write!(
                 formatter,
@@ -89,9 +99,16 @@ impl From<AngularSubstepError3d> for SampledRotatingFrameError3d {
 /// The frame begins with the existing conservative sweep + bounded sampled OBB search. If that search
 /// finds an earliest equal-time contact set, every body is advanced to one shared sampled frontier and
 /// the set is resolved through the order-invariant coupled response stage. The unconsumed fraction of
-/// the original frame is then reduced to an exact rational timestep and handed to the existing bounded
-/// angular-substep world solver. Because neither the sampled frontier nor its response applies angular
-/// damping, the remainder solver applies damping only on its final substep: once for the requested frame.
+/// the original frame is then reduced to an exact rational timestep and consumed by one or more bounded
+/// remainder segments. Every segment must independently fit the caller's existing angular-substep policy;
+/// a segment that would exceed that policy is split exactly in half before any state is advanced.
+///
+/// Segment admission is re-evaluated against the evolving world after every prior segment, so collision
+/// response that changes angular velocity cannot silently invalidate a precomputed schedule. Intermediate
+/// segments force unity angular damping, while only the final segment applies the requested damping. This
+/// preserves the existing once-per-requested-frame damping meaning even when the remainder needs several
+/// bounded segments. The number of created remainder segments is itself capped by
+/// [`MAX_SAMPLED_REMAINDER_SEGMENTS`] and fails closed when pathological motion exceeds that budget.
 ///
 /// When the bounded sampled search finds no contact, the whole frame is delegated directly to the bounded
 /// angular-substep solver. That preserves its existing conservative intermediate-orientation sampling and
@@ -107,7 +124,8 @@ impl From<AngularSubstepError3d> for SampledRotatingFrameError3d {
 /// # Errors
 ///
 /// Returns [`SampledRotatingFrameError3d`] for malformed frame configuration, sampled-frontier/search
-/// failures, coupled response failure, bounded remainder failure, or checked rational arithmetic overflow.
+/// failures, coupled response failure, bounded remainder failure, segment-budget exhaustion, or checked
+/// rational arithmetic overflow.
 pub fn step_rigid_box_world_sampled_rotating(
     boxes: &[RigidBox3d],
     config: RigidBoxWorldConfig3d,
@@ -123,6 +141,7 @@ pub fn step_rigid_box_world_sampled_rotating(
             boxes: step.boxes,
             first_contact_set: None,
             first_response_passes: 0,
+            remainder_segments: 0,
         });
     };
 
@@ -130,23 +149,24 @@ pub fn step_rigid_box_world_sampled_rotating(
     let first_contact_set = response.contact_set.clone();
     let first_response_passes = response.passes_used;
 
-    let boxes = if response.remaining_numerator == 0 {
+    let (boxes, remainder_segments) = if response.remaining_numerator == 0 {
         let mut boxes = response.boxes;
         damp_world_once(&mut boxes, config.angular_damping_milli)?;
-        boxes
+        (boxes, 0)
     } else {
         let remainder_config = scaled_remainder_config(
             config,
             response.remaining_numerator,
             response.contact_set.denominator,
         )?;
-        step_rigid_box_world_substepped(&response.boxes, remainder_config, substep_policy)?.boxes
+        step_bounded_remainder_segments(&response.boxes, remainder_config, substep_policy)?
     };
 
     Ok(SampledRotatingFrameStep3d {
         boxes,
         first_contact_set: Some(first_contact_set),
         first_response_passes,
+        remainder_segments,
     })
 }
 
@@ -169,6 +189,49 @@ fn validate_frame_config(config: RigidBoxWorldConfig3d) -> Result<(), SampledRot
     Ok(())
 }
 
+fn step_bounded_remainder_segments(
+    boxes: &[RigidBox3d],
+    remainder_config: RigidBoxWorldConfig3d,
+    policy: AngularSubstepPolicy3d,
+) -> Result<(Vec<RigidBox3d>, u16), SampledRotatingFrameError3d> {
+    let mut current = boxes.to_vec();
+    let mut segments = VecDeque::from([remainder_config]);
+    let mut planned_segments = 1_u16;
+    let mut executed_segments = 0_u16;
+
+    while let Some(segment) = segments.pop_front() {
+        match required_angular_substeps(&current, segment, policy) {
+            Ok(_) => {
+                let final_segment = segments.is_empty();
+                let mut step_config = segment;
+                if !final_segment {
+                    step_config.angular_damping_milli = MATERIAL_SCALE;
+                }
+                current = step_rigid_box_world_substepped(&current, step_config, policy)?.boxes;
+                executed_segments = executed_segments
+                    .checked_add(1)
+                    .ok_or(SampledRotatingFrameError3d::ArithmeticOverflow)?;
+            }
+            Err(AngularSubstepError3d::RequiredSubstepsExceeded { .. }) => {
+                if planned_segments >= MAX_SAMPLED_REMAINDER_SEGMENTS {
+                    return Err(SampledRotatingFrameError3d::RemainderSegmentLimit {
+                        maximum: MAX_SAMPLED_REMAINDER_SEGMENTS,
+                    });
+                }
+                let half = scale_timestep_config(segment, 1, 2)?;
+                segments.push_front(half);
+                segments.push_front(half);
+                planned_segments = planned_segments
+                    .checked_add(1)
+                    .ok_or(SampledRotatingFrameError3d::ArithmeticOverflow)?;
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+
+    Ok((current, executed_segments))
+}
+
 fn scaled_remainder_config(
     config: RigidBoxWorldConfig3d,
     remaining_numerator: u32,
@@ -177,15 +240,26 @@ fn scaled_remainder_config(
     if sampled_denominator == 0 || remaining_numerator > sampled_denominator {
         return Err(SampledRotatingFrameError3d::ArithmeticOverflow);
     }
+    scale_timestep_config(config, remaining_numerator, sampled_denominator)
+}
+
+fn scale_timestep_config(
+    config: RigidBoxWorldConfig3d,
+    fraction_numerator: u32,
+    fraction_denominator: u32,
+) -> Result<RigidBoxWorldConfig3d, SampledRotatingFrameError3d> {
+    if fraction_denominator == 0 || fraction_numerator > fraction_denominator {
+        return Err(SampledRotatingFrameError3d::ArithmeticOverflow);
+    }
 
     let numerator = u128::from(config.timestep_numerator.unsigned_abs())
-        .checked_mul(u128::from(remaining_numerator))
+        .checked_mul(u128::from(fraction_numerator))
         .ok_or(SampledRotatingFrameError3d::ArithmeticOverflow)?;
     let denominator = u128::from(
         u32::try_from(config.timestep_denominator)
             .map_err(|_| SampledRotatingFrameError3d::ArithmeticOverflow)?,
     )
-    .checked_mul(u128::from(sampled_denominator))
+    .checked_mul(u128::from(fraction_denominator))
     .ok_or(SampledRotatingFrameError3d::ArithmeticOverflow)?;
     let divisor = greatest_common_divisor(numerator, denominator);
     let numerator = numerator / divisor;
@@ -345,6 +419,7 @@ mod tests {
 
         assert!(step.first_contact_set.is_some());
         assert!(step.first_response_passes > 0);
+        assert!(step.remainder_segments > 1);
         assert_eq!(step.boxes[1], fixed);
         assert_ne!(
             step.boxes[0].state.angular.orientation,
@@ -381,6 +456,7 @@ mod tests {
         assert_eq!(actual.boxes, expected.boxes);
         assert_eq!(actual.first_contact_set, None);
         assert_eq!(actual.first_response_passes, 0);
+        assert_eq!(actual.remainder_segments, 0);
     }
 
     #[test]
