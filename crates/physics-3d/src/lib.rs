@@ -1,5 +1,6 @@
 mod angular;
 mod box_box;
+mod box_box_stabilization;
 mod box_plane;
 mod colliders;
 mod continuous_solver;
@@ -21,6 +22,7 @@ pub use angular::{
 pub use box_box::{
     BoxBoxContact3d, BoxBoxError3d, BoxBoxStep3d, RigidBoxState3d, resolve_box_box_contact,
 };
+pub use box_box_stabilization::{BoxBoxStabilizationError3d, stabilize_box_box_contact};
 pub use box_plane::{
     BoxPlaneConfig3d, BoxPlaneContact3d, BoxPlaneError3d, BoxPlaneState3d, BoxPlaneStep3d,
     oriented_box_vertices, step_box_on_plane,
