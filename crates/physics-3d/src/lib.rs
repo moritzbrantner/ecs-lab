@@ -11,6 +11,7 @@ mod impact;
 mod interactions;
 mod liquid;
 mod oriented_box;
+mod rigid_box_free_flight;
 mod rigid_box_world;
 mod rotating_contact_frontier;
 mod rotating_contact_response;
@@ -57,6 +58,10 @@ pub use interactions::{
 pub use liquid::{LiquidError3d, LiquidVolume3d, liquid_operations};
 pub use oriented_box::{
     ObbAxisFeature3d, ObbContactSeed3d, OrientedBox3d, OrientedBoxError3d, obb_contact_seed,
+};
+pub use rigid_box_free_flight::{
+    RigidBoxFreeFlightConfig3d, RigidBoxFreeFlightError3d, sample_rigid_box_free_flight,
+    sample_rigid_box_world_free_flight,
 };
 pub use rigid_box_world::{
     RigidBox3d, RigidBoxWorldConfig3d, RigidBoxWorldError3d, RigidBoxWorldStats3d,
