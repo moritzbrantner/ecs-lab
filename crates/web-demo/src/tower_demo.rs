@@ -251,6 +251,8 @@ pub extern "C" fn physics_tower_demo_impulsive_contacts(steps: u32) -> u32 {
 
 #[cfg(test)]
 mod tests {
+    use ecs_physics_3d::{OrientedBox3d, obb_contact_seed};
+
     use super::*;
 
     #[test]
@@ -274,12 +276,25 @@ mod tests {
     }
 
     #[test]
-    fn tower_fixture_keeps_every_dynamic_vertex_above_the_floor() {
+    fn tower_fixture_never_finishes_with_floor_penetration() {
         let mut state = TowerDemoState::new().expect("valid tower fixture");
         for step in 0..=240 {
             let frame = state.ensure_frame(step).expect("valid tower frame");
-            for vertices in &frame.vertices[PROJECTILE_INDEX..] {
-                assert!(vertices.iter().all(|vertex| vertex.y >= 0));
+            let floor = frame.boxes[FLOOR_INDEX];
+            for rigid_box in &frame.boxes[PROJECTILE_INDEX..] {
+                let floor_shape = OrientedBox3d::new(
+                    floor.state.center,
+                    floor.body.half_extents,
+                    floor.state.angular.orientation,
+                );
+                let body_shape = OrientedBox3d::new(
+                    rigid_box.state.center,
+                    rigid_box.body.half_extents,
+                    rigid_box.state.angular.orientation,
+                );
+                let contact = obb_contact_seed(floor_shape, body_shape)
+                    .expect("valid floor and dynamic OBB geometry");
+                assert!(contact.is_none_or(|value| value.overlap_numerator == 0));
             }
         }
     }
