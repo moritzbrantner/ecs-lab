@@ -184,10 +184,7 @@ fn dominant_slip_tangent(
     }
 }
 
-fn apply_tangent_response(
-    step: &mut BoxBoxStep3d,
-    response: &TangentResponse3d,
-) -> Result3d<()> {
+fn apply_tangent_response(step: &mut BoxBoxStep3d, response: &TangentResponse3d) -> Result3d<()> {
     let TangentResponse3d {
         left_body,
         right_body,
