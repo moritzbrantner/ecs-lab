@@ -4,8 +4,7 @@ use ecs_physics::BodyKind;
 use ecs_workload::{EntityId, Position};
 
 use crate::{
-    BoxBoxError3d, BoxBoxStep3d, OrientedBox3d, PhysicsBody3d, RigidBoxState3d, obb_contact_seed,
-    resolve_box_box_contact,
+    BoxBoxError3d, BoxBoxStep3d, PhysicsBody3d, RigidBoxState3d, resolve_box_box_contact,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -23,8 +22,12 @@ impl fmt::Display for BoxBoxStabilizationError3d {
                 "OBB stabilization expects ascending entity ids, got {} then {}",
                 left.0, right.0
             ),
-            Self::Response(error) => write!(formatter, "OBB stabilization response failed: {error}"),
-            Self::ArithmeticOverflow => write!(formatter, "OBB stabilization arithmetic overflowed"),
+            Self::Response(error) => {
+                write!(formatter, "OBB stabilization response failed: {error}")
+            }
+            Self::ArithmeticOverflow => {
+                write!(formatter, "OBB stabilization arithmetic overflowed")
+            }
         }
     }
 }
@@ -99,8 +102,8 @@ fn minimum_translation_vector(
     overlap_numerator: u128,
     axis_length_squared: u128,
 ) -> Result<[i64; 3], BoxBoxStabilizationError3d> {
-    let overlap =
-        i128::try_from(overlap_numerator).map_err(|_| BoxBoxStabilizationError3d::ArithmeticOverflow)?;
+    let overlap = i128::try_from(overlap_numerator)
+        .map_err(|_| BoxBoxStabilizationError3d::ArithmeticOverflow)?;
     let length_squared = i128::try_from(axis_length_squared)
         .map_err(|_| BoxBoxStabilizationError3d::ArithmeticOverflow)?;
     if overlap <= 0 || length_squared <= 0 {
@@ -115,7 +118,9 @@ fn minimum_translation_vector(
     let achieved = checked_dot(correction, axis)?;
     if achieved < overlap {
         let dominant = dominant_axis(axis)?;
-        let magnitude = axis[dominant].abs();
+        let magnitude = axis[dominant]
+            .checked_abs()
+            .ok_or(BoxBoxStabilizationError3d::ArithmeticOverflow)?;
         let residual = overlap
             .checked_sub(achieved)
             .ok_or(BoxBoxStabilizationError3d::ArithmeticOverflow)?;
@@ -126,20 +131,25 @@ fn minimum_translation_vector(
             .ok_or(BoxBoxStabilizationError3d::ArithmeticOverflow)?;
     }
 
-    correction.map(|value| {
-        i64::try_from(value).map_err(|_| BoxBoxStabilizationError3d::ArithmeticOverflow)
-    })
-    .into_iter()
-    .collect::<Result<Vec<_>, _>>()?
-    .try_into()
-    .map_err(|_| BoxBoxStabilizationError3d::ArithmeticOverflow)
+    Ok([
+        i64::try_from(correction[0])
+            .map_err(|_| BoxBoxStabilizationError3d::ArithmeticOverflow)?,
+        i64::try_from(correction[1])
+            .map_err(|_| BoxBoxStabilizationError3d::ArithmeticOverflow)?,
+        i64::try_from(correction[2])
+            .map_err(|_| BoxBoxStabilizationError3d::ArithmeticOverflow)?,
+    ])
 }
 
 fn dominant_axis(axis: [i128; 3]) -> Result<usize, BoxBoxStabilizationError3d> {
     let mut best = 0_usize;
-    let mut magnitude = axis[0].abs();
+    let mut magnitude = axis[0]
+        .checked_abs()
+        .ok_or(BoxBoxStabilizationError3d::ArithmeticOverflow)?;
     for (index, component) in axis.into_iter().enumerate().skip(1) {
-        let candidate = component.abs();
+        let candidate = component
+            .checked_abs()
+            .ok_or(BoxBoxStabilizationError3d::ArithmeticOverflow)?;
         if candidate > magnitude {
             best = index;
             magnitude = candidate;
@@ -165,7 +175,7 @@ fn project_pair(
             Ok(())
         }
         (BodyKind::Dynamic, BodyKind::Fixed) => {
-            left.center = offset_position(left.center, correction.map(i64::saturating_neg))?;
+            left.center = offset_position(left.center, negate_vector(correction)?)?;
             Ok(())
         }
         (BodyKind::Dynamic, BodyKind::Dynamic) => {
@@ -180,8 +190,12 @@ fn project_pair(
                     i128::from(right_body.mass_units),
                 )?;
                 let share = div_round_nearest(weighted, i128::from(total_mass))?;
-                left_move[axis] = i64::try_from(-share)
-                    .map_err(|_| BoxBoxStabilizationError3d::ArithmeticOverflow)?;
+                left_move[axis] = i64::try_from(
+                    share
+                        .checked_neg()
+                        .ok_or(BoxBoxStabilizationError3d::ArithmeticOverflow)?,
+                )
+                .map_err(|_| BoxBoxStabilizationError3d::ArithmeticOverflow)?;
                 right_move[axis] = correction[axis]
                     .checked_add(left_move[axis])
                     .ok_or(BoxBoxStabilizationError3d::ArithmeticOverflow)?;
@@ -191,6 +205,22 @@ fn project_pair(
             Ok(())
         }
     }
+}
+
+fn negate_vector(
+    vector: [i64; 3],
+) -> Result<[i64; 3], BoxBoxStabilizationError3d> {
+    Ok([
+        vector[0]
+            .checked_neg()
+            .ok_or(BoxBoxStabilizationError3d::ArithmeticOverflow)?,
+        vector[1]
+            .checked_neg()
+            .ok_or(BoxBoxStabilizationError3d::ArithmeticOverflow)?,
+        vector[2]
+            .checked_neg()
+            .ok_or(BoxBoxStabilizationError3d::ArithmeticOverflow)?,
+    ])
 }
 
 fn offset_position(
@@ -213,18 +243,12 @@ fn offset_position(
     ))
 }
 
-fn checked_mul(
-    left: i128,
-    right: i128,
-) -> Result<i128, BoxBoxStabilizationError3d> {
+fn checked_mul(left: i128, right: i128) -> Result<i128, BoxBoxStabilizationError3d> {
     left.checked_mul(right)
         .ok_or(BoxBoxStabilizationError3d::ArithmeticOverflow)
 }
 
-fn checked_dot(
-    left: [i128; 3],
-    right: [i128; 3],
-) -> Result<i128, BoxBoxStabilizationError3d> {
+fn checked_dot(left: [i128; 3], right: [i128; 3]) -> Result<i128, BoxBoxStabilizationError3d> {
     left.into_iter()
         .zip(right)
         .try_fold(0_i128, |sum, (left, right)| {
@@ -268,7 +292,9 @@ mod tests {
     use ecs_physics::PhysicsMaterial;
     use ecs_workload::{EntityId, Velocity};
 
-    use crate::{AngularState3d, AngularVelocity3d, Orientation3d};
+    use crate::{
+        AngularState3d, AngularVelocity3d, Orientation3d, OrientedBox3d, obb_contact_seed,
+    };
 
     use super::*;
 
@@ -316,7 +342,10 @@ mod tests {
         let step = stabilize_box_box_contact(left, left_body, right, right_body)
             .expect("valid stabilization");
 
-        assert_eq!(remaining_overlap(step.left, left_body, step.right, right_body), 0);
+        assert_eq!(
+            remaining_overlap(step.left, left_body, step.right, right_body),
+            0
+        );
         assert_eq!(step.left.center.x, -1);
         assert_eq!(step.right.center, right.center);
     }
@@ -331,7 +360,10 @@ mod tests {
         let step = stabilize_box_box_contact(left, left_body, right, right_body)
             .expect("valid stabilization");
 
-        assert_eq!(remaining_overlap(step.left, left_body, step.right, right_body), 0);
+        assert_eq!(
+            remaining_overlap(step.left, left_body, step.right, right_body),
+            0
+        );
         assert_eq!(step.right.center.x - step.left.center.x, 20);
     }
 
@@ -347,7 +379,10 @@ mod tests {
 
         assert_ne!(step.left.angular.angular_velocity.z, 0);
         assert_ne!(step.right.angular.angular_velocity.z, 0);
-        assert_eq!(remaining_overlap(step.left, left_body, step.right, right_body), 0);
+        assert_eq!(
+            remaining_overlap(step.left, left_body, step.right, right_body),
+            0
+        );
     }
 
     #[test]
