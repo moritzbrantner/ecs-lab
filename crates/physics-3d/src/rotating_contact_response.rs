@@ -3,6 +3,7 @@ use std::{
     fmt,
 };
 
+use ecs_physics::PhysicsMaterial;
 use ecs_workload::EntityId;
 
 use crate::{
@@ -127,6 +128,12 @@ impl StateDelta3d {
 /// in wide integer deltas and applied to all bodies only after every contact in the set has been evaluated.
 /// This Jacobi-style staging prevents discovery/iteration order from changing the representable response.
 ///
+/// Configured restitution is available only on the first coupled pass. Later passes retain the exact same
+/// masses, geometry, and friction but force restitution to zero, so they can restore non-approaching
+/// contact constraints after another simultaneous pair changes a shared body's velocity without treating
+/// each numerical iteration as another physical bounce. This matches the existing continuous contact-set
+/// solver's restitution contract and prevents iterative response from creating extra rebound energy.
+///
 /// Orientation is deliberately frozen at the sampled frontier. The response primitive is allowed to
 /// change translational and angular velocity plus discrete penetration correction, but any future change
 /// that mutates orientation inside pair response fails closed here. Consuming [`RotatingContactResponse3d::remaining_numerator`]
@@ -168,13 +175,14 @@ pub fn resolve_rotating_contact_frontier(
 
     let mut boxes = frontier.boxes;
     let mut passes_used = 0_u8;
-    for _ in 0..solver_passes {
+    for pass_index in 0..solver_passes {
         passes_used = passes_used
             .checked_add(1)
             .ok_or(RotatingContactResponseError3d::ArithmeticOverflow)?;
         let snapshot = boxes.clone();
         let mut deltas = vec![StateDelta3d::default(); snapshot.len()];
         let mut pair_changed = false;
+        let allow_restitution = pass_index == 0;
 
         for expected in &frontier.contact_set.contacts {
             let left_index = *indices
@@ -185,8 +193,12 @@ pub fn resolve_rotating_contact_frontier(
             )?;
             let left = snapshot[left_index];
             let right = snapshot[right_index];
-            let resolved =
-                stabilize_box_box_contact(left.state, left.body, right.state, right.body)?;
+            let resolved = stabilize_box_box_contact(
+                left.state,
+                response_body_for_pass(left.body, allow_restitution),
+                right.state,
+                response_body_for_pass(right.body, allow_restitution),
+            )?;
             let left_delta = state_delta(left.state, resolved.left, left.body.entity)?;
             let right_delta = state_delta(right.state, resolved.right, right.body.entity)?;
             pair_changed |= !left_delta.is_zero() || !right_delta.is_zero();
@@ -215,6 +227,13 @@ pub fn resolve_rotating_contact_frontier(
         remaining_numerator: frontier.remaining_numerator,
         passes_used,
     })
+}
+
+fn response_body_for_pass(mut body: crate::PhysicsBody3d, allow_restitution: bool) -> crate::PhysicsBody3d {
+    if !allow_restitution && body.material.restitution_milli != 0 {
+        body.material = PhysicsMaterial::new(0, body.material.friction_milli);
+    }
+    body
 }
 
 fn validate_contact_set(
@@ -321,7 +340,7 @@ fn add_i32_delta(value: i32, delta: i128) -> Result<i32, RotatingContactResponse
 
 #[cfg(test)]
 mod tests {
-    use ecs_physics::{BodyKind, MATERIAL_SCALE};
+    use ecs_physics::{BodyKind, MATERIAL_SCALE, PhysicsMaterial};
     use ecs_workload::{EntityId, Position, Velocity};
 
     use crate::{
@@ -407,6 +426,20 @@ mod tests {
 
         assert_eq!(canonical.boxes, reversed.boxes);
         assert_eq!(canonical.remaining_numerator, reversed.remaining_numerator);
+    }
+
+    #[test]
+    fn later_response_passes_disable_restitution_without_dropping_friction() {
+        let original = PhysicsBody3d::dynamic(EntityId(9), [10, 10, 10])
+            .with_material(PhysicsMaterial::new(750, 640));
+
+        assert_eq!(response_body_for_pass(original, true), original);
+        let later = response_body_for_pass(original, false);
+        assert_eq!(later.material.restitution_milli, 0);
+        assert_eq!(later.material.friction_milli, 640);
+        assert_eq!(later.entity, original.entity);
+        assert_eq!(later.mass_units, original.mass_units);
+        assert_eq!(later.half_extents, original.half_extents);
     }
 
     #[test]
