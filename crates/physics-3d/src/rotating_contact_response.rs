@@ -7,8 +7,8 @@ use ecs_physics::PhysicsMaterial;
 use ecs_workload::EntityId;
 
 use crate::{
-    AngularState3d, AngularVelocity3d, BoxBoxStabilizationError3d, RigidBox3d, RigidBoxState3d,
-    RotatingContactFrontier3d, RotatingContactSet3d, stabilize_box_box_contact,
+    AngularState3d, AngularVelocity3d, BoxBoxStabilizationError3d, PhysicsBody3d, RigidBox3d,
+    RigidBoxState3d, RotatingContactFrontier3d, RotatingContactSet3d, stabilize_box_box_contact,
 };
 
 pub const MAX_ROTATING_CONTACT_RESPONSE_PASSES: u8 = 16;
@@ -229,7 +229,7 @@ pub fn resolve_rotating_contact_frontier(
     })
 }
 
-fn response_body_for_pass(mut body: crate::PhysicsBody3d, allow_restitution: bool) -> crate::PhysicsBody3d {
+fn response_body_for_pass(mut body: PhysicsBody3d, allow_restitution: bool) -> PhysicsBody3d {
     if !allow_restitution && body.material.restitution_milli != 0 {
         body.material = PhysicsMaterial::new(0, body.material.friction_milli);
     }
