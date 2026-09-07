@@ -55,6 +55,8 @@ pub struct BoxPlaneContact3d {
     pub point: Position,
     pub manifold_vertices: u8,
     pub normal_impulse_units: i64,
+    /// Deterministic X/Z friction impulses applied at the contact point.
+    pub tangent_impulse_units: [i64; 2],
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -71,6 +73,7 @@ pub enum BoxPlaneError3d {
     NegativeTimestepNumerator(i32),
     NonPositiveTimestepDenominator(i32),
     DampingOutOfRange(u16),
+    FrictionOutOfRange(u16),
     Angular(AngularError3d),
     ArithmeticOverflow,
 }
@@ -102,6 +105,10 @@ impl fmt::Display for BoxPlaneError3d {
                 formatter,
                 "box-plane angular damping must be 0..={MATERIAL_SCALE}, got {value}"
             ),
+            Self::FrictionOutOfRange(value) => write!(
+                formatter,
+                "box-plane friction must be 0..={MATERIAL_SCALE}, got {value}"
+            ),
             Self::Angular(error) => write!(formatter, "box-plane angular state failed: {error}"),
             Self::ArithmeticOverflow => {
                 write!(formatter, "box-plane angular calculation overflowed")
@@ -121,10 +128,11 @@ impl From<AngularError3d> for BoxPlaneError3d {
 /// Advances one oriented cuboid against a static horizontal plane.
 ///
 /// Rust orientation determines all eight world-space corners. Tied lowest vertices become one stable
-/// manifold. An off-center normal impulse changes both linear and angular velocity through cuboid
-/// inertia. This does not rotate the existing AABB room solver; the orientation-aware plane fixture is
-/// kept separate until OBB narrow phase is ready. Rotational CCD is also deferred, so this 60 Hz slice
-/// corrects discrete penetration before response.
+/// manifold. Normal and tangential contact impulses change both linear and angular velocity through
+/// cuboid inertia, so surface friction can turn sliding motion into rolling motion. This does not rotate
+/// the existing AABB room solver; the orientation-aware plane fixture is kept separate until OBB narrow
+/// phase is ready. Rotational CCD is also deferred, so this 60 Hz slice corrects discrete penetration
+/// before response.
 ///
 /// # Errors
 ///
@@ -234,6 +242,14 @@ fn validate(body: PhysicsBody3d, config: BoxPlaneConfig3d) -> Result<(), BoxPlan
         return Err(BoxPlaneError3d::DampingOutOfRange(
             config.angular_damping_milli,
         ));
+    }
+    for friction in [
+        body.material.friction_milli,
+        config.plane_material.friction_milli,
+    ] {
+        if friction > MATERIAL_SCALE {
+            return Err(BoxPlaneError3d::FrictionOutOfRange(friction));
+        }
     }
     Ok(())
 }
@@ -470,7 +486,7 @@ fn resolve_plane_contact(
             .ok_or(BoxPlaneError3d::ArithmeticOverflow)?,
     );
     let contact_y_velocity = contact_velocity(*state, contact_offset)?[1];
-    let impulse = if contact_y_velocity < 0 {
+    let normal_impulse_units = if contact_y_velocity < 0 {
         normal_impulse(
             body,
             state.angular.orientation,
@@ -481,14 +497,18 @@ fn resolve_plane_contact(
     } else {
         0
     };
-    if impulse > 0 {
-        apply_normal_impulse(state, body, contact_offset, impulse)?;
-    }
+    let tangent_impulse_units = if normal_impulse_units > 0 {
+        apply_contact_impulse(state, body, contact_offset, [0, normal_impulse_units, 0])?;
+        apply_plane_friction(state, body, contact_offset, normal_impulse_units, config)?
+    } else {
+        [0, 0]
+    };
 
     Ok(BoxPlaneContact3d {
         point,
         manifold_vertices,
-        normal_impulse_units: impulse,
+        normal_impulse_units,
+        tangent_impulse_units,
     })
 }
 
@@ -566,8 +586,100 @@ fn normal_impulse(
     normal_velocity: i64,
     config: BoxPlaneConfig3d,
 ) -> Result<i64, BoxPlaneError3d> {
+    let effective_inverse_mass =
+        directional_effective_inverse_mass_scaled(body, orientation, contact_offset, [0, 1, 0])?;
+    let restitution = body
+        .material
+        .restitution_milli
+        .max(config.plane_material.restitution_milli);
+    let closing_speed = i128::from(normal_velocity)
+        .checked_neg()
+        .ok_or(BoxPlaneError3d::ArithmeticOverflow)?;
+    let bounce_scale = i128::from(MATERIAL_SCALE) + i128::from(restitution);
+    let numerator = checked_mul(checked_mul(closing_speed, bounce_scale)?, RESPONSE_SCALE)?;
+    let denominator = checked_mul(i128::from(MATERIAL_SCALE), effective_inverse_mass)?;
+    i64::try_from(div_round_nearest(numerator, denominator)?)
+        .map_err(|_| BoxPlaneError3d::ArithmeticOverflow)
+}
+
+fn apply_plane_friction(
+    state: &mut BoxPlaneState3d,
+    body: PhysicsBody3d,
+    contact_offset: [i64; 3],
+    normal_impulse_units: i64,
+    config: BoxPlaneConfig3d,
+) -> Result<[i64; 2], BoxPlaneError3d> {
+    let friction_milli = body
+        .material
+        .friction_milli
+        .max(config.plane_material.friction_milli);
+    if friction_milli == 0 || normal_impulse_units <= 0 {
+        return Ok([0, 0]);
+    }
+
+    let maximum = checked_mul(i128::from(normal_impulse_units), i128::from(friction_milli))?;
+    let maximum = div_round_nearest(maximum, i128::from(MATERIAL_SCALE))?;
+    let maximum = i64::try_from(maximum).map_err(|_| BoxPlaneError3d::ArithmeticOverflow)?;
+    let x = apply_tangent_impulse(state, body, contact_offset, 0, [1, 0, 0], maximum)?;
+    let z = apply_tangent_impulse(state, body, contact_offset, 2, [0, 0, 1], maximum)?;
+    Ok([x, z])
+}
+
+fn apply_tangent_impulse(
+    state: &mut BoxPlaneState3d,
+    body: PhysicsBody3d,
+    contact_offset: [i64; 3],
+    velocity_axis: usize,
+    direction: [i64; 3],
+    maximum: i64,
+) -> Result<i64, BoxPlaneError3d> {
+    if maximum <= 0 {
+        return Ok(0);
+    }
+    let tangent_velocity = contact_velocity(*state, contact_offset)?[velocity_axis];
+    if tangent_velocity == 0 {
+        return Ok(0);
+    }
+    let effective_inverse_mass = directional_effective_inverse_mass_scaled(
+        body,
+        state.angular.orientation,
+        contact_offset,
+        direction,
+    )?;
+    let opposing_velocity = i128::from(tangent_velocity)
+        .checked_neg()
+        .ok_or(BoxPlaneError3d::ArithmeticOverflow)?;
+    let desired = div_round_nearest(
+        checked_mul(opposing_velocity, RESPONSE_SCALE)?,
+        effective_inverse_mass,
+    )?;
+    let maximum = i128::from(maximum);
+    let bounded = desired.clamp(-maximum, maximum);
+    let impulse = i64::try_from(bounded).map_err(|_| BoxPlaneError3d::ArithmeticOverflow)?;
+    if impulse == 0 {
+        return Ok(0);
+    }
+
+    let mut impulse_vector = [0_i64; 3];
+    impulse_vector[velocity_axis] = impulse;
+    apply_contact_impulse(state, body, contact_offset, impulse_vector)?;
+    Ok(impulse)
+}
+
+fn directional_effective_inverse_mass_scaled(
+    body: PhysicsBody3d,
+    orientation: Orientation3d,
+    contact_offset: [i64; 3],
+    direction: [i64; 3],
+) -> Result<i128, BoxPlaneError3d> {
+    let angular_impulse = contact_angular_impulse(contact_offset, direction)?;
+    let angular_impulse_world = [
+        i64::try_from(angular_impulse[0]).map_err(|_| BoxPlaneError3d::ArithmeticOverflow)?,
+        i64::try_from(angular_impulse[1]).map_err(|_| BoxPlaneError3d::ArithmeticOverflow)?,
+        i64::try_from(angular_impulse[2]).map_err(|_| BoxPlaneError3d::ArithmeticOverflow)?,
+    ];
+    let local = rotate_inverse(orientation, angular_impulse_world)?;
     let inertia = box_inertia(body)?;
-    let local = rotate_inverse(orientation, [-contact_offset[2], 0, contact_offset[0]])?;
     let mut rotational_term_scaled = 0_i128;
     for (axis, component) in local.into_iter().enumerate() {
         let inverse_inertia =
@@ -584,18 +696,7 @@ fn normal_impulse(
     if effective_inverse_mass <= 0 {
         return Err(BoxPlaneError3d::ArithmeticOverflow);
     }
-    let restitution = body
-        .material
-        .restitution_milli
-        .max(config.plane_material.restitution_milli);
-    let closing_speed = i128::from(normal_velocity)
-        .checked_neg()
-        .ok_or(BoxPlaneError3d::ArithmeticOverflow)?;
-    let bounce_scale = i128::from(MATERIAL_SCALE) + i128::from(restitution);
-    let numerator = checked_mul(checked_mul(closing_speed, bounce_scale)?, RESPONSE_SCALE)?;
-    let denominator = checked_mul(i128::from(MATERIAL_SCALE), effective_inverse_mass)?;
-    i64::try_from(div_round_nearest(numerator, denominator)?)
-        .map_err(|_| BoxPlaneError3d::ArithmeticOverflow)
+    Ok(effective_inverse_mass)
 }
 
 fn inverse_inertia_scaled(
@@ -610,20 +711,19 @@ fn inverse_inertia_scaled(
     Ok(checked_mul(RESPONSE_SCALE, i128::from(denominator))? / principal)
 }
 
-fn apply_normal_impulse(
+fn apply_contact_impulse(
     state: &mut BoxPlaneState3d,
     body: PhysicsBody3d,
     contact_offset: [i64; 3],
-    impulse: i64,
+    impulse: [i64; 3],
 ) -> Result<(), BoxPlaneError3d> {
-    let linear_delta = div_round_nearest(i128::from(impulse), i128::from(body.mass_units))?;
-    let next_linear_y = i128::from(state.linear_velocity.y)
-        .checked_add(linear_delta)
-        .ok_or(BoxPlaneError3d::ArithmeticOverflow)?;
-    state.linear_velocity.y =
-        i32::try_from(next_linear_y).map_err(|_| BoxPlaneError3d::ArithmeticOverflow)?;
+    state.linear_velocity = Velocity::new3(
+        add_linear_impulse_axis(state.linear_velocity.x, impulse[0], body.mass_units)?,
+        add_linear_impulse_axis(state.linear_velocity.y, impulse[1], body.mass_units)?,
+        add_linear_impulse_axis(state.linear_velocity.z, impulse[2], body.mass_units)?,
+    );
 
-    let angular_impulse = contact_angular_impulse(contact_offset, [0, impulse, 0])?;
+    let angular_impulse = contact_angular_impulse(contact_offset, impulse)?;
     let angular_impulse_world = [
         i64::try_from(angular_impulse[0]).map_err(|_| BoxPlaneError3d::ArithmeticOverflow)?,
         i64::try_from(angular_impulse[1]).map_err(|_| BoxPlaneError3d::ArithmeticOverflow)?,
@@ -649,6 +749,18 @@ fn apply_normal_impulse(
         add_angular_axis(state.angular.angular_velocity.z, world_delta[2])?,
     );
     Ok(())
+}
+
+fn add_linear_impulse_axis(
+    current: i32,
+    impulse: i64,
+    mass_units: u32,
+) -> Result<i32, BoxPlaneError3d> {
+    let delta = div_round_nearest(i128::from(impulse), i128::from(mass_units))?;
+    let next = i128::from(current)
+        .checked_add(delta)
+        .ok_or(BoxPlaneError3d::ArithmeticOverflow)?;
+    i32::try_from(next).map_err(|_| BoxPlaneError3d::ArithmeticOverflow)
 }
 
 fn add_angular_axis(current: i32, delta: i64) -> Result<i32, BoxPlaneError3d> {
@@ -724,6 +836,7 @@ mod tests {
         let contact = step.contact.expect("box should touch the plane");
         assert_eq!(contact.manifold_vertices, 4);
         assert!(contact.normal_impulse_units > 0);
+        assert_eq!(contact.tangent_impulse_units, [0, 0]);
         assert_eq!(
             step.state.angular.angular_velocity,
             AngularVelocity3d::default()
@@ -746,6 +859,57 @@ mod tests {
         assert!(contact.manifold_vertices <= 2);
         assert!(contact.normal_impulse_units > 0);
         assert_ne!(step.state.angular.angular_velocity.z, 0);
+    }
+
+    #[test]
+    fn flat_sliding_contact_converts_friction_to_roll() {
+        let friction_body = PhysicsBody3d::dynamic(EntityId(1), [10, 10, 10])
+            .with_material(PhysicsMaterial::new(0, MATERIAL_SCALE));
+        let state = BoxPlaneState3d::new(
+            Position::new3(0, 10, 0),
+            Velocity::new3(120, -60, 0),
+            AngularState3d::new(Orientation3d::IDENTITY, AngularVelocity3d::default()),
+        );
+        let step =
+            step_box_on_plane(state, friction_body, config()).expect("valid sliding contact");
+        let contact = step.contact.expect("sliding box should contact the plane");
+
+        assert!(contact.tangent_impulse_units[0] < 0);
+        assert_eq!(contact.tangent_impulse_units[1], 0);
+        assert!(contact.tangent_impulse_units[0].abs() <= contact.normal_impulse_units);
+        assert!(step.state.linear_velocity.x.abs() < state.linear_velocity.x.abs());
+        assert_ne!(step.state.angular.angular_velocity.z, 0);
+    }
+
+    #[test]
+    fn zero_friction_preserves_tangential_speed() {
+        let state = BoxPlaneState3d::new(
+            Position::new3(0, 10, 0),
+            Velocity::new3(120, -60, 0),
+            AngularState3d::new(Orientation3d::IDENTITY, AngularVelocity3d::default()),
+        );
+        let step = step_box_on_plane(state, body(), config()).expect("valid frictionless contact");
+        let contact = step.contact.expect("box should contact the plane");
+
+        assert_eq!(contact.tangent_impulse_units, [0, 0]);
+        assert_eq!(step.state.linear_velocity.x, state.linear_velocity.x);
+        assert_eq!(step.state.angular.angular_velocity.z, 0);
+    }
+
+    #[test]
+    fn invalid_friction_fails_closed() {
+        let mut invalid = config();
+        invalid.plane_material = PhysicsMaterial::new(0, MATERIAL_SCALE + 1);
+        let state = BoxPlaneState3d::new(
+            Position::new3(0, 100, 0),
+            Velocity::new3(0, 0, 0),
+            AngularState3d::new(Orientation3d::IDENTITY, AngularVelocity3d::default()),
+        );
+
+        assert_eq!(
+            step_box_on_plane(state, body(), invalid),
+            Err(BoxPlaneError3d::FrictionOutOfRange(MATERIAL_SCALE + 1))
+        );
     }
 
     #[test]
