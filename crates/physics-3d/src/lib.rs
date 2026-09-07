@@ -12,6 +12,7 @@ mod interactions;
 mod liquid;
 mod oriented_box;
 mod rigid_box_world;
+mod rotational_sweep;
 mod scenario;
 #[allow(dead_code)]
 mod solver;
@@ -57,6 +58,10 @@ pub use oriented_box::{
 pub use rigid_box_world::{
     RigidBox3d, RigidBoxWorldConfig3d, RigidBoxWorldError3d, RigidBoxWorldStats3d,
     RigidBoxWorldStep3d, step_rigid_box_world,
+};
+pub use rotational_sweep::{
+    RotationalSweepBounds3d, RotationalSweepError3d, RotationalSweepPair3d,
+    rotational_sweep_bounds, rotational_sweep_candidate_pairs,
 };
 pub use scenario::{BouncingRoom3dScenario, BroadPhaseBody3d, BroadPhaseFrame3d, ScenarioError3d};
 pub use types::{
