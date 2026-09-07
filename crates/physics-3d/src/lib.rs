@@ -1,4 +1,5 @@
 mod angular;
+mod angular_substep;
 mod box_box;
 mod box_box_friction;
 mod box_box_stabilization;
@@ -20,6 +21,11 @@ mod types;
 pub use angular::{
     ANGULAR_VELOCITY_SCALE, AngularError3d, AngularState3d, AngularVelocity3d, BoxInertia3d,
     ORIENTATION_SCALE, Orientation3d, box_inertia, contact_angular_impulse, integrate_orientation,
+};
+pub use angular_substep::{
+    AngularSubstepError3d, AngularSubstepPolicy3d, DEFAULT_MAX_ANGULAR_STEP_UNITS,
+    DEFAULT_MAX_ANGULAR_SUBSTEPS, MAX_ANGULAR_SUBSTEPS, required_angular_substeps,
+    step_rigid_box_world_substepped,
 };
 pub use box_box::{
     BoxBoxContact3d, BoxBoxError3d, BoxBoxStep3d, RigidBoxState3d, resolve_box_box_contact,
