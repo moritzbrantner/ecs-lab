@@ -12,6 +12,7 @@ mod interactions;
 mod liquid;
 mod oriented_box;
 mod rigid_box_world;
+mod rotating_contact_search;
 mod rotational_sweep;
 mod scenario;
 #[allow(dead_code)]
@@ -58,6 +59,11 @@ pub use oriented_box::{
 pub use rigid_box_world::{
     RigidBox3d, RigidBoxWorldConfig3d, RigidBoxWorldError3d, RigidBoxWorldStats3d,
     RigidBoxWorldStep3d, step_rigid_box_world,
+};
+pub use rotating_contact_search::{
+    MAX_ROTATING_CONTACT_REFINEMENTS, MAX_ROTATING_CONTACT_SAMPLES, RotatingContactBracket3d,
+    RotatingContactSearchConfig3d, RotatingContactSearchError3d, bracket_rotating_contact,
+    search_rotating_contacts,
 };
 pub use rotational_sweep::{
     RotationalSweepBounds3d, RotationalSweepError3d, RotationalSweepPair3d,
