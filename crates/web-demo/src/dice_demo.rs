@@ -2,9 +2,9 @@ use std::sync::{Mutex, OnceLock};
 
 use ecs_physics::PhysicsMaterial;
 use ecs_physics_3d::{
-    ANGULAR_VELOCITY_SCALE, AngularState3d, AngularVelocity3d, BoxPlaneConfig3d,
-    BoxPlaneContact3d, BoxPlaneState3d, ORIENTATION_SCALE, Orientation3d, PhysicsBody3d,
-    oriented_box_vertices, step_box_on_plane,
+    ANGULAR_VELOCITY_SCALE, AngularState3d, AngularVelocity3d, BoxPlaneConfig3d, BoxPlaneContact3d,
+    BoxPlaneState3d, ORIENTATION_SCALE, Orientation3d, PhysicsBody3d, oriented_box_vertices,
+    step_box_on_plane,
 };
 use ecs_workload::{EntityId, Position, Velocity};
 
