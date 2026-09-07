@@ -256,6 +256,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn tower_remains_quiescent_before_projectile_reaches_front_face() {
+        let mut state = TowerDemoState::new().expect("valid tower fixture");
+        for step in 0..=30 {
+            let frame = state.ensure_frame(step).expect("valid tower frame");
+            for rigid_box in &frame.boxes[FIRST_BLOCK_INDEX..] {
+                assert_eq!(
+                    rigid_box.state.angular.angular_velocity,
+                    AngularVelocity3d::default(),
+                    "tower block {} started spinning before impact at frame {step}",
+                    rigid_box.body.entity.0
+                );
+                assert_eq!(
+                    rigid_box.state.angular.orientation,
+                    Orientation3d::IDENTITY,
+                    "tower block {} rotated before impact at frame {step}",
+                    rigid_box.body.entity.0
+                );
+            }
+        }
+    }
+
+    #[test]
     fn trebuchet_impact_spins_multiple_tower_blocks() {
         let mut state = TowerDemoState::new().expect("valid tower fixture");
         let mut maximum_spinning_blocks = 0_usize;
