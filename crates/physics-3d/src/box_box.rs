@@ -35,7 +35,7 @@ impl RigidBoxState3d {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct BoxBoxContact3d {
-    /// Stable support-centroid contact point derived from the Rust-owned OBB geometry.
+    /// Stable reduced-manifold contact point derived from the Rust-owned OBB geometry.
     pub point: Position,
     /// Primitive SAT axis oriented from the left body toward the right body.
     pub axis: [i128; 3],
@@ -116,10 +116,14 @@ impl From<OrientedBoxError3d> for BoxBoxError3d {
 /// Resolves one overlapping oriented-box pair with a deterministic normal impulse.
 ///
 /// The existing swept-AABB path remains the broad phase. This function consumes the Rust-owned SAT
-/// contact seed, reduces each support set to a stable centroid contact point, measures relative velocity
-/// at that point including angular motion, and applies one equal-and-opposite normal impulse. Because the
-/// impulse is applied at the contact point, off-center hits change both linear and angular velocity for
-/// both dynamic bodies through their principal cuboid inertia.
+/// contact seed, reduces the support sets to one stable contact point, measures relative velocity at that
+/// point including angular motion, and applies one equal-and-opposite normal impulse. Dynamic↔dynamic
+/// pairs keep the midpoint of their support centroids. For dynamic↔fixed contacts with unequal support
+/// footprints, the tighter support feature anchors the tangent location and is projected onto the shared
+/// support mid-plane. That prevents a very large boundary face (for example a floor slab) from moving the
+/// impulse toward the boundary's own center and inventing torque on an otherwise centered resting box.
+/// Because the impulse is applied at the contact point, genuine off-center hits still change both linear
+/// and angular velocity for dynamic bodies through their principal cuboid inertia.
 ///
 /// This is deliberately a narrow response seam rather than a complete rigid-body world step: it does not
 /// integrate gravity/position/orientation, perform rotational CCD, iterate a multi-contact island, or add
@@ -174,7 +178,18 @@ pub fn resolve_box_box_contact(
     .map_err(map_vertex_error)?;
     let left_support = support_centroid(&left_vertices, seed.left_support_mask)?;
     let right_support = support_centroid(&right_vertices, seed.right_support_mask)?;
-    let point = midpoint(left_support, right_support)?;
+    let point = reduced_contact_point(
+        &left_vertices,
+        seed.left_support_mask,
+        left_support,
+        left_body,
+        &right_vertices,
+        seed.right_support_mask,
+        right_support,
+        right_body,
+        seed.axis,
+        seed.axis_length_squared,
+    )?;
     let left_offset = position_delta(left_state.center, point)?;
     let right_offset = position_delta(right_state.center, point)?;
 
@@ -276,6 +291,118 @@ fn support_centroid(vertices: &[Position; 8], mask: u8) -> Result<Position, BoxB
         i64::try_from(div_round_nearest(sum[2], count)?)
             .map_err(|_| BoxBoxError3d::ArithmeticOverflow)?,
     ))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn reduced_contact_point(
+    left_vertices: &[Position; 8],
+    left_mask: u8,
+    left_support: Position,
+    left_body: PhysicsBody3d,
+    right_vertices: &[Position; 8],
+    right_mask: u8,
+    right_support: Position,
+    right_body: PhysicsBody3d,
+    axis: [i128; 3],
+    axis_length_squared: u128,
+) -> Result<Position, BoxBoxError3d> {
+    if left_body.kind == right_body.kind {
+        return midpoint(left_support, right_support);
+    }
+
+    let left_spread = support_spread_squared(left_vertices, left_mask, left_support)?;
+    let right_spread = support_spread_squared(right_vertices, right_mask, right_support)?;
+    let anchor = if left_spread < right_spread {
+        left_support
+    } else if right_spread < left_spread {
+        right_support
+    } else {
+        return midpoint(left_support, right_support);
+    };
+    project_to_support_midplane(anchor, left_support, right_support, axis, axis_length_squared)
+}
+
+fn support_spread_squared(
+    vertices: &[Position; 8],
+    mask: u8,
+    center: Position,
+) -> Result<u128, BoxBoxError3d> {
+    let mut total = 0_u128;
+    let mut count = 0_u8;
+    for (index, vertex) in vertices.iter().enumerate() {
+        if mask & (1_u8 << index) == 0 {
+            continue;
+        }
+        count = count
+            .checked_add(1)
+            .ok_or(BoxBoxError3d::ArithmeticOverflow)?;
+        for component in [
+            i128::from(vertex.x) - i128::from(center.x),
+            i128::from(vertex.y) - i128::from(center.y),
+            i128::from(vertex.z) - i128::from(center.z),
+        ] {
+            let magnitude = component.unsigned_abs();
+            let square = magnitude
+                .checked_mul(magnitude)
+                .ok_or(BoxBoxError3d::ArithmeticOverflow)?;
+            total = total
+                .checked_add(square)
+                .ok_or(BoxBoxError3d::ArithmeticOverflow)?;
+        }
+    }
+    if count == 0 {
+        return Err(BoxBoxError3d::ArithmeticOverflow);
+    }
+    Ok(total)
+}
+
+fn project_to_support_midplane(
+    anchor: Position,
+    left_support: Position,
+    right_support: Position,
+    axis: [i128; 3],
+    axis_length_squared: u128,
+) -> Result<Position, BoxBoxError3d> {
+    let length_squared =
+        i128::try_from(axis_length_squared).map_err(|_| BoxBoxError3d::ArithmeticOverflow)?;
+    if length_squared <= 0 {
+        return Err(BoxBoxError3d::ArithmeticOverflow);
+    }
+    let target_projection = div_round_nearest(
+        checked_add(
+            dot_position(left_support, axis)?,
+            dot_position(right_support, axis)?,
+        )?,
+        2,
+    )?;
+    let projection_delta = checked_sub(target_projection, dot_position(anchor, axis)?)?;
+    let mut coordinate = [
+        i128::from(anchor.x),
+        i128::from(anchor.y),
+        i128::from(anchor.z),
+    ];
+    for index in 0..3 {
+        coordinate[index] = checked_add(
+            coordinate[index],
+            div_round_nearest(checked_mul(projection_delta, axis[index])?, length_squared)?,
+        )?;
+    }
+    Ok(Position::new3(
+        i64::try_from(coordinate[0]).map_err(|_| BoxBoxError3d::ArithmeticOverflow)?,
+        i64::try_from(coordinate[1]).map_err(|_| BoxBoxError3d::ArithmeticOverflow)?,
+        i64::try_from(coordinate[2]).map_err(|_| BoxBoxError3d::ArithmeticOverflow)?,
+    ))
+}
+
+fn dot_position(position: Position, axis: [i128; 3]) -> Result<i128, BoxBoxError3d> {
+    checked_dot(
+        [
+            i128::from(position.x),
+            i128::from(position.y),
+            i128::from(position.z),
+        ],
+        axis,
+    )
 }
 
 fn midpoint(left: Position, right: Position) -> Result<Position, BoxBoxError3d> {
@@ -715,6 +842,27 @@ mod tests {
         );
         assert_eq!(step.left.linear_velocity.x, -60);
         assert_eq!(step.right, right);
+    }
+
+    #[test]
+    fn wide_fixed_support_does_not_invent_torque_from_its_face_center() {
+        let floor_body = PhysicsBody3d::fixed(EntityId(1), [100, 10, 100]);
+        let block_body = dynamic_body(2);
+        let floor = state(Position::new3(0, 0, 0), Velocity::new3(0, 0, 0));
+        let block = state(Position::new3(60, 19, 40), Velocity::new3(0, -60, 0));
+        let step = resolve_box_box_contact(floor, floor_body, block, block_body)
+            .expect("valid wide support contact");
+        let contact = step.contact.expect("floor should contact block");
+
+        assert_eq!(contact.axis, [0, 1, 0]);
+        assert_eq!(contact.point.x, block.center.x);
+        assert_eq!(contact.point.z, block.center.z);
+        assert!(contact.normal_impulse_units > 0);
+        assert_eq!(
+            step.right.angular.angular_velocity,
+            AngularVelocity3d::default()
+        );
+        assert_eq!(step.left, floor);
     }
 
     #[test]
