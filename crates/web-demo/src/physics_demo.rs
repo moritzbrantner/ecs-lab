@@ -329,7 +329,7 @@ fn frame_bounds(body_index: u32, steps: u32) -> Option<DisplayBounds3d> {
     let index = usize::try_from(body_index).ok()?;
     let mut state = demo_state().lock().ok()?;
     let state = ensure_state(&mut state)?;
-    *state.ensure_frame(steps)?.broad_bounds.get(index)
+    state.ensure_frame(steps)?.broad_bounds.get(index).copied()
 }
 
 fn material_position(body_index: u32, steps: u32) -> Option<Position> {
@@ -429,26 +429,30 @@ pub extern "C" fn physics_demo_half_extent_z(body_index: u32, steps: u32) -> f32
 
 #[unsafe(no_mangle)]
 pub extern "C" fn physics_demo_orientation_x(body_index: u32, steps: u32) -> f32 {
-    frame_body(body_index, steps)
-        .map_or(0.0, |(rigid_box, _)| display_orientation(rigid_box.state.angular.orientation.x))
+    frame_body(body_index, steps).map_or(0.0, |(rigid_box, _)| {
+        display_orientation(rigid_box.state.angular.orientation.x)
+    })
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn physics_demo_orientation_y(body_index: u32, steps: u32) -> f32 {
-    frame_body(body_index, steps)
-        .map_or(0.0, |(rigid_box, _)| display_orientation(rigid_box.state.angular.orientation.y))
+    frame_body(body_index, steps).map_or(0.0, |(rigid_box, _)| {
+        display_orientation(rigid_box.state.angular.orientation.y)
+    })
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn physics_demo_orientation_z(body_index: u32, steps: u32) -> f32 {
-    frame_body(body_index, steps)
-        .map_or(0.0, |(rigid_box, _)| display_orientation(rigid_box.state.angular.orientation.z))
+    frame_body(body_index, steps).map_or(0.0, |(rigid_box, _)| {
+        display_orientation(rigid_box.state.angular.orientation.z)
+    })
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn physics_demo_orientation_w(body_index: u32, steps: u32) -> f32 {
-    frame_body(body_index, steps)
-        .map_or(0.0, |(rigid_box, _)| display_orientation(rigid_box.state.angular.orientation.w))
+    frame_body(body_index, steps).map_or(0.0, |(rigid_box, _)| {
+        display_orientation(rigid_box.state.angular.orientation.w)
+    })
 }
 
 #[unsafe(no_mangle)]
