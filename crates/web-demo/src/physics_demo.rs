@@ -3,9 +3,8 @@ use std::sync::{Mutex, OnceLock};
 use ecs_physics::{BodyKind, PhysicsMaterial};
 use ecs_physics_3d::{
     ANGULAR_VELOCITY_SCALE, AngularState3d, AngularVelocity3d, BouncingRoom3dScenario,
-    ORIENTATION_SCALE, Orientation3d, PhysicsBody3d, PhysicsConfig3d, RigidBox3d,
-    RigidBoxState3d, RigidBoxWorldConfig3d, oriented_box_vertices, step_3d,
-    step_rigid_box_world,
+    ORIENTATION_SCALE, Orientation3d, PhysicsBody3d, PhysicsConfig3d, RigidBox3d, RigidBoxState3d,
+    RigidBoxWorldConfig3d, oriented_box_vertices, step_3d, step_rigid_box_world,
 };
 use ecs_reference::ReferenceWorld;
 use ecs_workload::{EntityId, Operation, Position, Velocity, Workload};
@@ -271,10 +270,7 @@ fn display_bounds(rigid_box: RigidBox3d, spatial_scale: i64) -> Option<DisplayBo
 }
 
 fn pair_evidence(bounds: &[DisplayBounds3d]) -> Vec<u32> {
-    let possible_pairs = bounds
-        .len()
-        .saturating_mul(bounds.len().saturating_sub(1))
-        / 2;
+    let possible_pairs = bounds.len().saturating_mul(bounds.len().saturating_sub(1)) / 2;
     let mut pair_words = vec![0_u32; possible_pairs.div_ceil(32)];
     let mut pair = 0_usize;
     for left in 0..bounds.len() {
@@ -429,26 +425,30 @@ pub extern "C" fn physics_demo_half_extent_z(body_index: u32, steps: u32) -> f32
 
 #[unsafe(no_mangle)]
 pub extern "C" fn physics_demo_orientation_x(body_index: u32, steps: u32) -> f32 {
-    frame_body(body_index, steps)
-        .map_or(0.0, |(rigid_box, _)| display_orientation(rigid_box.state.angular.orientation.x))
+    frame_body(body_index, steps).map_or(0.0, |(rigid_box, _)| {
+        display_orientation(rigid_box.state.angular.orientation.x)
+    })
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn physics_demo_orientation_y(body_index: u32, steps: u32) -> f32 {
-    frame_body(body_index, steps)
-        .map_or(0.0, |(rigid_box, _)| display_orientation(rigid_box.state.angular.orientation.y))
+    frame_body(body_index, steps).map_or(0.0, |(rigid_box, _)| {
+        display_orientation(rigid_box.state.angular.orientation.y)
+    })
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn physics_demo_orientation_z(body_index: u32, steps: u32) -> f32 {
-    frame_body(body_index, steps)
-        .map_or(0.0, |(rigid_box, _)| display_orientation(rigid_box.state.angular.orientation.z))
+    frame_body(body_index, steps).map_or(0.0, |(rigid_box, _)| {
+        display_orientation(rigid_box.state.angular.orientation.z)
+    })
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn physics_demo_orientation_w(body_index: u32, steps: u32) -> f32 {
-    frame_body(body_index, steps)
-        .map_or(0.0, |(rigid_box, _)| display_orientation(rigid_box.state.angular.orientation.w))
+    frame_body(body_index, steps).map_or(0.0, |(rigid_box, _)| {
+        display_orientation(rigid_box.state.angular.orientation.w)
+    })
 }
 
 #[unsafe(no_mangle)]
