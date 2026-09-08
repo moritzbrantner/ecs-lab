@@ -317,6 +317,16 @@ mod tests {
         )
     }
 
+    fn recontacting_rod() -> RigidBox3d {
+        body(
+            1,
+            BodyKind::Dynamic,
+            [20, 2, 2],
+            Position::new3(0, 0, 0),
+            AngularVelocity3d::new(0, 0, 1_000 * ANGULAR_VELOCITY_SCALE),
+        )
+    }
+
     fn resting_rod() -> RigidBox3d {
         body(
             1,
@@ -365,8 +375,8 @@ mod tests {
 
     #[test]
     fn start_contact_clear_then_recontact_is_reported() {
-        let rod = rotating_rod();
-        let touching = obstacle(2, 18, 0);
+        let rod = recontacting_rod();
+        let touching = obstacle(2, 21, 0);
         let ordinary = bracket_rotating_contact(
             rod,
             touching,
@@ -428,7 +438,7 @@ mod tests {
     #[test]
     fn world_search_retains_sampled_recontact() {
         let contacts = search_new_rotating_contacts(
-            &[rotating_rod(), obstacle(2, 18, 0)],
+            &[recontacting_rod(), obstacle(2, 21, 0)],
             frame_config(),
             RotatingContactSearchConfig3d::default(),
         )
