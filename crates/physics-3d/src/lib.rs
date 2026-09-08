@@ -16,6 +16,7 @@ mod rigid_box_world;
 mod rotating_contact_frontier;
 mod rotating_contact_response;
 mod rotating_contact_search;
+mod rotating_new_contact_search;
 mod rotational_sweep;
 mod sampled_rotating_frame;
 mod scenario;
@@ -80,6 +81,9 @@ pub use rotating_contact_search::{
     MAX_ROTATING_CONTACT_REFINEMENTS, MAX_ROTATING_CONTACT_SAMPLES, RotatingContactBracket3d,
     RotatingContactSearchConfig3d, RotatingContactSearchError3d, RotatingContactSet3d,
     bracket_rotating_contact, earliest_rotating_contact_set, search_rotating_contacts,
+};
+pub use rotating_new_contact_search::{
+    bracket_new_rotating_contact, earliest_new_rotating_contact_set, search_new_rotating_contacts,
 };
 pub use rotational_sweep::{
     RotationalSweepBounds3d, RotationalSweepError3d, RotationalSweepPair3d,
