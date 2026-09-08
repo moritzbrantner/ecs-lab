@@ -459,15 +459,55 @@ fn compare_squared_ratios(
             }
         }
     }
-    Ok(checked_product(left)?.cmp(&checked_product(right)?))
+    Ok(wide_product(left)?.cmp(&wide_product(right)?))
 }
 
-fn checked_product(factors: [u128; 3]) -> Result<u128, OrientedBoxError3d> {
-    factors.into_iter().try_fold(1_u128, |product, factor| {
-        product
-            .checked_mul(factor)
-            .ok_or(OrientedBoxError3d::ArithmeticOverflow)
-    })
+fn wide_product(factors: [u128; 3]) -> Result<[u64; 6], OrientedBoxError3d> {
+    let mut product = [0_u64; 6];
+    product[0] = 1;
+    for factor in factors {
+        product = multiply_wide(product, factor)?;
+    }
+    product.reverse();
+    Ok(product)
+}
+
+fn multiply_wide(product: [u64; 6], factor: u128) -> Result<[u64; 6], OrientedBoxError3d> {
+    let factor = [
+        u64::try_from(factor & u128::from(u64::MAX))
+            .map_err(|_| OrientedBoxError3d::ArithmeticOverflow)?,
+        u64::try_from(factor >> 64).map_err(|_| OrientedBoxError3d::ArithmeticOverflow)?,
+    ];
+    let mut result = [0_u64; 6];
+    for (left_index, left) in product.into_iter().enumerate() {
+        let mut carry = 0_u128;
+        for (right_index, right) in factor.into_iter().enumerate() {
+            let index = left_index + right_index;
+            if index >= result.len() {
+                if (left != 0 && right != 0) || carry != 0 {
+                    return Err(OrientedBoxError3d::ArithmeticOverflow);
+                }
+                continue;
+            }
+            let value = u128::from(result[index]) + u128::from(left) * u128::from(right) + carry;
+            result[index] = u64::try_from(value & u128::from(u64::MAX))
+                .map_err(|_| OrientedBoxError3d::ArithmeticOverflow)?;
+            carry = value >> 64;
+        }
+
+        let mut index = left_index + factor.len();
+        while carry != 0 && index < result.len() {
+            let value = u128::from(result[index]) + carry;
+            result[index] = u64::try_from(value & u128::from(u64::MAX))
+                .map_err(|_| OrientedBoxError3d::ArithmeticOverflow)?;
+            carry = value >> 64;
+            index += 1;
+        }
+        if carry != 0 {
+            return Err(OrientedBoxError3d::ArithmeticOverflow);
+        }
+    }
+    Ok(result)
 }
 
 fn orient_toward_right(
@@ -514,7 +554,12 @@ fn support_mask(
 
 #[cfg(test)]
 mod tests {
-    use super::{ObbAxisFeature3d, OrientedBox3d, OrientedBoxError3d, obb_contact_seed};
+    use std::cmp::Ordering;
+
+    use super::{
+        ObbAxisFeature3d, OrientedBox3d, OrientedBoxError3d, compare_squared_ratios,
+        obb_contact_seed, wide_product,
+    };
     use crate::Orientation3d;
     use ecs_workload::Position;
 
@@ -558,6 +603,28 @@ mod tests {
             obb_contact_seed(cube(Position::new3(0, 0, 0)), cube(Position::new3(3, 0, 0)))
                 .expect("valid OBB pair"),
             None
+        );
+    }
+
+    #[test]
+    fn normalized_overlap_comparison_keeps_exact_products_wider_than_u128() {
+        let numerator = 373_263_717_518_u128;
+        let other_denominator = 2_687_465_820_327_019_u128;
+
+        assert_eq!(
+            wide_product([numerator, numerator, other_denominator]),
+            Ok([
+                0,
+                0,
+                0,
+                1,
+                1_851_327_578_378_911_237,
+                16_547_754_579_345_353_708,
+            ])
+        );
+        assert_eq!(
+            compare_squared_ratios(numerator, 1, 1, other_denominator),
+            Ok(Ordering::Greater)
         );
     }
 
