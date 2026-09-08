@@ -52,13 +52,17 @@ pub enum SphereObbError3d {
 impl fmt::Display for SphereObbError3d {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::InvalidRadius => write!(formatter, "sphere-OBB contact requires a positive radius"),
+            Self::InvalidRadius => {
+                write!(formatter, "sphere-OBB contact requires a positive radius")
+            }
             Self::InvalidHalfExtents => write!(
                 formatter,
                 "sphere-OBB contact requires strictly positive box half extents"
             ),
             Self::Angular(error) => write!(formatter, "sphere-OBB orientation failed: {error}"),
-            Self::ArithmeticOverflow => write!(formatter, "sphere-OBB contact arithmetic overflowed"),
+            Self::ArithmeticOverflow => {
+                write!(formatter, "sphere-OBB contact arithmetic overflowed")
+            }
         }
     }
 }
@@ -94,7 +98,9 @@ pub fn sphere_obb_contact(
     let center_delta = position_delta(box_shape.center, sphere.center)?;
     let local_center = rotate_inverse_with_matrix(matrix, center_delta)?;
     let half_extents = box_shape.half_extents.map(i64::from);
-    let center_inside = (0..3).all(|axis| local_center[axis].abs() <= half_extents[axis]);
+    let center_inside = (0..3).all(|axis| {
+        local_center[axis] >= -half_extents[axis] && local_center[axis] <= half_extents[axis]
+    });
 
     let (local_point, inside_normal) = if center_inside {
         nearest_surface_point(local_center, half_extents)?
@@ -159,7 +165,11 @@ fn nearest_surface_point(
         }
     }
 
-    let sign = if local_center[axis] < 0 { -1_i64 } else { 1_i64 };
+    let sign = if local_center[axis] < 0 {
+        -1_i64
+    } else {
+        1_i64
+    };
     let mut point = local_center;
     point[axis] = half_extents[axis]
         .checked_mul(sign)
@@ -205,9 +215,7 @@ fn add_offset(center: Position, offset: [i64; 3]) -> Result<Position, SphereObbE
     ))
 }
 
-fn rotation_matrix(
-    orientation: Orientation3d,
-) -> Result<[[i128; 3]; 3], SphereObbError3d> {
+fn rotation_matrix(orientation: Orientation3d) -> Result<[[i128; 3]; 3], SphereObbError3d> {
     let x = i128::from(orientation.x);
     let y = i128::from(orientation.y);
     let z = i128::from(orientation.z);
@@ -304,10 +312,7 @@ fn checked_sub(left: i128, right: i128) -> Result<i128, SphereObbError3d> {
         .ok_or(SphereObbError3d::ArithmeticOverflow)
 }
 
-fn div_round_nearest(
-    numerator: i128,
-    denominator: i128,
-) -> Result<i128, SphereObbError3d> {
+fn div_round_nearest(numerator: i128, denominator: i128) -> Result<i128, SphereObbError3d> {
     if denominator <= 0 {
         return Err(SphereObbError3d::ArithmeticOverflow);
     }
@@ -332,11 +337,8 @@ mod tests {
     #[test]
     fn face_touch_uses_closest_surface_point() {
         let sphere = Sphere3d::new(Position::new3(5, 0, 0), 3);
-        let box_shape = OrientedBox3d::new(
-            Position::new3(0, 0, 0),
-            [2, 3, 4],
-            Orientation3d::IDENTITY,
-        );
+        let box_shape =
+            OrientedBox3d::new(Position::new3(0, 0, 0), [2, 3, 4], Orientation3d::IDENTITY);
         let contact = sphere_obb_contact(sphere, box_shape).expect("valid mixed pair");
 
         assert!(contact.overlaps());
@@ -350,11 +352,8 @@ mod tests {
     #[test]
     fn corner_gap_uses_euclidean_distance() {
         let sphere = Sphere3d::new(Position::new3(5, 5, 0), 4);
-        let box_shape = OrientedBox3d::new(
-            Position::new3(0, 0, 0),
-            [2, 2, 2],
-            Orientation3d::IDENTITY,
-        );
+        let box_shape =
+            OrientedBox3d::new(Position::new3(0, 0, 0), [2, 2, 2], Orientation3d::IDENTITY);
         let contact = sphere_obb_contact(sphere, box_shape).expect("valid mixed pair");
 
         assert!(!contact.overlaps());
@@ -381,11 +380,8 @@ mod tests {
     #[test]
     fn interior_center_chooses_stable_nearest_face() {
         let sphere = Sphere3d::new(Position::new3(0, 0, 0), 1);
-        let box_shape = OrientedBox3d::new(
-            Position::new3(0, 0, 0),
-            [2, 3, 4],
-            Orientation3d::IDENTITY,
-        );
+        let box_shape =
+            OrientedBox3d::new(Position::new3(0, 0, 0), [2, 3, 4], Orientation3d::IDENTITY);
         let contact = sphere_obb_contact(sphere, box_shape).expect("valid interior pair");
 
         assert!(contact.overlaps());
@@ -397,22 +393,27 @@ mod tests {
     }
 
     #[test]
+    fn extreme_center_does_not_overflow_absolute_value() {
+        let sphere = Sphere3d::new(Position::new3(i64::MIN, 0, 0), 1);
+        let box_shape =
+            OrientedBox3d::new(Position::new3(0, 0, 0), [2, 2, 2], Orientation3d::IDENTITY);
+        let contact = sphere_obb_contact(sphere, box_shape).expect("representable extreme pair");
+
+        assert!(!contact.overlaps());
+        assert!(!contact.center_inside);
+    }
+
+    #[test]
     fn invalid_dimensions_fail_closed() {
-        let box_shape = OrientedBox3d::new(
-            Position::new3(0, 0, 0),
-            [2, 2, 2],
-            Orientation3d::IDENTITY,
-        );
+        let box_shape =
+            OrientedBox3d::new(Position::new3(0, 0, 0), [2, 2, 2], Orientation3d::IDENTITY);
         assert_eq!(
             sphere_obb_contact(Sphere3d::new(Position::new3(0, 0, 0), 0), box_shape),
             Err(SphereObbError3d::InvalidRadius)
         );
 
-        let invalid_box = OrientedBox3d::new(
-            Position::new3(0, 0, 0),
-            [2, 0, 2],
-            Orientation3d::IDENTITY,
-        );
+        let invalid_box =
+            OrientedBox3d::new(Position::new3(0, 0, 0), [2, 0, 2], Orientation3d::IDENTITY);
         assert_eq!(
             sphere_obb_contact(Sphere3d::new(Position::new3(0, 0, 0), 1), invalid_box),
             Err(SphereObbError3d::InvalidHalfExtents)
