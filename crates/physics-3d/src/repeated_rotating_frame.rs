@@ -11,8 +11,8 @@ use crate::{
     RotatingContactFrontier3d, RotatingContactFrontierError3d, RotatingContactResponseError3d,
     RotatingContactSearchConfig3d, RotatingContactSearchError3d, RotatingContactSet3d,
     advance_to_earliest_rotating_contact_set, earliest_new_rotating_contact_set, obb_contact_seed,
-    required_angular_substeps, resolve_rotating_contact_frontier, sample_rigid_box_world_free_flight,
-    step_rigid_box_world, step_rigid_box_world_substepped,
+    required_angular_substeps, resolve_rotating_contact_frontier,
+    sample_rigid_box_world_free_flight, step_rigid_box_world, step_rigid_box_world_substepped,
 };
 
 /// Maximum number of sampled impact frontiers admitted inside one requested frame.
@@ -261,9 +261,11 @@ fn validate_frame_config(
         ));
     }
     if config.timestep_denominator <= 0 {
-        return Err(RepeatedRotatingFrameError3d::NonPositiveTimestepDenominator(
-            config.timestep_denominator,
-        ));
+        return Err(
+            RepeatedRotatingFrameError3d::NonPositiveTimestepDenominator(
+                config.timestep_denominator,
+            ),
+        );
     }
     if config.angular_damping_milli > MATERIAL_SCALE {
         return Err(RepeatedRotatingFrameError3d::DampingOutOfRange(
@@ -316,9 +318,12 @@ fn verify_contact_set(
         let left_index = *indices
             .get(&expected.left)
             .ok_or(RotatingContactFrontierError3d::MissingEntity(expected.left))?;
-        let right_index = *indices
-            .get(&expected.right)
-            .ok_or(RotatingContactFrontierError3d::MissingEntity(expected.right))?;
+        let right_index =
+            *indices
+                .get(&expected.right)
+                .ok_or(RotatingContactFrontierError3d::MissingEntity(
+                    expected.right,
+                ))?;
         let left = boxes[left_index];
         let right = boxes[right_index];
         let actual = obb_contact_seed(
@@ -710,9 +715,7 @@ mod tests {
                 RotatingContactSearchConfig3d::default(),
                 AngularSubstepPolicy3d::default(),
             ),
-            Err(RepeatedRotatingFrameError3d::NonPositiveTimestepDenominator(
-                0
-            ))
+            Err(RepeatedRotatingFrameError3d::NonPositiveTimestepDenominator(0))
         );
     }
 }
