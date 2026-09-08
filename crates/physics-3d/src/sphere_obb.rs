@@ -2,9 +2,7 @@ use std::fmt;
 
 use ecs_workload::Position;
 
-use crate::{
-    AngularError3d, BoxPlaneError3d, OrientedBox3d, oriented_box_vertices,
-};
+use crate::{AngularError3d, BoxPlaneError3d, OrientedBox3d, oriented_box_vertices};
 
 const FEATURE_SIGNS: [i128; 2] = [1, -1];
 
@@ -128,7 +126,13 @@ pub fn sphere_obb_contact(
     let center_delta = position_delta(box_shape.center, sphere.center)?;
     let center_inside = point_inside_quantized_box(center_delta, basis)?;
     let candidate = closest_surface_candidate(center_delta, basis)?;
-    make_contact(sphere, box_shape.center, center_delta, center_inside, candidate)
+    make_contact(
+        sphere,
+        box_shape.center,
+        center_delta,
+        center_inside,
+        candidate,
+    )
 }
 
 fn quantized_basis(vertices: &[Position; 8]) -> Result<[[i128; 3]; 3], SphereObbError3d> {
@@ -197,14 +201,9 @@ fn closest_surface_candidate(
         let others = other_axes(axis);
         for first_sign in FEATURE_SIGNS {
             for second_sign in FEATURE_SIGNS {
-                if let Some(candidate) = edge_candidate(
-                    point,
-                    basis,
-                    axis,
-                    others,
-                    first_sign,
-                    second_sign,
-                )? {
+                if let Some(candidate) =
+                    edge_candidate(point, basis, axis, others, first_sign, second_sign)?
+                {
                     consider_candidate(&mut best, candidate)?;
                 }
             }
@@ -214,11 +213,8 @@ fn closest_surface_candidate(
     for first_sign in FEATURE_SIGNS {
         for second_sign in FEATURE_SIGNS {
             for third_sign in FEATURE_SIGNS {
-                let candidate = vertex_candidate(
-                    point,
-                    basis,
-                    [first_sign, second_sign, third_sign],
-                )?;
+                let candidate =
+                    vertex_candidate(point, basis, [first_sign, second_sign, third_sign])?;
                 consider_candidate(&mut best, candidate)?;
             }
         }
@@ -258,10 +254,8 @@ fn face_candidate(
     offset_numerator = add_vectors(offset_numerator, scale_vector(u, u_numerator)?)?;
     offset_numerator = add_vectors(offset_numerator, scale_vector(v, v_numerator)?)?;
     let relative_squared = dot(relative, relative)?;
-    let projected_numerator = checked_add(
-        checked_mul(ru, u_numerator)?,
-        checked_mul(rv, v_numerator)?,
-    )?;
+    let projected_numerator =
+        checked_add(checked_mul(ru, u_numerator)?, checked_mul(rv, v_numerator)?)?;
     let distance_squared_numerator = checked_sub(
         checked_mul(relative_squared, denominator)?,
         projected_numerator,
@@ -311,10 +305,7 @@ fn edge_candidate(
     }
 
     let mut offset_numerator = scale_vector(edge_offset, denominator)?;
-    offset_numerator = add_vectors(
-        offset_numerator,
-        scale_vector(edge, parameter_numerator)?,
-    )?;
+    offset_numerator = add_vectors(offset_numerator, scale_vector(edge, parameter_numerator)?)?;
     let relative_squared = dot(relative, relative)?;
     let distance_squared_numerator = checked_sub(
         checked_mul(relative_squared, denominator)?,
@@ -357,14 +348,10 @@ fn consider_candidate(
     let replace = match *best {
         None => true,
         Some(current) => {
-            let candidate_scaled = checked_mul(
-                candidate.distance_squared_numerator,
-                current.denominator,
-            )?;
-            let current_scaled = checked_mul(
-                current.distance_squared_numerator,
-                candidate.denominator,
-            )?;
+            let candidate_scaled =
+                checked_mul(candidate.distance_squared_numerator, current.denominator)?;
+            let current_scaled =
+                checked_mul(current.distance_squared_numerator, candidate.denominator)?;
             candidate_scaled < current_scaled
         }
     };
@@ -461,11 +448,7 @@ fn position_delta(left: Position, right: Position) -> Result<[i128; 3], SphereOb
 }
 
 const fn position_axes(position: Position) -> [i128; 3] {
-    [
-        position.x as i128,
-        position.y as i128,
-        position.z as i128,
-    ]
+    [position.x as i128, position.y as i128, position.z as i128]
 }
 
 fn dot(left: [i128; 3], right: [i128; 3]) -> Result<i128, SphereObbError3d> {
@@ -509,10 +492,7 @@ fn scale_vector(vector: [i128; 3], scale: i128) -> Result<[i128; 3], SphereObbEr
     ])
 }
 
-fn add_vectors(
-    left: [i128; 3],
-    right: [i128; 3],
-) -> Result<[i128; 3], SphereObbError3d> {
+fn add_vectors(left: [i128; 3], right: [i128; 3]) -> Result<[i128; 3], SphereObbError3d> {
     Ok([
         checked_add(left[0], right[0])?,
         checked_add(left[1], right[1])?,
@@ -520,10 +500,7 @@ fn add_vectors(
     ])
 }
 
-fn subtract_vectors(
-    left: [i128; 3],
-    right: [i128; 3],
-) -> Result<[i128; 3], SphereObbError3d> {
+fn subtract_vectors(left: [i128; 3], right: [i128; 3]) -> Result<[i128; 3], SphereObbError3d> {
     Ok([
         checked_sub(left[0], right[0])?,
         checked_sub(left[1], right[1])?,
