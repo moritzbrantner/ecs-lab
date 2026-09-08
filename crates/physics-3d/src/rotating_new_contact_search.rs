@@ -323,7 +323,7 @@ mod tests {
             BodyKind::Dynamic,
             [20, 2, 2],
             Position::new3(0, 0, 0),
-            AngularVelocity3d::new(0, 0, 1_000 * ANGULAR_VELOCITY_SCALE),
+            AngularVelocity3d::new(0, 0, 230 * ANGULAR_VELOCITY_SCALE),
         )
     }
 
@@ -376,7 +376,7 @@ mod tests {
     #[test]
     fn start_contact_clear_then_recontact_is_reported() {
         let rod = recontacting_rod();
-        let touching = obstacle(2, 21, 0);
+        let touching = obstacle(2, -6, 3);
         let ordinary = bracket_rotating_contact(
             rod,
             touching,
@@ -438,7 +438,7 @@ mod tests {
     #[test]
     fn world_search_retains_sampled_recontact() {
         let contacts = search_new_rotating_contacts(
-            &[recontacting_rod(), obstacle(2, 21, 0)],
+            &[recontacting_rod(), obstacle(2, -6, 3)],
             frame_config(),
             RotatingContactSearchConfig3d::default(),
         )
