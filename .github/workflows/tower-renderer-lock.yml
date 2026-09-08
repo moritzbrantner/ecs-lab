@@ -1,0 +1,25 @@
+name: Generate tower renderer lockfile
+
+on:
+  push:
+    branches: [tower-rust-wgpu-ball-camera]
+
+permissions:
+  contents: read
+
+jobs:
+  lockfile:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2
+        with:
+          toolchain: 1.98.0
+      - name: Generate renderer lockfile
+        run: cargo generate-lockfile --manifest-path experiments/tower-wgpu-renderer/Cargo.toml
+      - name: Upload renderer lockfile
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: tower-renderer-lock
+          path: experiments/tower-wgpu-renderer/Cargo.lock
+          if-no-files-found: error
