@@ -54,10 +54,14 @@ jobs:
           mkdir -p reference/profiles/runtime-profiler
           cp candidate/profiles/runtime-profiler/benchmark-smoke.json reference/profiles/runtime-profiler/benchmark-smoke.json
           git -C reference add profiles/runtime-profiler/benchmark-smoke.json
-          git -C reference \
-            -c user.name='runtime-profiler' \
-            -c user.email='runtime-profiler@invalid' \
-            commit -m 'chore: attach comparable ECS profiler scenario'
+          if git -C reference diff --cached --quiet; then
+            echo 'Base already has the identical profiler scenario.'
+          else
+            git -C reference \
+              -c user.name='runtime-profiler' \
+              -c user.email='runtime-profiler@invalid' \
+              commit -m 'chore: attach comparable ECS profiler scenario'
+          fi
 
       - name: Prime deterministic workload
         run: |
