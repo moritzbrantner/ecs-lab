@@ -78,6 +78,7 @@ const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)
 
 let wasm = null;
 let renderer = null;
+let rendererFallbackReason = "";
 let maxStep = 0;
 let bodyCount = 0;
 let roles = [];
@@ -151,12 +152,26 @@ function resizeCanvas(canvas) {
   return { width, height, ratio };
 }
 
+function renderFrame(frame) {
+  if (!renderer) return;
+  try {
+    renderer.render(frame, camera);
+  } catch (error) {
+    if (renderer.mode !== "rust-wasm-wgpu") throw error;
+    stopRun();
+    const message = error instanceof Error ? error.message : String(error);
+    renderer = activateCanvasFallback(`WebGPU renderer failed: ${message}`);
+    renderer.render(frame, camera);
+  }
+}
+
 function renderCurrentCamera() {
   if (!wasm || !renderer) return;
-  renderer.render(readFrame(currentFrame()), camera);
+  renderFrame(readFrame(currentFrame()));
 }
 
 function beginCameraDrag(event) {
+  if (event.target instanceof HTMLButtonElement) return;
   if (event.button !== 0 && event.button !== 2) return;
   event.preventDefault();
   stage.focus({ preventScroll: true });
@@ -318,9 +333,19 @@ function createCanvasRenderer() {
         else drawWireBox(context, body, matrix, cssWidth, cssHeight, dark);
       }
       const elapsed = performance.now() - started;
-      rendererStatus.textContent = `Canvas fallback · CPU draw ${elapsed.toFixed(2)} ms`;
+      const reason = rendererFallbackReason ? ` · ${rendererFallbackReason}` : "";
+      rendererStatus.textContent = `Canvas fallback · CPU draw ${elapsed.toFixed(2)} ms${reason}`;
     },
   };
+}
+
+function activateCanvasFallback(reason = "") {
+  rendererFallbackReason = reason;
+  webgpuCanvas.hidden = true;
+  webgpuCanvas.style.display = "none";
+  fallbackCanvas.hidden = false;
+  fallbackCanvas.style.display = "block";
+  return createCanvasRenderer();
 }
 
 function drawWireBox(context, body, matrix, width, height, dark) {
@@ -475,7 +500,7 @@ function setFrame(step) {
   frameLabel.textContent = String(bounded);
   if (!wasm || !renderer) return;
   const frame = readFrame(bounded);
-  renderer.render(frame, camera);
+  renderFrame(frame);
   updateStatus(frame);
 }
 
@@ -493,7 +518,7 @@ function animateRun(now) {
   const elapsedSeconds = (now - runStartedAt) / 1000;
   const next = clampFrame(runStartFrame + Math.floor(elapsedSeconds * 60));
   setFrame(next);
-  if (next >= maxStep) {
+  if (!running || next >= maxStep) {
     stopRun();
     return;
   }
@@ -548,20 +573,18 @@ async function createRenderer() {
       resizeCanvas(webgpuCanvas);
       await initTowerRenderer();
       const wgpuRenderer = await create_tower_renderer(webgpuCanvas);
+      rendererFallbackReason = "";
       fallbackCanvas.hidden = true;
       fallbackCanvas.style.display = "none";
       webgpuCanvas.hidden = false;
       webgpuCanvas.style.display = "block";
       return createRustWgpuRenderer(wgpuRenderer);
     } catch (error) {
-      rendererStatus.textContent = `Rust/Wasm wgpu unavailable; Canvas fallback (${error instanceof Error ? error.message : String(error)})`;
+      const message = error instanceof Error ? error.message : String(error);
+      return activateCanvasFallback(`Rust/Wasm wgpu unavailable: ${message}`);
     }
   }
-  webgpuCanvas.hidden = true;
-  webgpuCanvas.style.display = "none";
-  fallbackCanvas.hidden = false;
-  fallbackCanvas.style.display = "block";
-  return createCanvasRenderer();
+  return activateCanvasFallback("WebGPU unavailable in this browser");
 }
 
 frameInput.addEventListener("input", () => {
