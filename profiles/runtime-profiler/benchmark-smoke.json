@@ -1,0 +1,16 @@
+{
+  "schema_version": "runtime-profiler/scenario/v1",
+  "id": "ecs-lab-benchmark-smoke",
+  "target": {
+    "type": "command",
+    "program": "target/release/ecs-runner",
+    "args": ["benchmark-smoke", "runtime-profiler"],
+    "working_directory": "../.."
+  },
+  "run": {
+    "warmup_iterations": 1,
+    "measurement_iterations": 3,
+    "timeout_seconds": 120
+  },
+  "collectors": ["process"]
+}
