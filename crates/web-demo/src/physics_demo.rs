@@ -554,7 +554,9 @@ pub extern "C" fn physics_demo_pair_word(word_index: u32, steps: u32) -> u32 {
     let Ok(index) = usize::try_from(word_index) else {
         return 0;
     };
-    let Ok(mut state) = demo_state().lock().ok()?;
+    let Ok(mut state) = demo_state().lock() else {
+        return 0;
+    };
     let Some(state) = ensure_state(&mut state) else {
         return 0;
     };
