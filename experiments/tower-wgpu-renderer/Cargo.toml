@@ -1,0 +1,21 @@
+[package]
+name = "ecs-tower-wgpu-renderer"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+license = "MIT"
+publish = false
+description = "Experimental Rust/Wasm wgpu renderer for the ECS Lab tower-destruction scene"
+
+[lib]
+crate-type = ["cdylib"]
+
+[workspace]
+
+[dependencies]
+bytemuck = { version = "=1.25.2", features = ["derive"] }
+js-sys = "=0.3.104"
+wasm-bindgen = "=0.2.127"
+wasm-bindgen-futures = "=0.4.77"
+web-sys = { version = "=0.3.104", features = ["HtmlCanvasElement"] }
+wgpu = { version = "=30.0.1", default-features = false, features = ["webgpu", "wgsl"] }
