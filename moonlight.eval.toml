@@ -45,3 +45,12 @@ cwd = "."
 timeout_ms = 900000
 ignore_stdout = true
 ignore_stderr = true
+
+[[checks]]
+id = "pages-wgpu-build"
+name = "Pages and Rust/Wasm wgpu build"
+command = "bash scripts/build-pages.sh"
+cwd = "."
+timeout_ms = 900000
+ignore_stdout = true
+ignore_stderr = true
