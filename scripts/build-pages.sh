@@ -12,6 +12,7 @@ rm -rf target/tower-wgpu-renderer target/tower-wgpu-bindgen
 CARGO_TARGET_DIR=target/tower-wgpu-renderer \
   cargo build \
   --manifest-path experiments/tower-wgpu-renderer/Cargo.toml \
+  --locked \
   --release \
   --target wasm32-unknown-unknown
 wasm-bindgen \
