@@ -185,7 +185,9 @@ impl TowerRenderer {
         }
         let body_count = values.len() / 24;
         if !(2..=MAX_BODIES).contains(&body_count) {
-            return Err(JsValue::from_str("tower renderer received an invalid body count"));
+            return Err(JsValue::from_str(
+                "tower renderer received an invalid body count",
+            ));
         }
         if width == 0 || height == 0 {
             return Ok(());
@@ -287,7 +289,10 @@ impl TowerRenderer {
             pass.set_bind_group(0, &self.camera_bind_group, &[]);
             pass.set_pipeline(&self.line_pipeline);
             pass.set_vertex_buffer(0, self.line_buffer.slice(..));
-            pass.draw(0..u32::try_from(line_vertices.len()).unwrap_or_default(), 0..1);
+            pass.draw(
+                0..u32::try_from(line_vertices.len()).unwrap_or_default(),
+                0..1,
+            );
             pass.set_pipeline(&self.sphere_pipeline);
             pass.set_vertex_buffer(0, self.sphere_buffer.slice(..));
             pass.draw(
@@ -326,7 +331,9 @@ impl TowerRenderer {
             .map_err(js_error)?;
         let mut config = surface
             .get_default_config(&adapter, width, height)
-            .ok_or_else(|| JsValue::from_str("wgpu surface has no supported default configuration"))?;
+            .ok_or_else(|| {
+                JsValue::from_str("wgpu surface has no supported default configuration")
+            })?;
         config.desired_maximum_frame_latency = 2;
         surface.configure(&device, &config);
 
@@ -478,7 +485,8 @@ impl TowerRenderer {
         self.config.width = width.max(1);
         self.config.height = height.max(1);
         self.surface.configure(&self.device, &self.config);
-        self.depth_texture = create_depth_texture(&self.device, self.config.width, self.config.height);
+        self.depth_texture =
+            create_depth_texture(&self.device, self.config.width, self.config.height);
     }
 }
 
@@ -487,7 +495,11 @@ pub async fn create_tower_renderer(canvas: HtmlCanvasElement) -> Result<TowerRen
     TowerRenderer::new(canvas).await
 }
 
-fn pack_box_lines(values: &[f32], body_count: usize, dark: bool) -> Result<Vec<LineVertex>, JsValue> {
+fn pack_box_lines(
+    values: &[f32],
+    body_count: usize,
+    dark: bool,
+) -> Result<Vec<LineVertex>, JsValue> {
     let mut output = Vec::with_capacity((body_count - 1) * LINE_VERTICES_PER_BODY);
     for body in 0..body_count {
         if body == 1 {
@@ -521,7 +533,9 @@ fn pack_box_lines(values: &[f32], body_count: usize, dark: bool) -> Result<Vec<L
 
 fn pack_projectile_sphere(values: &[f32], dark: bool) -> Result<Vec<SphereVertex>, JsValue> {
     if values.len() < 48 {
-        return Err(JsValue::from_str("tower renderer is missing projectile vertices"));
+        return Err(JsValue::from_str(
+            "tower renderer is missing projectile vertices",
+        ));
     }
     let base = 24;
     let mut center = [0.0_f32; 3];
@@ -591,7 +605,9 @@ fn sphere_normal(theta: f32, phi: f32) -> [f32; 3] {
 fn read_vertex(values: &[f32], body_base: usize, vertex: usize) -> Result<[f32; 3], JsValue> {
     let offset = body_base + vertex * 3;
     let Some(point) = values.get(offset..offset + 3) else {
-        return Err(JsValue::from_str("tower renderer vertex buffer is truncated"));
+        return Err(JsValue::from_str(
+            "tower renderer vertex buffer is truncated",
+        ));
     };
     Ok([point[0], point[1], point[2]])
 }
@@ -634,11 +650,7 @@ fn camera_view_projection(
 }
 
 fn look_at(eye: [f32; 3], target: [f32; 3], up: [f32; 3]) -> [f32; 16] {
-    let z = normalize([
-        eye[0] - target[0],
-        eye[1] - target[1],
-        eye[2] - target[2],
-    ]);
+    let z = normalize([eye[0] - target[0], eye[1] - target[1], eye[2] - target[2]]);
     let x = normalize(cross(up, z));
     let y = cross(z, x);
     [
