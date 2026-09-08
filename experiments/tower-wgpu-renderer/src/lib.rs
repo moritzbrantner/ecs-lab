@@ -570,8 +570,8 @@ fn pack_projectile_sphere(values: &[f32], dark: bool) -> Result<Vec<SphereVertex
             let n01 = sphere_normal(theta0, phi1);
             let n10 = sphere_normal(theta1, phi0);
             let n11 = sphere_normal(theta1, phi1);
-            push_sphere_triangle(&mut output, center, radius, color, [n00, n10, n11]);
-            push_sphere_triangle(&mut output, center, radius, color, [n00, n11, n01]);
+            push_sphere_triangle(&mut output, center, radius, color, [n00, n11, n10]);
+            push_sphere_triangle(&mut output, center, radius, color, [n00, n01, n11]);
         }
     }
     Ok(output)
