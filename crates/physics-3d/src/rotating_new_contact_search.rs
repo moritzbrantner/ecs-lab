@@ -4,8 +4,8 @@ use crate::{
     MAX_ROTATING_CONTACT_REFINEMENTS, MAX_ROTATING_CONTACT_SAMPLES, ObbContactSeed3d,
     OrientedBox3d, RigidBox3d, RigidBoxFreeFlightConfig3d, RigidBoxWorldConfig3d,
     RigidBoxWorldError3d, RotatingContactBracket3d, RotatingContactSearchConfig3d,
-    RotatingContactSearchError3d, RotatingContactSet3d, bracket_rotating_contact,
-    obb_contact_seed, rotational_sweep_candidate_pairs, sample_rigid_box_free_flight,
+    RotatingContactSearchError3d, RotatingContactSet3d, bracket_rotating_contact, obb_contact_seed,
+    rotational_sweep_candidate_pairs, sample_rigid_box_free_flight,
 };
 
 /// Finds the first strictly-positive sampled rotating impact for one pair.
