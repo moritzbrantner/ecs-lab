@@ -1,4 +1,45 @@
-const canvas = document.querySelector("#tower-canvas");
+import initTowerRenderer, { create_tower_renderer } from "../pkg/tower_wgpu_renderer.js";
+
+const originalCanvas = document.querySelector("#tower-canvas");
+if (!(originalCanvas instanceof HTMLCanvasElement)) {
+  throw new Error("The trebuchet tower canvas is missing.");
+}
+
+const stage = document.createElement("div");
+stage.id = "tower-stage";
+stage.className = "physics-stage tower-stage";
+stage.tabIndex = 0;
+stage.setAttribute("aria-label", "Interactive 3D tower destruction scene. Drag to orbit, Shift-drag or right-drag to pan, and use the mouse wheel to zoom.");
+
+const webgpuCanvas = document.createElement("canvas");
+webgpuCanvas.id = "tower-wgpu-canvas";
+webgpuCanvas.width = originalCanvas.width;
+webgpuCanvas.height = originalCanvas.height;
+webgpuCanvas.hidden = true;
+webgpuCanvas.style.display = "none";
+
+const fallbackCanvas = originalCanvas;
+fallbackCanvas.id = "tower-fallback-canvas";
+fallbackCanvas.classList.remove("dice-stage");
+
+const cameraHud = document.createElement("div");
+cameraHud.className = "camera-hud";
+cameraHud.innerHTML = "<span>Drag · orbit</span><span>Shift/right drag · pan</span><span>Wheel · zoom</span>";
+
+const resetCameraButton = document.createElement("button");
+resetCameraButton.id = "tower-reset-camera";
+resetCameraButton.className = "camera-reset";
+resetCameraButton.type = "button";
+resetCameraButton.textContent = "Reset camera";
+
+const rendererStatus = document.createElement("p");
+rendererStatus.id = "tower-renderer-status";
+rendererStatus.className = "renderer-status";
+rendererStatus.textContent = "Starting renderer…";
+
+fallbackCanvas.replaceWith(stage);
+stage.append(webgpuCanvas, fallbackCanvas, cameraHud, resetCameraButton, rendererStatus);
+
 const frameInput = document.querySelector("#tower-frame");
 const frameLabel = document.querySelector("#tower-frame-label");
 const resetButton = document.querySelector("#tower-reset");
@@ -7,7 +48,11 @@ const runButton = document.querySelector("#tower-run");
 const status = document.querySelector("#tower-status");
 
 if (
-  !(canvas instanceof HTMLCanvasElement) ||
+  !(stage instanceof HTMLElement) ||
+  !(webgpuCanvas instanceof HTMLCanvasElement) ||
+  !(fallbackCanvas instanceof HTMLCanvasElement) ||
+  !(resetCameraButton instanceof HTMLButtonElement) ||
+  !(rendererStatus instanceof HTMLElement) ||
   !(frameInput instanceof HTMLInputElement) ||
   !(frameLabel instanceof HTMLElement) ||
   !(resetButton instanceof HTMLButtonElement) ||
@@ -16,11 +61,6 @@ if (
   !(status instanceof HTMLElement)
 ) {
   throw new Error("The trebuchet tower demo markup is incomplete.");
-}
-
-const context = canvas.getContext("2d");
-if (!context) {
-  throw new Error("The browser cannot create the trebuchet tower canvas.");
 }
 
 const EDGES = Object.freeze([
@@ -32,14 +72,12 @@ const EDGES = Object.freeze([
   [5, 7],
   [6, 7],
 ]);
-const CAMERA = Object.freeze({ yaw: 35 * Math.PI / 180, pitch: 18 * Math.PI / 180 });
-const SCENE_GUIDES = Object.freeze([
-  [-22, 0, -8], [-22, 0, 8], [12, 0, -8], [12, 0, 8],
-  [-22, 12, -8], [-22, 12, 8], [12, 12, -8], [12, 12, 8],
-]);
+const DEFAULT_CAMERA = Object.freeze({ yaw: 38, pitch: 22, radius: 49, target: [-3, 7, 0] });
+const CAMERA_LIMITS = Object.freeze({ minPitch: -10, maxPitch: 78, minRadius: 18, maxRadius: 95 });
 const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 let wasm = null;
+let renderer = null;
 let maxStep = 0;
 let bodyCount = 0;
 let roles = [];
@@ -47,6 +85,12 @@ let running = false;
 let animationHandle = 0;
 let runStartedAt = 0;
 let runStartFrame = 0;
+let camera = cloneCamera(DEFAULT_CAMERA);
+let cameraDrag = null;
+
+function cloneCamera(value) {
+  return { yaw: value.yaw, pitch: value.pitch, radius: value.radius, target: [...value.target] };
+}
 
 function currentFrame() {
   return Number.parseInt(frameInput.value, 10) || 0;
@@ -74,58 +118,6 @@ function readFrame(step) {
   };
 }
 
-function cameraPoint([x, y, z]) {
-  const cosYaw = Math.cos(CAMERA.yaw);
-  const sinYaw = Math.sin(CAMERA.yaw);
-  const yawX = x * cosYaw - z * sinYaw;
-  const yawZ = x * sinYaw + z * cosYaw;
-  const cosPitch = Math.cos(CAMERA.pitch);
-  const sinPitch = Math.sin(CAMERA.pitch);
-  return [yawX, y * cosPitch - yawZ * sinPitch, y * sinPitch + yawZ * cosPitch];
-}
-
-function resizeCanvas() {
-  const ratio = Math.min(window.devicePixelRatio || 1, 2);
-  const width = Math.max(1, Math.floor(canvas.clientWidth * ratio));
-  const height = Math.max(1, Math.floor(canvas.clientHeight * ratio));
-  if (canvas.width !== width || canvas.height !== height) {
-    canvas.width = width;
-    canvas.height = height;
-  }
-  return { width, height, ratio };
-}
-
-function projector(width, height) {
-  const guidePoints = SCENE_GUIDES.map(cameraPoint);
-  const minimumX = Math.min(...guidePoints.map((point) => point[0]));
-  const maximumX = Math.max(...guidePoints.map((point) => point[0]));
-  const minimumY = Math.min(...guidePoints.map((point) => point[1]));
-  const maximumY = Math.max(...guidePoints.map((point) => point[1]));
-  const spanX = Math.max(1, maximumX - minimumX);
-  const spanY = Math.max(1, maximumY - minimumY);
-  const scale = Math.min(width * 0.88 / spanX, height * 0.82 / spanY);
-  const centerX = (minimumX + maximumX) / 2;
-  const centerY = (minimumY + maximumY) / 2;
-  return (point) => {
-    const camera = cameraPoint(point);
-    return [
-      width / 2 + (camera[0] - centerX) * scale,
-      height / 2 - (camera[1] - centerY) * scale,
-      camera[2],
-    ];
-  };
-}
-
-function drawPath(points, close = false) {
-  if (points.length === 0) return;
-  context.beginPath();
-  context.moveTo(points[0][0], points[0][1]);
-  for (const point of points.slice(1)) {
-    context.lineTo(point[0], point[1]);
-  }
-  if (close) context.closePath();
-}
-
 function averagePoint(points) {
   const sum = points.reduce(
     (accumulator, point) => [
@@ -138,60 +130,330 @@ function averagePoint(points) {
   return sum.map((value) => value / points.length);
 }
 
-function floorTopFace(body) {
-  const maximumY = Math.max(...body.vertices.map((vertex) => vertex[1]));
-  return body.vertices
-    .filter((vertex) => Math.abs(vertex[1] - maximumY) < 0.001)
-    .sort((left, right) => Math.atan2(left[2], left[0]) - Math.atan2(right[2], right[0]));
+function projectileRadius(body) {
+  const center = averagePoint(body.vertices);
+  const diagonal = Math.hypot(
+    body.vertices[0][0] - center[0],
+    body.vertices[0][1] - center[1],
+    body.vertices[0][2] - center[2],
+  );
+  return diagonal / Math.sqrt(3);
 }
 
-function render(frame) {
-  const { width, height, ratio } = resizeCanvas();
-  const cssWidth = width / ratio;
-  const cssHeight = height / ratio;
-  context.setTransform(ratio, 0, 0, ratio, 0, 0);
-  context.clearRect(0, 0, cssWidth, cssHeight);
-
-  const dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-  context.fillStyle = dark ? "#0b0c0f" : "#f5f5f2";
-  context.fillRect(0, 0, cssWidth, cssHeight);
-
-  const project = projector(cssWidth, cssHeight);
-  const floor = frame.bodies.find((body) => body.role === 0);
-  if (floor) {
-    const top = floorTopFace(floor).map(project);
-    drawPath(top, true);
-    context.fillStyle = dark ? "rgba(255,255,255,.035)" : "rgba(0,0,0,.035)";
-    context.fill();
-    context.strokeStyle = dark ? "rgba(245,245,245,.25)" : "rgba(20,20,20,.25)";
-    context.lineWidth = 1;
-    context.stroke();
+function resizeCanvas(canvas) {
+  const ratio = Math.min(window.devicePixelRatio || 1, 2);
+  const width = Math.max(1, Math.floor(canvas.clientWidth * ratio));
+  const height = Math.max(1, Math.floor(canvas.clientHeight * ratio));
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
   }
+  return { width, height, ratio };
+}
 
-  const visibleBodies = frame.bodies
-    .filter((body) => body.role !== 0)
-    .map((body) => ({
-      ...body,
-      projected: body.vertices.map(project),
-      depth: cameraPoint(averagePoint(body.vertices))[2],
-    }))
-    .sort((left, right) => left.depth - right.depth);
+function renderCurrentCamera() {
+  if (!wasm || !renderer) return;
+  renderer.render(readFrame(currentFrame()), camera);
+}
 
-  for (const body of visibleBodies) {
-    const projectile = body.role === 1;
-    context.strokeStyle = projectile
-      ? (dark ? "#f5c96a" : "#7b4c00")
-      : (dark ? "rgba(245,245,245,.72)" : "rgba(20,20,20,.66)");
-    context.lineWidth = projectile ? 3 : 1.45;
-    context.beginPath();
-    for (const [left, right] of EDGES) {
-      const from = body.projected[left];
-      const to = body.projected[right];
-      context.moveTo(from[0], from[1]);
-      context.lineTo(to[0], to[1]);
+function beginCameraDrag(event) {
+  if (event.button !== 0 && event.button !== 2) return;
+  event.preventDefault();
+  stage.focus({ preventScroll: true });
+  stage.setPointerCapture(event.pointerId);
+  cameraDrag = {
+    pointerId: event.pointerId,
+    x: event.clientX,
+    y: event.clientY,
+    mode: event.button === 2 || event.shiftKey ? "pan" : "orbit",
+  };
+  stage.classList.add("camera-dragging");
+}
+
+function moveCameraDrag(event) {
+  if (!cameraDrag || cameraDrag.pointerId !== event.pointerId) return;
+  event.preventDefault();
+  const dx = event.clientX - cameraDrag.x;
+  const dy = event.clientY - cameraDrag.y;
+  cameraDrag.x = event.clientX;
+  cameraDrag.y = event.clientY;
+  if (cameraDrag.mode === "orbit") {
+    camera.yaw += dx * 0.35;
+    camera.pitch = Math.max(
+      CAMERA_LIMITS.minPitch,
+      Math.min(CAMERA_LIMITS.maxPitch, camera.pitch + dy * 0.28),
+    );
+  } else {
+    panCamera(dx, dy);
+  }
+  renderCurrentCamera();
+}
+
+function endCameraDrag(event) {
+  if (!cameraDrag || cameraDrag.pointerId !== event.pointerId) return;
+  if (stage.hasPointerCapture(event.pointerId)) stage.releasePointerCapture(event.pointerId);
+  cameraDrag = null;
+  stage.classList.remove("camera-dragging");
+}
+
+function zoomCamera(delta) {
+  camera.radius = Math.max(
+    CAMERA_LIMITS.minRadius,
+    Math.min(CAMERA_LIMITS.maxRadius, camera.radius * Math.exp(delta * 0.0012)),
+  );
+  renderCurrentCamera();
+}
+
+function panCamera(dx, dy) {
+  const yaw = camera.yaw * Math.PI / 180;
+  const right = [Math.cos(yaw), 0, -Math.sin(yaw)];
+  const scale = camera.radius * 0.0019;
+  camera.target[0] -= right[0] * dx * scale;
+  camera.target[2] -= right[2] * dx * scale;
+  camera.target[1] += dy * scale;
+}
+
+function resetCamera() {
+  camera = cloneCamera(DEFAULT_CAMERA);
+  renderCurrentCamera();
+}
+
+function bindCameraControls() {
+  stage.addEventListener("pointerdown", beginCameraDrag);
+  stage.addEventListener("pointermove", moveCameraDrag);
+  stage.addEventListener("pointerup", endCameraDrag);
+  stage.addEventListener("pointercancel", endCameraDrag);
+  stage.addEventListener("contextmenu", (event) => event.preventDefault());
+  stage.addEventListener("wheel", (event) => {
+    event.preventDefault();
+    zoomCamera(event.deltaY);
+  }, { passive: false });
+  stage.addEventListener("dblclick", resetCamera);
+  stage.addEventListener("keydown", (event) => {
+    const orbitStep = event.shiftKey ? 8 : 3;
+    if (event.key === "ArrowLeft") camera.yaw -= orbitStep;
+    else if (event.key === "ArrowRight") camera.yaw += orbitStep;
+    else if (event.key === "ArrowUp") {
+      camera.pitch = Math.max(CAMERA_LIMITS.minPitch, camera.pitch - orbitStep);
+    } else if (event.key === "ArrowDown") {
+      camera.pitch = Math.min(CAMERA_LIMITS.maxPitch, camera.pitch + orbitStep);
+    } else if (event.key === "+" || event.key === "=") {
+      zoomCamera(-90);
+      event.preventDefault();
+      return;
+    } else if (event.key === "-" || event.key === "_") {
+      zoomCamera(90);
+      event.preventDefault();
+      return;
+    } else if (event.key.toLowerCase() === "r") {
+      resetCamera();
+      event.preventDefault();
+      return;
+    } else {
+      return;
     }
-    context.stroke();
+    event.preventDefault();
+    renderCurrentCamera();
+  });
+  resetCameraButton.addEventListener("click", resetCamera);
+}
+
+function flattenFrameVertices(frame) {
+  const values = new Float32Array(frame.bodies.length * 8 * 3);
+  let offset = 0;
+  for (const body of frame.bodies) {
+    for (const vertex of body.vertices) {
+      values[offset] = vertex[0];
+      values[offset + 1] = vertex[1];
+      values[offset + 2] = vertex[2];
+      offset += 3;
+    }
   }
+  return values;
+}
+
+function createRustWgpuRenderer(wgpuRenderer) {
+  return {
+    mode: "rust-wasm-wgpu",
+    render(frame, cameraValue) {
+      const { width, height } = resizeCanvas(webgpuCanvas);
+      const started = performance.now();
+      wgpuRenderer.render(
+        flattenFrameVertices(frame),
+        width,
+        height,
+        cameraValue.yaw,
+        cameraValue.pitch,
+        cameraValue.radius,
+        cameraValue.target[0],
+        cameraValue.target[1],
+        cameraValue.target[2],
+        window.matchMedia("(prefers-color-scheme: dark)").matches,
+      );
+      const elapsed = performance.now() - started;
+      rendererStatus.textContent = `Rust/Wasm wgpu · CPU submit ${elapsed.toFixed(2)} ms`;
+    },
+  };
+}
+
+function createCanvasRenderer() {
+  const context = fallbackCanvas.getContext("2d");
+  if (!context) {
+    throw new Error("The browser cannot create the tower Canvas fallback.");
+  }
+  return {
+    mode: "canvas",
+    render(frame, cameraValue) {
+      const { width, height, ratio } = resizeCanvas(fallbackCanvas);
+      const cssWidth = width / ratio;
+      const cssHeight = height / ratio;
+      const started = performance.now();
+      context.setTransform(ratio, 0, 0, ratio, 0, 0);
+      const dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      context.fillStyle = dark ? "#0b0c0f" : "#f5f5f2";
+      context.fillRect(0, 0, cssWidth, cssHeight);
+      const matrix = cameraViewProjection(cameraValue, cssWidth / cssHeight);
+      for (const body of frame.bodies) {
+        if (body.role === 1) drawProjectileBall(context, body, matrix, cssWidth, cssHeight, dark);
+        else drawWireBox(context, body, matrix, cssWidth, cssHeight, dark);
+      }
+      const elapsed = performance.now() - started;
+      rendererStatus.textContent = `Canvas fallback · CPU draw ${elapsed.toFixed(2)} ms`;
+    },
+  };
+}
+
+function drawWireBox(context, body, matrix, width, height, dark) {
+  const projected = body.vertices.map((point) => projectPoint(point, matrix, width, height));
+  context.beginPath();
+  for (const [left, right] of EDGES) {
+    const from = projected[left];
+    const to = projected[right];
+    if (!from || !to) continue;
+    context.moveTo(from[0], from[1]);
+    context.lineTo(to[0], to[1]);
+  }
+  context.lineWidth = body.role === 0 ? 1 : 1.45;
+  context.strokeStyle = body.role === 0
+    ? (dark ? "rgba(245,245,245,.34)" : "rgba(20,20,20,.34)")
+    : (dark ? "rgba(245,245,245,.78)" : "rgba(20,20,20,.72)");
+  context.stroke();
+}
+
+function drawProjectileBall(context, body, matrix, width, height, dark) {
+  const center = averagePoint(body.vertices);
+  const radius = projectileRadius(body);
+  const projectedCenter = projectPoint(center, matrix, width, height);
+  if (!projectedCenter) return;
+  const projectedAxes = [
+    [center[0] + radius, center[1], center[2]],
+    [center[0], center[1] + radius, center[2]],
+    [center[0], center[1], center[2] + radius],
+  ].map((point) => projectPoint(point, matrix, width, height)).filter(Boolean);
+  const screenRadius = Math.max(
+    1,
+    ...projectedAxes.map((point) => Math.hypot(point[0] - projectedCenter[0], point[1] - projectedCenter[1])),
+  );
+  const gradient = context.createRadialGradient(
+    projectedCenter[0] - screenRadius * 0.28,
+    projectedCenter[1] - screenRadius * 0.32,
+    screenRadius * 0.08,
+    projectedCenter[0],
+    projectedCenter[1],
+    screenRadius,
+  );
+  if (dark) {
+    gradient.addColorStop(0, "#ffe1a0");
+    gradient.addColorStop(0.55, "#c98320");
+    gradient.addColorStop(1, "#593000");
+  } else {
+    gradient.addColorStop(0, "#f3c66f");
+    gradient.addColorStop(0.55, "#9b5b09");
+    gradient.addColorStop(1, "#3d2100");
+  }
+  context.beginPath();
+  context.arc(projectedCenter[0], projectedCenter[1], screenRadius, 0, Math.PI * 2);
+  context.fillStyle = gradient;
+  context.fill();
+}
+
+function projectPoint(point, matrix, width, height) {
+  const [x, y, z] = point;
+  const clipX = matrix[0] * x + matrix[4] * y + matrix[8] * z + matrix[12];
+  const clipY = matrix[1] * x + matrix[5] * y + matrix[9] * z + matrix[13];
+  const clipW = matrix[3] * x + matrix[7] * y + matrix[11] * z + matrix[15];
+  if (clipW <= 0.0001) return null;
+  const ndcX = clipX / clipW;
+  const ndcY = clipY / clipW;
+  return [(ndcX * 0.5 + 0.5) * width, (0.5 - ndcY * 0.5) * height];
+}
+
+function cameraViewProjection(cameraValue, aspect) {
+  const yaw = cameraValue.yaw * Math.PI / 180;
+  const pitch = cameraValue.pitch * Math.PI / 180;
+  const horizontal = cameraValue.radius * Math.cos(pitch);
+  const eye = [
+    cameraValue.target[0] + horizontal * Math.sin(yaw),
+    cameraValue.target[1] + cameraValue.radius * Math.sin(pitch),
+    cameraValue.target[2] + horizontal * Math.cos(yaw),
+  ];
+  return multiplyMat4(
+    perspective(46 * Math.PI / 180, aspect, 0.1, 180),
+    lookAt(eye, cameraValue.target, [0, 1, 0]),
+  );
+}
+
+function lookAt(eye, target, up) {
+  const z = normalize([eye[0] - target[0], eye[1] - target[1], eye[2] - target[2]]);
+  const x = normalize(cross(up, z));
+  const y = cross(z, x);
+  return new Float32Array([
+    x[0], y[0], z[0], 0,
+    x[1], y[1], z[1], 0,
+    x[2], y[2], z[2], 0,
+    -dot(x, eye), -dot(y, eye), -dot(z, eye), 1,
+  ]);
+}
+
+function perspective(fov, aspect, near, far) {
+  const f = 1 / Math.tan(fov / 2);
+  return new Float32Array([
+    f / aspect, 0, 0, 0,
+    0, f, 0, 0,
+    0, 0, far / (near - far), -1,
+    0, 0, (near * far) / (near - far), 0,
+  ]);
+}
+
+function multiplyMat4(left, right) {
+  const output = new Float32Array(16);
+  for (let column = 0; column < 4; column += 1) {
+    for (let row = 0; row < 4; row += 1) {
+      let value = 0;
+      for (let index = 0; index < 4; index += 1) {
+        value += left[index * 4 + row] * right[column * 4 + index];
+      }
+      output[column * 4 + row] = value;
+    }
+  }
+  return output;
+}
+
+function normalize(vector) {
+  const length = Math.hypot(...vector) || 1;
+  return vector.map((value) => value / length);
+}
+
+function cross(left, right) {
+  return [
+    left[1] * right[2] - left[2] * right[1],
+    left[2] * right[0] - left[0] * right[2],
+    left[0] * right[1] - left[1] * right[0],
+  ];
+}
+
+function dot(left, right) {
+  return left[0] * right[0] + left[1] * right[1] + left[2] * right[2];
 }
 
 function projectileCenter(frame) {
@@ -204,16 +466,16 @@ function updateStatus(frame) {
   const event = frame.impulsiveContacts > 0
     ? `${frame.impulsiveContacts} impulsive ${frame.impulsiveContacts === 1 ? "contact" : "contacts"}`
     : `${frame.contacts} resting/touching contacts`;
-  status.textContent = `Rust frame ${frame.step}/60 s · projectile x ${projectile[0].toFixed(1)}, y ${projectile[1].toFixed(1)} · ${frame.spinningBodies} dynamic bodies spinning · ${event}. Every displayed cuboid edge comes from Rust-exported collision vertices.`;
+  status.textContent = `Rust frame ${frame.step}/60 s · ball x ${projectile[0].toFixed(1)}, y ${projectile[1].toFixed(1)} · ${frame.spinningBodies} dynamic bodies spinning · ${event}. The renderer draws the projectile as a sphere from its Rust-owned center and proxy radius; collision response is still the current Rust OBB proxy in this slice.`;
 }
 
 function setFrame(step) {
   const bounded = clampFrame(step);
   frameInput.value = String(bounded);
   frameLabel.textContent = String(bounded);
-  if (!wasm) return;
+  if (!wasm || !renderer) return;
   const frame = readFrame(bounded);
-  render(frame);
+  renderer.render(frame, camera);
   updateStatus(frame);
 }
 
@@ -255,7 +517,7 @@ function toggleRun() {
   animationHandle = requestAnimationFrame(animateRun);
 }
 
-async function loadWasm() {
+async function loadPhysicsWasm() {
   const response = await fetch("../pkg/ecs_web_demo.wasm");
   if (!response.ok) {
     throw new Error(`Wasm request failed with HTTP ${response.status}`);
@@ -280,6 +542,28 @@ async function loadWasm() {
   return instance.exports;
 }
 
+async function createRenderer() {
+  if ("gpu" in navigator) {
+    try {
+      resizeCanvas(webgpuCanvas);
+      await initTowerRenderer();
+      const wgpuRenderer = await create_tower_renderer(webgpuCanvas);
+      fallbackCanvas.hidden = true;
+      fallbackCanvas.style.display = "none";
+      webgpuCanvas.hidden = false;
+      webgpuCanvas.style.display = "block";
+      return createRustWgpuRenderer(wgpuRenderer);
+    } catch (error) {
+      rendererStatus.textContent = `Rust/Wasm wgpu unavailable; Canvas fallback (${error instanceof Error ? error.message : String(error)})`;
+    }
+  }
+  webgpuCanvas.hidden = true;
+  webgpuCanvas.style.display = "none";
+  fallbackCanvas.hidden = false;
+  fallbackCanvas.style.display = "block";
+  return createCanvasRenderer();
+}
+
 frameInput.addEventListener("input", () => {
   stopRun();
   setFrame(Number(frameInput.value));
@@ -293,20 +577,21 @@ stepButton.addEventListener("click", () => {
   setFrame(currentFrame() + 1);
 });
 runButton.addEventListener("click", toggleRun);
-window.addEventListener("resize", () => {
-  if (wasm) setFrame(currentFrame());
-});
+window.addEventListener("resize", renderCurrentCamera);
+bindCameraControls();
 
 try {
-  wasm = await loadWasm();
+  wasm = await loadPhysicsWasm();
   maxStep = wasm.physics_tower_demo_max_steps();
   bodyCount = wasm.physics_tower_demo_body_count();
   roles = Array.from({ length: bodyCount }, (_, index) => wasm.physics_tower_demo_body_role(index));
   frameInput.max = String(maxStep);
+  renderer = await createRenderer();
   setFrame(0);
 } catch (error) {
   status.textContent = `Trebuchet tower demo unavailable: ${error instanceof Error ? error.message : String(error)}`;
-  for (const control of [frameInput, resetButton, stepButton, runButton]) {
+  rendererStatus.textContent = "Renderer unavailable";
+  for (const control of [frameInput, resetButton, stepButton, runButton, resetCameraButton]) {
     control.disabled = true;
   }
 }
