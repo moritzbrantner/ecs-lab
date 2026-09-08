@@ -2,9 +2,10 @@ use std::sync::{Mutex, OnceLock};
 
 use ecs_physics::{BodyKind, PhysicsMaterial};
 use ecs_physics_3d::{
-    ANGULAR_VELOCITY_SCALE, AngularState3d, AngularVelocity3d, BouncingRoom3dScenario,
-    ORIENTATION_SCALE, Orientation3d, PhysicsBody3d, PhysicsConfig3d, RigidBox3d, RigidBoxState3d,
-    RigidBoxWorldConfig3d, oriented_box_vertices, step_3d, step_rigid_box_world,
+    ANGULAR_VELOCITY_SCALE, AngularState3d, AngularSubstepPolicy3d, AngularVelocity3d,
+    BouncingRoom3dScenario, ORIENTATION_SCALE, Orientation3d, PhysicsBody3d, PhysicsConfig3d,
+    RigidBox3d, RigidBoxState3d, RigidBoxWorldConfig3d, RotatingContactSearchConfig3d,
+    oriented_box_vertices, step_3d, step_rigid_box_world_repeated_rotating,
 };
 use ecs_reference::ReferenceWorld;
 use ecs_workload::{EntityId, Operation, Position, Velocity, Workload};
@@ -106,7 +107,13 @@ impl PhysicsDemoState {
         let target = usize::try_from(steps).ok()?;
         while self.frames.len() <= target {
             let previous = &self.frames.last()?.boxes;
-            let next = step_rigid_box_world(previous, self.config).ok()?;
+            let next = step_rigid_box_world_repeated_rotating(
+                previous,
+                self.config,
+                RotatingContactSearchConfig3d::default(),
+                AngularSubstepPolicy3d::default(),
+            )
+            .ok()?;
             self.frames
                 .push(build_demo_frame(next.boxes, self.spatial_scale)?);
         }
