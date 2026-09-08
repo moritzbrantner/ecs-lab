@@ -14,7 +14,11 @@ The tower-destruction scene now has an explicit renderer experiment rather than 
 
 The trebuchet projectile is presented as a shaded sphere. Its center and radius are derived from the Rust-owned projectile frame vertices, so browser code does not invent a trajectory or scale.
 
-The current tower world solver is still `RigidBox3d`-only. The sphere is therefore a presentation shape over the existing equal-extents OBB collision proxy. Do not describe this slice as sphere↔OBB collision response. A true physical ball requires a reusable mixed sphere↔oriented-box response path in `physics-3d`, not a tower-only special case.
+The current tower world solver is still `RigidBox3d`-only. The sphere is therefore a presentation shape over the existing equal-extents OBB collision proxy. Do not describe the tower as using sphere <-> OBB collision response yet.
+
+`ecs-physics-3d` now has a reusable deterministic fixed-point `sphere_obb_contact` geometry query. It provides the closest oriented-box surface point, a stable world-space contact direction, squared-distance evidence, and deterministic nearest-face selection for an interior sphere center. That is deliberately only the first mixed-shape slice: it does not apply impulses, stabilize penetration, integrate a rigid sphere, or provide continuous sphere <-> OBB collision handling.
+
+The next tower physics slice is therefore mixed-shape normal response/stabilization, followed by replacing the equal-extents projectile proxy with a solver-owned rigid sphere. See `tower-physics-roadmap.md` for the bounded sequence.
 
 ## Camera
 
@@ -33,6 +37,6 @@ Camera changes affect presentation only. They never step or mutate physics.
 
 `moonlight.eval.toml` includes the Pages/Wasm build so baseline and candidate behavior evaluation covers the new renderer's compilation and packaging seam. The existing runtime-profiler PR canary still compares the deterministic ECS benchmark before and after this change, which is the appropriate guard against accidentally moving physics work into the renderer or slowing the authoritative workload.
 
-The tower page reports CPU-side draw/submission duration using `performance.now()` for the active renderer. That number includes JavaScript↔Wasm transfer and CPU submission work; it is not GPU-completion time and must not be used as a GPU throughput claim.
+The tower page reports CPU-side draw/submission duration using `performance.now()` for the active renderer. That number includes JavaScript<->Wasm transfer and CPU submission work; it is not GPU-completion time and must not be used as a GPU throughput claim.
 
 `runtime-profiler` currently has a process-command collector rather than a browser/WebGPU frame collector, so this experiment deliberately does not produce a synthetic renderer-retention score. A later profiler slice can add a browser collector with reproducible adapter metadata and, where supported, GPU timestamp-query evidence.
