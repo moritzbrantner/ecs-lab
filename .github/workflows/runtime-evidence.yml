@@ -100,6 +100,13 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Prepare renderer build tooling
+        run: |
+          rustup target add wasm32-unknown-unknown
+          if ! command -v wasm-bindgen >/dev/null 2>&1 || ! wasm-bindgen --version | grep -q '0.2.127'; then
+            cargo install wasm-bindgen-cli --version 0.2.127 --locked
+          fi
+
       - name: Run Moonlight correctness evaluation
         working-directory: candidate
         run: |
@@ -130,4 +137,5 @@ jobs:
             ${{ runner.temp }}/candidate-ecs
             ${{ runner.temp }}/runtime-ecs.json
             ${{ runner.temp }}/moonlight.md
+            candidate/.moonlight/runtime-evidence.jsonl
           if-no-files-found: warn
