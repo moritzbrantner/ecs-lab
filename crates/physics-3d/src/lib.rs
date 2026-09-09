@@ -24,6 +24,7 @@ mod scenario;
 #[allow(dead_code)]
 mod solver;
 mod sphere_obb;
+mod sphere_obb_response;
 mod swept_broad_phase;
 mod types;
 
@@ -102,6 +103,10 @@ pub use sampled_rotating_frame::{
 };
 pub use scenario::{BouncingRoom3dScenario, BroadPhaseBody3d, BroadPhaseFrame3d, ScenarioError3d};
 pub use sphere_obb::{Sphere3d, SphereObbContact3d, SphereObbError3d, sphere_obb_contact};
+pub use sphere_obb_response::{
+    RigidSphereState3d, SphereBody3d, SphereObbResponseContact3d, SphereObbResponseError3d,
+    SphereObbStep3d, resolve_sphere_obb_contact, stabilize_sphere_obb_contact,
+};
 pub use types::{
     ContactNormal3d, PhysicsBody3d, PhysicsConfig3d, PhysicsContact3d, PhysicsError3d,
     PhysicsStep3d, PhysicsStep3dStats,
