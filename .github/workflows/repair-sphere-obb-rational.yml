@@ -46,7 +46,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git rm .github/workflows/repair-sphere-obb-rational.yml
-          git rm .github/scripts/repair_sphere_obb_rational.py
+          git rm -f .github/scripts/repair_sphere_obb_rational.py
           git rm .github/scripts/prepare_sphere_obb_repair.py
           git add crates/physics-3d/src/sphere_obb_response.rs
           git diff --cached --check
