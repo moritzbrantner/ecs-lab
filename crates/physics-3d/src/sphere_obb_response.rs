@@ -5,8 +5,8 @@ use ecs_workload::{EntityId, Position, Velocity};
 
 use crate::{
     ANGULAR_VELOCITY_SCALE, AngularError3d, AngularVelocity3d, ORIENTATION_SCALE, Orientation3d,
-    OrientedBox3d, PhysicsBody3d, RigidBoxState3d, Sphere3d, SphereObbContact3d,
-    SphereObbError3d, box_inertia, sphere_obb_contact,
+    OrientedBox3d, PhysicsBody3d, RigidBoxState3d, Sphere3d, SphereObbContact3d, SphereObbError3d,
+    box_inertia, sphere_obb_contact,
 };
 
 const RESPONSE_SCALE: i128 = 1_i128 << 50;
@@ -136,7 +136,9 @@ impl fmt::Display for SphereObbResponseError3d {
                 entity.0
             ),
             Self::Geometry(error) => write!(formatter, "sphere-OBB geometry failed: {error}"),
-            Self::Angular(error) => write!(formatter, "sphere-OBB angular response failed: {error}"),
+            Self::Angular(error) => {
+                write!(formatter, "sphere-OBB angular response failed: {error}")
+            }
             Self::ArithmeticOverflow => {
                 write!(formatter, "sphere-OBB response arithmetic overflowed")
             }
@@ -303,9 +305,7 @@ fn validate_pair(
         return Err(SphereObbResponseError3d::SameEntity(sphere_body.entity));
     }
     if sphere_body.radius <= 0 {
-        return Err(SphereObbResponseError3d::InvalidRadius(
-            sphere_body.entity,
-        ));
+        return Err(SphereObbResponseError3d::InvalidRadius(sphere_body.entity));
     }
     if box_body.half_extents.iter().any(|extent| *extent <= 0) {
         return Err(SphereObbResponseError3d::InvalidHalfExtents(
@@ -334,7 +334,8 @@ fn validate_pair(
 }
 
 const fn is_penetrating(contact: SphereObbContact3d) -> bool {
-    contact.center_inside || contact.distance_squared_numerator < contact.threshold_squared_numerator
+    contact.center_inside
+        || contact.distance_squared_numerator < contact.threshold_squared_numerator
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -558,12 +559,9 @@ fn correction_for_projection(
     }
 
     Ok([
-        i64::try_from(correction[0])
-            .map_err(|_| SphereObbResponseError3d::ArithmeticOverflow)?,
-        i64::try_from(correction[1])
-            .map_err(|_| SphereObbResponseError3d::ArithmeticOverflow)?,
-        i64::try_from(correction[2])
-            .map_err(|_| SphereObbResponseError3d::ArithmeticOverflow)?,
+        i64::try_from(correction[0]).map_err(|_| SphereObbResponseError3d::ArithmeticOverflow)?,
+        i64::try_from(correction[1]).map_err(|_| SphereObbResponseError3d::ArithmeticOverflow)?,
+        i64::try_from(correction[2]).map_err(|_| SphereObbResponseError3d::ArithmeticOverflow)?,
     ])
 }
 
@@ -584,13 +582,9 @@ fn project_pair(
             oriented_box.center = offset_position(oriented_box.center, negate_vector(correction)?)?;
             Ok(())
         }
-        (BodyKind::Dynamic, BodyKind::Dynamic) => project_dynamic_pair(
-            sphere,
-            sphere_body,
-            oriented_box,
-            box_body,
-            correction,
-        ),
+        (BodyKind::Dynamic, BodyKind::Dynamic) => {
+            project_dynamic_pair(sphere, sphere_body, oriented_box, box_body, correction)
+        }
     }
 }
 
@@ -613,11 +607,9 @@ fn project_dynamic_pair(
                 i128::from(correction[axis]),
                 i128::from(box_body.mass_units),
             )?;
-            sphere_move[axis] = i64::try_from(div_round_nearest(
-                sphere_weighted,
-                i128::from(total_mass),
-            )?)
-            .map_err(|_| SphereObbResponseError3d::ArithmeticOverflow)?;
+            sphere_move[axis] =
+                i64::try_from(div_round_nearest(sphere_weighted, i128::from(total_mass))?)
+                    .map_err(|_| SphereObbResponseError3d::ArithmeticOverflow)?;
             box_move[axis] = sphere_move[axis]
                 .checked_sub(correction[axis])
                 .ok_or(SphereObbResponseError3d::ArithmeticOverflow)?;
@@ -626,11 +618,9 @@ fn project_dynamic_pair(
                 -i128::from(correction[axis]),
                 i128::from(sphere_body.mass_units),
             )?;
-            box_move[axis] = i64::try_from(div_round_nearest(
-                box_weighted,
-                i128::from(total_mass),
-            )?)
-            .map_err(|_| SphereObbResponseError3d::ArithmeticOverflow)?;
+            box_move[axis] =
+                i64::try_from(div_round_nearest(box_weighted, i128::from(total_mass))?)
+                    .map_err(|_| SphereObbResponseError3d::ArithmeticOverflow)?;
             sphere_move[axis] = correction[axis]
                 .checked_add(box_move[axis])
                 .ok_or(SphereObbResponseError3d::ArithmeticOverflow)?;
@@ -642,17 +632,14 @@ fn project_dynamic_pair(
     Ok(())
 }
 
-fn floor_sqrt_ratio(
-    numerator: i128,
-    denominator: i128,
-) -> Result<i128, SphereObbResponseError3d> {
+fn floor_sqrt_ratio(numerator: i128, denominator: i128) -> Result<i128, SphereObbResponseError3d> {
     if numerator < 0 || denominator <= 0 {
         return Err(SphereObbResponseError3d::ArithmeticOverflow);
     }
-    let numerator = u128::try_from(numerator)
-        .map_err(|_| SphereObbResponseError3d::ArithmeticOverflow)?;
-    let denominator = u128::try_from(denominator)
-        .map_err(|_| SphereObbResponseError3d::ArithmeticOverflow)?;
+    let numerator =
+        u128::try_from(numerator).map_err(|_| SphereObbResponseError3d::ArithmeticOverflow)?;
+    let denominator =
+        u128::try_from(denominator).map_err(|_| SphereObbResponseError3d::ArithmeticOverflow)?;
     let quotient = numerator / denominator;
     i128::try_from(integer_sqrt_u128(quotient))
         .map_err(|_| SphereObbResponseError3d::ArithmeticOverflow)
@@ -742,10 +729,7 @@ fn vector_length_squared(vector: [i128; 3]) -> Result<u128, SphereObbResponseErr
     })
 }
 
-fn position_delta(
-    center: Position,
-    point: Position,
-) -> Result<[i64; 3], SphereObbResponseError3d> {
+fn position_delta(center: Position, point: Position) -> Result<[i64; 3], SphereObbResponseError3d> {
     Ok([
         point
             .x
@@ -818,10 +802,7 @@ fn add_linear_impulse_axis(
     i32::try_from(next).map_err(|_| SphereObbResponseError3d::ArithmeticOverflow)
 }
 
-fn add_angular_axis(
-    current: i32,
-    delta: i128,
-) -> Result<i32, SphereObbResponseError3d> {
+fn add_angular_axis(current: i32, delta: i128) -> Result<i32, SphereObbResponseError3d> {
     let next = checked_add(i128::from(current), delta)?;
     i32::try_from(next).map_err(|_| SphereObbResponseError3d::ArithmeticOverflow)
 }
@@ -838,10 +819,7 @@ fn inverse_inertia_scaled(
     Ok(checked_mul(RESPONSE_SCALE, i128::from(denominator))? / principal)
 }
 
-fn cross_i64_i128(
-    left: [i64; 3],
-    right: [i128; 3],
-) -> Result<[i128; 3], SphereObbResponseError3d> {
+fn cross_i64_i128(left: [i64; 3], right: [i128; 3]) -> Result<[i128; 3], SphereObbResponseError3d> {
     let left = left.map(i128::from);
     Ok([
         cross_component(left[1], right[2], left[2], right[1])?,
@@ -859,10 +837,7 @@ fn cross_component(
     checked_sub(checked_mul(left_a, right_a)?, checked_mul(left_b, right_b)?)
 }
 
-fn scale_axis(
-    axis: [i128; 3],
-    scale: i128,
-) -> Result<[i128; 3], SphereObbResponseError3d> {
+fn scale_axis(axis: [i128; 3], scale: i128) -> Result<[i128; 3], SphereObbResponseError3d> {
     Ok([
         checked_mul(axis[0], scale)?,
         checked_mul(axis[1], scale)?,
@@ -892,9 +867,7 @@ fn rotate_forward(
     rotate_with_matrix(rotation_matrix(orientation.normalized()?)?, vector)
 }
 
-fn rotation_matrix(
-    orientation: Orientation3d,
-) -> Result<[[i128; 3]; 3], SphereObbResponseError3d> {
+fn rotation_matrix(orientation: Orientation3d) -> Result<[[i128; 3]; 3], SphereObbResponseError3d> {
     let x = i128::from(orientation.x);
     let y = i128::from(orientation.y);
     let z = i128::from(orientation.z);
@@ -948,10 +921,7 @@ fn rotate_with_matrix(
     Ok(output)
 }
 
-fn scaled_twice(
-    value: i128,
-    scale: i128,
-) -> Result<i128, SphereObbResponseError3d> {
+fn scaled_twice(value: i128, scale: i128) -> Result<i128, SphereObbResponseError3d> {
     div_round_nearest(checked_mul(value, 2)?, scale)
 }
 
@@ -976,10 +946,7 @@ fn checked_sub(left: i128, right: i128) -> Result<i128, SphereObbResponseError3d
         .ok_or(SphereObbResponseError3d::ArithmeticOverflow)
 }
 
-fn checked_dot(
-    left: [i128; 3],
-    right: [i128; 3],
-) -> Result<i128, SphereObbResponseError3d> {
+fn checked_dot(left: [i128; 3], right: [i128; 3]) -> Result<i128, SphereObbResponseError3d> {
     checked_add(
         checked_add(
             checked_mul(left[0], right[0])?,
@@ -989,10 +956,7 @@ fn checked_dot(
     )
 }
 
-fn div_round_nearest(
-    numerator: i128,
-    denominator: i128,
-) -> Result<i128, SphereObbResponseError3d> {
+fn div_round_nearest(numerator: i128, denominator: i128) -> Result<i128, SphereObbResponseError3d> {
     if denominator <= 0 {
         return Err(SphereObbResponseError3d::ArithmeticOverflow);
     }
@@ -1006,10 +970,7 @@ fn div_round_nearest(
     Ok(adjusted / denominator)
 }
 
-fn div_ceil_positive(
-    numerator: i128,
-    denominator: i128,
-) -> Result<i128, SphereObbResponseError3d> {
+fn div_ceil_positive(numerator: i128, denominator: i128) -> Result<i128, SphereObbResponseError3d> {
     if numerator < 0 || denominator <= 0 {
         return Err(SphereObbResponseError3d::ArithmeticOverflow);
     }
@@ -1039,8 +1000,7 @@ mod tests {
     }
 
     fn dynamic_sphere(entity: u32) -> SphereBody3d {
-        SphereBody3d::dynamic(EntityId(entity), 2)
-            .with_material(PhysicsMaterial::new(0, 0))
+        SphereBody3d::dynamic(EntityId(entity), 2).with_material(PhysicsMaterial::new(0, 0))
     }
 
     fn dynamic_box(entity: u32) -> PhysicsBody3d {
@@ -1070,13 +1030,9 @@ mod tests {
     fn separated_pair_is_idempotently_unchanged() {
         let sphere = sphere_state(Position::new3(20, 0, 0), Velocity::new3(-20, 0, 0));
         let oriented_box = box_state(Position::new3(0, 0, 0), Velocity::new3(0, 0, 0));
-        let step = stabilize_sphere_obb_contact(
-            sphere,
-            dynamic_sphere(1),
-            oriented_box,
-            dynamic_box(2),
-        )
-        .expect("valid separated pair");
+        let step =
+            stabilize_sphere_obb_contact(sphere, dynamic_sphere(1), oriented_box, dynamic_box(2))
+                .expect("valid separated pair");
 
         assert_eq!(step.contact, None);
         assert_eq!(step.sphere, sphere);
@@ -1087,13 +1043,9 @@ mod tests {
     fn centered_impact_changes_linear_velocity_without_spin() {
         let sphere = sphere_state(Position::new3(11, 0, 0), Velocity::new3(-60, 0, 0));
         let oriented_box = box_state(Position::new3(0, 0, 0), Velocity::new3(0, 0, 0));
-        let step = resolve_sphere_obb_contact(
-            sphere,
-            dynamic_sphere(1),
-            oriented_box,
-            dynamic_box(2),
-        )
-        .expect("valid centered impact");
+        let step =
+            resolve_sphere_obb_contact(sphere, dynamic_sphere(1), oriented_box, dynamic_box(2))
+                .expect("valid centered impact");
         let contact = step.contact.expect("overlapping pair should contact");
 
         assert_eq!(contact.geometry.normal, [1, 0, 0]);
@@ -1111,13 +1063,9 @@ mod tests {
     fn glancing_sphere_impact_generates_box_spin() {
         let sphere = sphere_state(Position::new3(11, 5, 0), Velocity::new3(-90, 0, 0));
         let oriented_box = box_state(Position::new3(0, 0, 0), Velocity::new3(0, 0, 0));
-        let step = resolve_sphere_obb_contact(
-            sphere,
-            dynamic_sphere(1),
-            oriented_box,
-            dynamic_box(2),
-        )
-        .expect("valid glancing impact");
+        let step =
+            resolve_sphere_obb_contact(sphere, dynamic_sphere(1), oriented_box, dynamic_box(2))
+                .expect("valid glancing impact");
 
         assert!(
             step.contact
@@ -1134,13 +1082,8 @@ mod tests {
         let sphere = sphere_state(Position::new3(11, 0, 0), Velocity::new3(-60, 0, 0));
         let oriented_box = box_state(Position::new3(0, 0, 0), Velocity::new3(0, 0, 0));
         let box_body = PhysicsBody3d::fixed(EntityId(2), [10, 10, 10]);
-        let step = stabilize_sphere_obb_contact(
-            sphere,
-            dynamic_sphere(1),
-            oriented_box,
-            box_body,
-        )
-        .expect("valid fixed-box contact");
+        let step = stabilize_sphere_obb_contact(sphere, dynamic_sphere(1), oriented_box, box_body)
+            .expect("valid fixed-box contact");
 
         assert_eq!(step.oriented_box, oriented_box);
         assert!(!remaining_penetration(
@@ -1194,20 +1137,12 @@ mod tests {
         let sphere = sphere_state(Position::new3(11, 0, 0), Velocity::new3(0, 0, 0));
         let oriented_box = box_state(Position::new3(0, 0, 0), Velocity::new3(0, 0, 0));
 
-        let sphere_first = stabilize_sphere_obb_contact(
-            sphere,
-            dynamic_sphere(1),
-            oriented_box,
-            dynamic_box(2),
-        )
-        .expect("valid canonical tie");
-        let box_first = stabilize_sphere_obb_contact(
-            sphere,
-            dynamic_sphere(2),
-            oriented_box,
-            dynamic_box(1),
-        )
-        .expect("valid reversed ids");
+        let sphere_first =
+            stabilize_sphere_obb_contact(sphere, dynamic_sphere(1), oriented_box, dynamic_box(2))
+                .expect("valid canonical tie");
+        let box_first =
+            stabilize_sphere_obb_contact(sphere, dynamic_sphere(2), oriented_box, dynamic_box(1))
+                .expect("valid reversed ids");
 
         assert_eq!(sphere_first.sphere.center.x, 12);
         assert_eq!(sphere_first.oriented_box.center.x, 0);
@@ -1236,12 +1171,7 @@ mod tests {
         let oriented_box = box_state(Position::new3(0, 0, 0), Velocity::new3(0, 0, 0));
 
         assert_eq!(
-            stabilize_sphere_obb_contact(
-                sphere,
-                dynamic_sphere(1),
-                oriented_box,
-                dynamic_box(1),
-            ),
+            stabilize_sphere_obb_contact(sphere, dynamic_sphere(1), oriented_box, dynamic_box(1),),
             Err(SphereObbResponseError3d::SameEntity(EntityId(1)))
         );
         assert_eq!(
