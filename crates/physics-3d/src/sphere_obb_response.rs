@@ -12,6 +12,18 @@ use crate::{
 const RESPONSE_SCALE: i128 = 1_i128 << 50;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct RationalVector3 {
+    numerator: [i128; 3],
+    denominator: i128,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct RationalScalar {
+    numerator: i128,
+    denominator: i128,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SphereBody3d {
     pub entity: EntityId,
     pub radius: i32,
@@ -201,27 +213,41 @@ pub fn resolve_sphere_obb_contact(
     }
 
     let normal_length_squared = vector_length_squared(geometry.normal)?;
-    let box_offset = position_delta(box_state.center, geometry.point)?;
+    let box_offset = rational_position_delta(
+        box_state.center,
+        geometry.point_numerator,
+        geometry.point_denominator,
+    )?;
     let box_velocity = box_contact_velocity(box_state, box_offset)?;
-    let relative_velocity = [
+    let relative_velocity_numerator = [
         checked_sub(
-            i128::from(sphere_state.linear_velocity.x),
-            i128::from(box_velocity[0]),
+            checked_mul(
+                i128::from(sphere_state.linear_velocity.x),
+                box_velocity.denominator,
+            )?,
+            box_velocity.numerator[0],
         )?,
         checked_sub(
-            i128::from(sphere_state.linear_velocity.y),
-            i128::from(box_velocity[1]),
+            checked_mul(
+                i128::from(sphere_state.linear_velocity.y),
+                box_velocity.denominator,
+            )?,
+            box_velocity.numerator[1],
         )?,
         checked_sub(
-            i128::from(sphere_state.linear_velocity.z),
-            i128::from(box_velocity[2]),
+            checked_mul(
+                i128::from(sphere_state.linear_velocity.z),
+                box_velocity.denominator,
+            )?,
+            box_velocity.numerator[2],
         )?,
     ];
-    let normal_velocity = checked_dot(relative_velocity, geometry.normal)?;
+    let normal_velocity_numerator = checked_dot(relative_velocity_numerator, geometry.normal)?;
+    let normal_velocity_denominator = box_velocity.denominator;
 
     let mut sphere = sphere_state;
     let mut oriented_box = box_state;
-    let normal_impulse_units = if normal_velocity < 0
+    let normal_impulse_units = if normal_velocity_numerator < 0
         && (sphere_body.kind == BodyKind::Dynamic || box_body.kind == BodyKind::Dynamic)
     {
         let impulse = normal_impulse(
@@ -231,7 +257,8 @@ pub fn resolve_sphere_obb_contact(
             box_offset,
             geometry.normal,
             normal_length_squared,
-            normal_velocity,
+            normal_velocity_numerator,
+            normal_velocity_denominator,
         )?;
         if impulse > 0 {
             let sphere_impulse = scale_axis(geometry.normal, i128::from(impulse))?;
@@ -343,22 +370,30 @@ fn normal_impulse(
     sphere_body: SphereBody3d,
     box_body: PhysicsBody3d,
     box_orientation: Orientation3d,
-    box_offset: [i64; 3],
+    box_offset: RationalVector3,
     axis: [i128; 3],
     axis_length_squared: u128,
-    normal_velocity: i128,
+    normal_velocity_numerator: i128,
+    normal_velocity_denominator: i128,
 ) -> Result<i64, SphereObbResponseError3d> {
-    let effective_inverse_mass = checked_add(
-        sphere_effective_inverse_mass_scaled(sphere_body, axis_length_squared)?,
-        box_effective_inverse_mass_scaled(
-            box_body,
-            box_orientation,
-            box_offset,
-            axis,
-            axis_length_squared,
-        )?,
+    if normal_velocity_denominator <= 0 {
+        return Err(SphereObbResponseError3d::ArithmeticOverflow);
+    }
+
+    let sphere_inverse_mass =
+        sphere_effective_inverse_mass_scaled(sphere_body, axis_length_squared)?;
+    let box_inverse_mass = box_effective_inverse_mass_scaled(
+        box_body,
+        box_orientation,
+        box_offset,
+        axis,
+        axis_length_squared,
     )?;
-    if effective_inverse_mass <= 0 {
+    let effective_inverse_mass_numerator = checked_add(
+        checked_mul(sphere_inverse_mass, box_inverse_mass.denominator)?,
+        box_inverse_mass.numerator,
+    )?;
+    if effective_inverse_mass_numerator <= 0 {
         return Ok(0);
     }
 
@@ -366,12 +401,21 @@ fn normal_impulse(
         .material
         .restitution_milli
         .max(box_body.material.restitution_milli);
-    let closing_speed = normal_velocity
+    let closing_speed_numerator = normal_velocity_numerator
         .checked_neg()
         .ok_or(SphereObbResponseError3d::ArithmeticOverflow)?;
     let bounce_scale = checked_add(i128::from(MATERIAL_SCALE), i128::from(restitution))?;
-    let numerator = checked_mul(checked_mul(closing_speed, bounce_scale)?, RESPONSE_SCALE)?;
-    let denominator = checked_mul(i128::from(MATERIAL_SCALE), effective_inverse_mass)?;
+    let numerator = checked_mul(
+        checked_mul(
+            checked_mul(closing_speed_numerator, bounce_scale)?,
+            RESPONSE_SCALE,
+        )?,
+        box_inverse_mass.denominator,
+    )?;
+    let denominator = checked_mul(
+        checked_mul(normal_velocity_denominator, i128::from(MATERIAL_SCALE))?,
+        effective_inverse_mass_numerator,
+    )?;
     i64::try_from(div_round_nearest(numerator, denominator)?)
         .map_err(|_| SphereObbResponseError3d::ArithmeticOverflow)
 }
@@ -391,30 +435,44 @@ fn sphere_effective_inverse_mass_scaled(
 fn box_effective_inverse_mass_scaled(
     body: PhysicsBody3d,
     orientation: Orientation3d,
-    contact_offset: [i64; 3],
+    contact_offset: RationalVector3,
     axis: [i128; 3],
     axis_length_squared: u128,
-) -> Result<i128, SphereObbResponseError3d> {
+) -> Result<RationalScalar, SphereObbResponseError3d> {
     if body.kind == BodyKind::Fixed {
-        return Ok(0);
+        return Ok(RationalScalar {
+            numerator: 0,
+            denominator: 1,
+        });
+    }
+    if contact_offset.denominator <= 0 {
+        return Err(SphereObbResponseError3d::ArithmeticOverflow);
     }
 
     let length_squared = i128::try_from(axis_length_squared)
         .map_err(|_| SphereObbResponseError3d::ArithmeticOverflow)?;
     let translational = checked_mul(RESPONSE_SCALE, length_squared)? / i128::from(body.mass_units);
-    let angular_impulse = cross_i64_i128(contact_offset, axis)?;
-    let local = rotate_inverse(orientation, angular_impulse)?;
+    let angular_impulse_numerator = cross_i128(contact_offset.numerator, axis)?;
+    let local_numerator = rotate_inverse(orientation, angular_impulse_numerator)?;
     let inertia = box_inertia(body)?;
-    let mut rotational = 0_i128;
-    for (index, component) in local.into_iter().enumerate() {
+    let mut rotational_numerator = 0_i128;
+    for (index, component) in local_numerator.into_iter().enumerate() {
         let inverse_inertia =
             inverse_inertia_scaled(inertia.principal_numerators[index], inertia.denominator)?;
-        rotational = checked_add(
-            rotational,
+        rotational_numerator = checked_add(
+            rotational_numerator,
             checked_mul(checked_mul(component, component)?, inverse_inertia)?,
         )?;
     }
-    checked_add(translational, rotational)
+    let denominator = checked_mul(contact_offset.denominator, contact_offset.denominator)?;
+    let numerator = checked_add(
+        checked_mul(translational, denominator)?,
+        rotational_numerator,
+    )?;
+    Ok(RationalScalar {
+        numerator,
+        denominator,
+    })
 }
 
 fn apply_sphere_impulse(
@@ -436,11 +494,14 @@ fn apply_sphere_impulse(
 fn apply_box_impulse(
     state: &mut RigidBoxState3d,
     body: PhysicsBody3d,
-    contact_offset: [i64; 3],
+    contact_offset: RationalVector3,
     impulse: [i128; 3],
 ) -> Result<(), SphereObbResponseError3d> {
     if body.kind == BodyKind::Fixed {
         return Ok(());
+    }
+    if contact_offset.denominator <= 0 {
+        return Err(SphereObbResponseError3d::ArithmeticOverflow);
     }
 
     state.linear_velocity = Velocity::new3(
@@ -449,18 +510,24 @@ fn apply_box_impulse(
         add_linear_impulse_axis(state.linear_velocity.z, impulse[2], body.mass_units)?,
     );
 
-    let angular_impulse = cross_i64_i128(contact_offset, impulse)?;
-    let local_impulse = rotate_inverse(state.angular.orientation, angular_impulse)?;
+    let angular_impulse_numerator = cross_i128(contact_offset.numerator, impulse)?;
+    let local_impulse_numerator =
+        rotate_inverse(state.angular.orientation, angular_impulse_numerator)?;
     let inertia = box_inertia(body)?;
+    let angular_denominator = checked_mul(RESPONSE_SCALE, contact_offset.denominator)?;
     let mut local_delta = [0_i128; 3];
-    for (index, (target, component)) in local_delta.iter_mut().zip(local_impulse).enumerate() {
+    for (index, (target, component)) in local_delta
+        .iter_mut()
+        .zip(local_impulse_numerator)
+        .enumerate()
+    {
         let inverse_inertia =
             inverse_inertia_scaled(inertia.principal_numerators[index], inertia.denominator)?;
         let numerator = checked_mul(
             checked_mul(component, inverse_inertia)?,
             i128::from(ANGULAR_VELOCITY_SCALE),
         )?;
-        *target = div_round_nearest(numerator, RESPONSE_SCALE)?;
+        *target = div_round_nearest(numerator, angular_denominator)?;
     }
     let world_delta = rotate_forward(state.angular.orientation, local_delta)?;
     state.angular.angular_velocity = AngularVelocity3d::new(
@@ -473,27 +540,42 @@ fn apply_box_impulse(
 
 fn box_contact_velocity(
     state: RigidBoxState3d,
-    offset: [i64; 3],
-) -> Result<[i64; 3], SphereObbResponseError3d> {
+    offset: RationalVector3,
+) -> Result<RationalVector3, SphereObbResponseError3d> {
+    if offset.denominator <= 0 {
+        return Err(SphereObbResponseError3d::ArithmeticOverflow);
+    }
     let omega = state.angular.angular_velocity;
     let rotation_x = checked_sub(
-        checked_mul(i128::from(omega.y), i128::from(offset[2]))?,
-        checked_mul(i128::from(omega.z), i128::from(offset[1]))?,
+        checked_mul(i128::from(omega.y), offset.numerator[2])?,
+        checked_mul(i128::from(omega.z), offset.numerator[1])?,
     )?;
     let rotation_y = checked_sub(
-        checked_mul(i128::from(omega.z), i128::from(offset[0]))?,
-        checked_mul(i128::from(omega.x), i128::from(offset[2]))?,
+        checked_mul(i128::from(omega.z), offset.numerator[0])?,
+        checked_mul(i128::from(omega.x), offset.numerator[2])?,
     )?;
     let rotation_z = checked_sub(
-        checked_mul(i128::from(omega.x), i128::from(offset[1]))?,
-        checked_mul(i128::from(omega.y), i128::from(offset[0]))?,
+        checked_mul(i128::from(omega.x), offset.numerator[1])?,
+        checked_mul(i128::from(omega.y), offset.numerator[0])?,
     )?;
-    let scale = i128::from(ANGULAR_VELOCITY_SCALE);
-    Ok([
-        add_linear_rotation(state.linear_velocity.x, rotation_x, scale)?,
-        add_linear_rotation(state.linear_velocity.y, rotation_y, scale)?,
-        add_linear_rotation(state.linear_velocity.z, rotation_z, scale)?,
-    ])
+    let denominator = checked_mul(i128::from(ANGULAR_VELOCITY_SCALE), offset.denominator)?;
+    Ok(RationalVector3 {
+        numerator: [
+            checked_add(
+                checked_mul(i128::from(state.linear_velocity.x), denominator)?,
+                rotation_x,
+            )?,
+            checked_add(
+                checked_mul(i128::from(state.linear_velocity.y), denominator)?,
+                rotation_y,
+            )?,
+            checked_add(
+                checked_mul(i128::from(state.linear_velocity.z), denominator)?,
+                rotation_z,
+            )?,
+        ],
+        denominator,
+    })
 }
 
 fn penetration_correction(
@@ -729,21 +811,36 @@ fn vector_length_squared(vector: [i128; 3]) -> Result<u128, SphereObbResponseErr
     })
 }
 
-fn position_delta(center: Position, point: Position) -> Result<[i64; 3], SphereObbResponseError3d> {
-    Ok([
-        point
-            .x
-            .checked_sub(center.x)
-            .ok_or(SphereObbResponseError3d::ArithmeticOverflow)?,
-        point
-            .y
-            .checked_sub(center.y)
-            .ok_or(SphereObbResponseError3d::ArithmeticOverflow)?,
-        point
-            .z
-            .checked_sub(center.z)
-            .ok_or(SphereObbResponseError3d::ArithmeticOverflow)?,
-    ])
+fn rational_position_delta(
+    center: Position,
+    point_numerator: [i128; 3],
+    point_denominator: i128,
+) -> Result<RationalVector3, SphereObbResponseError3d> {
+    if point_denominator <= 0 {
+        return Err(SphereObbResponseError3d::ArithmeticOverflow);
+    }
+    let center = [
+        i128::from(center.x),
+        i128::from(center.y),
+        i128::from(center.z),
+    ];
+    Ok(RationalVector3 {
+        numerator: [
+            checked_sub(
+                point_numerator[0],
+                checked_mul(center[0], point_denominator)?,
+            )?,
+            checked_sub(
+                point_numerator[1],
+                checked_mul(center[1], point_denominator)?,
+            )?,
+            checked_sub(
+                point_numerator[2],
+                checked_mul(center[2], point_denominator)?,
+            )?,
+        ],
+        denominator: point_denominator,
+    })
 }
 
 fn offset_position(
@@ -780,18 +877,6 @@ fn negate_vector(vector: [i64; 3]) -> Result<[i64; 3], SphereObbResponseError3d>
     ])
 }
 
-fn add_linear_rotation(
-    linear: i32,
-    rotational_numerator: i128,
-    scale: i128,
-) -> Result<i64, SphereObbResponseError3d> {
-    let rotational = i64::try_from(div_round_nearest(rotational_numerator, scale)?)
-        .map_err(|_| SphereObbResponseError3d::ArithmeticOverflow)?;
-    i64::from(linear)
-        .checked_add(rotational)
-        .ok_or(SphereObbResponseError3d::ArithmeticOverflow)
-}
-
 fn add_linear_impulse_axis(
     current: i32,
     impulse: i128,
@@ -819,8 +904,7 @@ fn inverse_inertia_scaled(
     Ok(checked_mul(RESPONSE_SCALE, i128::from(denominator))? / principal)
 }
 
-fn cross_i64_i128(left: [i64; 3], right: [i128; 3]) -> Result<[i128; 3], SphereObbResponseError3d> {
-    let left = left.map(i128::from);
+fn cross_i128(left: [i128; 3], right: [i128; 3]) -> Result<[i128; 3], SphereObbResponseError3d> {
     Ok([
         cross_component(left[1], right[2], left[2], right[1])?,
         cross_component(left[2], right[0], left[0], right[2])?,
@@ -1074,6 +1158,30 @@ mod tests {
                 > 0
         );
         assert_ne!(step.oriented_box.angular.angular_velocity.z, 0);
+        assert_eq!(step.sphere.angular_velocity, sphere.angular_velocity);
+    }
+
+    #[test]
+    fn rotated_glancing_impact_preserves_rational_contact_lever_arm() {
+        let sphere = sphere_state(Position::new3(3, 2, 0), Velocity::new3(-90, -45, 0));
+        let orientation = Orientation3d::new(0, 0, 246_695_320, 1_045_018_145);
+        let oriented_box = RigidBoxState3d::new(
+            Position::new3(0, 0, 0),
+            Velocity::new3(0, 0, 0),
+            AngularState3d::new(orientation, AngularVelocity3d::default()),
+        );
+        let box_body = PhysicsBody3d::dynamic(EntityId(2), [2, 2, 2])
+            .with_material(PhysicsMaterial::new(0, 0));
+        let step = resolve_sphere_obb_contact(sphere, dynamic_sphere(1), oriented_box, box_body)
+            .expect("valid rotated glancing impact");
+        let contact = step.contact.expect("overlapping pair should contact");
+
+        assert_eq!(contact.geometry.point, Position::new3(2, 1, 0));
+        assert_eq!(contact.geometry.point_numerator, [36, 28, 0]);
+        assert_eq!(contact.geometry.point_denominator, 20);
+        assert_eq!(contact.geometry.normal, [2, 1, 0]);
+        assert!(contact.normal_impulse_units > 0);
+        assert!(step.oriented_box.angular.angular_velocity.z > 0);
         assert_eq!(step.sphere.angular_velocity, sphere.angular_velocity);
     }
 
