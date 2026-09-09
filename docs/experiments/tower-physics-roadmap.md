@@ -10,6 +10,7 @@ The current Pages experiment already has:
 - gravity, mass, restitution, friction, OBB collision response, stabilization, and angular velocity;
 - deterministic broad-phase acceleration with exact OBB narrow-phase truth;
 - bounded sampled rotating-contact handling rather than an analytic rotational-CCD claim;
+- reusable deterministic fixed-point sphere <-> OBB closest-feature/contact geometry;
 - a Rust/Wasm `wgpu` renderer with orbit/pan/zoom controls and Canvas fallback;
 - a visually spherical trebuchet projectile whose center and radius come from Rust-owned frame state.
 
@@ -17,21 +18,25 @@ The important remaining mismatch is that the projectile is still an equal-extent
 
 ## Next vertical slices
 
-### 1. Sphere <-> OBB contact geometry -- active
+### 1. Sphere <-> OBB contact geometry -- integrated in #75
 
-Add a reusable deterministic fixed-point closest-feature query between a sphere and an oriented box. Keep this as geometry evidence only: no tower-only response branch and no continuous-collision claim.
+A reusable deterministic fixed-point closest-feature query between a sphere and an oriented box is integrated. It remains geometry evidence only: no tower-only response branch and no continuous-collision claim.
+
+The geometry contract covers face, edge/corner, rotated-box, interior-center, invalid-input, stable nearest-face selection, and integer/fixed-point arithmetic.
+
+### 2. Mixed-shape normal response and stabilization -- active in #76
+
+Add a reusable sphere <-> OBB normal impulse path that can transfer off-center impact torque into the box. Add deterministic penetration correction while keeping fixed bodies immovable and making integer-grid remainder ownership depend on stable entity identity rather than shape/input order.
 
 Acceptance:
 
-- face, edge/corner, rotated-box, interior-center, and invalid-input regressions;
-- stable nearest-face selection when a sphere center is inside an OBB;
-- integer/fixed-point arithmetic only.
-
-### 2. Mixed-shape normal response and stabilization
-
-Add a reusable sphere <-> OBB normal impulse path that can transfer off-center impact torque into the box. Add deterministic penetration correction while keeping fixed bodies immovable and preserving canonical pair ordering.
-
-Do not add friction in the same slice unless the normal-response contract is already stable.
+- separated pairs are idempotently unchanged;
+- centered impacts change linear velocity without inventing spin;
+- glancing sphere impacts transfer angular motion into the box;
+- fixed participants remain immutable;
+- exterior and interior penetration project to non-penetrating states;
+- repeated runs produce exactly equal response state;
+- friction, tower integration, and continuous collision handling remain separate later slices.
 
 ### 3. Replace the tower projectile proxy with a true sphere
 
