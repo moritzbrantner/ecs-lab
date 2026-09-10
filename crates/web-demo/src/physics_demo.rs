@@ -2,9 +2,10 @@ use std::sync::{Mutex, OnceLock};
 
 use ecs_physics::{BodyKind, PhysicsMaterial};
 use ecs_physics_3d::{
-    ANGULAR_VELOCITY_SCALE, AngularState3d, AngularVelocity3d, BouncingRoom3dScenario,
-    ORIENTATION_SCALE, Orientation3d, PhysicsBody3d, PhysicsConfig3d, RigidBox3d, RigidBoxState3d,
-    RigidBoxWorldConfig3d, oriented_box_vertices, step_3d, step_rigid_box_world,
+    ANGULAR_VELOCITY_SCALE, AngularState3d, AngularSubstepPolicy3d, AngularVelocity3d,
+    BouncingRoom3dScenario, ORIENTATION_SCALE, Orientation3d, PhysicsBody3d, PhysicsConfig3d,
+    RigidBox3d, RigidBoxState3d, RigidBoxWorldConfig3d, RotatingContactSearchConfig3d,
+    oriented_box_vertices, step_3d, step_rigid_box_world_repeated_rotating,
 };
 use ecs_reference::ReferenceWorld;
 use ecs_workload::{EntityId, Operation, Position, Velocity, Workload};
@@ -14,6 +15,12 @@ const PHYSICS_DEMO_SECONDS: u32 = 10;
 const PHYSICS_DEMO_MAX_STEPS: u32 = PHYSICS_DEMO_FPS * PHYSICS_DEMO_SECONDS;
 const PHYSICS_DEMO_SOLVER_PASSES: u8 = 6;
 const PHYSICS_DEMO_ANGULAR_DAMPING_MILLI: u16 = 998;
+// Keep repeated-event remainders inside the authoritative i32 timestep domain. This remains a
+// bounded coarse sampling grid, not analytic rotational CCD.
+const PHYSICS_DEMO_CONTACT_SEARCH: RotatingContactSearchConfig3d = RotatingContactSearchConfig3d {
+    coarse_samples: 3,
+    refinement_steps: 0,
+};
 const MATERIAL_DEMO_COUNT: usize = 6;
 const MATERIAL_DEMO_RESTITUTION: [u16; MATERIAL_DEMO_COUNT] = [1_000, 850, 650, 450, 250, 0];
 const MATERIAL_DEMO_FRICTION: [u16; MATERIAL_DEMO_COUNT] = [0, 150, 350, 550, 750, 1_000];
@@ -106,7 +113,13 @@ impl PhysicsDemoState {
         let target = usize::try_from(steps).ok()?;
         while self.frames.len() <= target {
             let previous = &self.frames.last()?.boxes;
-            let next = step_rigid_box_world(previous, self.config).ok()?;
+            let next = step_rigid_box_world_repeated_rotating(
+                previous,
+                self.config,
+                PHYSICS_DEMO_CONTACT_SEARCH,
+                AngularSubstepPolicy3d::default(),
+            )
+            .ok()?;
             self.frames
                 .push(build_demo_frame(next.boxes, self.spatial_scale)?);
         }
@@ -616,13 +629,27 @@ pub extern "C" fn physics_material_demo_position_y(body_index: u32, steps: u32) 
 #[cfg(test)]
 mod tests {
     use super::{
-        ORIENTATION_SCALE, physics_demo_angular_velocity_x, physics_demo_angular_velocity_y,
-        physics_demo_angular_velocity_z, physics_demo_body_count, physics_demo_fps,
-        physics_demo_half_extent_z, physics_demo_is_fixed, physics_demo_max_steps,
-        physics_demo_orientation_w, physics_demo_orientation_x, physics_demo_orientation_y,
-        physics_demo_orientation_z, physics_demo_position_z, physics_material_demo_count,
-        physics_material_demo_position_y, physics_material_demo_restitution_milli,
+        ORIENTATION_SCALE, PhysicsDemoState, physics_demo_angular_velocity_x,
+        physics_demo_angular_velocity_y, physics_demo_angular_velocity_z, physics_demo_body_count,
+        physics_demo_fps, physics_demo_half_extent_z, physics_demo_is_fixed,
+        physics_demo_max_steps, physics_demo_orientation_w, physics_demo_orientation_x,
+        physics_demo_orientation_y, physics_demo_orientation_z, physics_demo_position_z,
+        physics_material_demo_count, physics_material_demo_position_y,
+        physics_material_demo_restitution_milli,
     };
+
+    #[test]
+    fn repeated_rotating_browser_scenario_constructs_every_authoritative_frame() {
+        let mut state = PhysicsDemoState::new().expect("valid committed browser scenario");
+
+        for step in 1..=60 {
+            assert!(
+                state.ensure_frame(step).is_some(),
+                "authoritative Rust physics failed while constructing frame {step}"
+            );
+        }
+        assert_eq!(state.frames.len(), 61);
+    }
 
     #[test]
     fn browser_demo_exposes_true_sixty_hz_oriented_three_dimensional_steps() {

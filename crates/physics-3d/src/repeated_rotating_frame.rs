@@ -151,11 +151,11 @@ impl From<AngularSubstepError3d> for RepeatedRotatingFrameError3d {
 /// damping. Event count and tail-segment count are independently bounded and fail closed on pathological
 /// motion rather than silently dropping simulation work.
 ///
-/// This remains bounded sampled rotational collision handling, not analytic rotational CCD. A contact island
-/// can still exist entirely between configured samples, and a pair that is already touching at a segment
-/// start is not separately searched for a later clear-then-recontact transition inside that same segment.
-/// Those limitations are explicit; the improvement here is that multiple distinct sampled impacts in one
-/// frame are no longer collapsed into a discrete remainder.
+/// This remains bounded sampled rotational collision handling, not analytic rotational CCD. A separation
+/// interval or contact island can still exist entirely between configured coarse samples. Pairs that start
+/// touching can produce a later re-contact event only when the configured grid observes at least one clear
+/// sample followed by a later contact sample. Those sampling limits are explicit; the improvement here is
+/// that multiple distinct sampled impacts in one frame are no longer collapsed into a discrete remainder.
 ///
 /// # Errors
 ///
