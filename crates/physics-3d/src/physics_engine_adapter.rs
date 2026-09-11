@@ -171,7 +171,7 @@ pub fn step_rigid_box_world_with_physics_engine(
     for rigid_box in boxes {
         validate_material(rigid_box)?;
         if source_bodies
-            .insert(rigid_box.body.entity.0, rigid_box.body)
+            .insert(rigid_box.body.entity.0, *rigid_box)
             .is_some()
         {
             return Err(PhysicsEngineAdapterError3d::DuplicateEntity(
@@ -277,30 +277,35 @@ fn to_engine_box(rigid_box: RigidBox3d) -> Result<EngineRigidBox3d, PhysicsEngin
 
 fn from_engine_box(
     engine_box: &EngineRigidBox3d,
-    source: crate::PhysicsBody3d,
+    source: RigidBox3d,
     damping_milli: u16,
 ) -> Result<RigidBox3d, PhysicsEngineAdapterError3d> {
     let body = engine_box.body();
     let angular = engine_box.angular();
+    let linear_velocity = if source.body.kind == BodyKind::Fixed {
+        source.state.linear_velocity
+    } else {
+        Velocity::new3(body.velocity().x, body.velocity().y, body.velocity().z)
+    };
     let angular_velocity = AngularVelocity3d::new(
         angular.angular_velocity.x,
         angular.angular_velocity.y,
         angular.angular_velocity.z,
     );
-    let angular_velocity = if source.kind == BodyKind::Dynamic {
+    let angular_velocity = if source.body.kind == BodyKind::Dynamic {
         damp_angular_velocity(angular_velocity, damping_milli)?
     } else {
         angular_velocity
     };
     Ok(RigidBox3d::new(
-        source,
+        source.body,
         RigidBoxState3d::new(
             Position::new3(
                 i64::from(body.position().x),
                 i64::from(body.position().y),
                 i64::from(body.position().z),
             ),
-            Velocity::new3(body.velocity().x, body.velocity().y, body.velocity().z),
+            linear_velocity,
             AngularState3d::new(
                 Orientation3d::new(
                     angular.orientation.x,
@@ -416,6 +421,37 @@ mod tests {
         assert!(step.boxes[0].state.linear_velocity.z.abs() < 40);
         assert!(!step.boxes[0].state.angular.angular_velocity.is_zero());
         assert!(step.sampled_events >= 1 || step.tail_contacts >= 1);
+    }
+
+    #[test]
+    fn fixed_body_velocity_is_preserved_across_adapter_round_trip() {
+        let velocity = Velocity::new3(7, -3, 5);
+        let fixed = RigidBox3d::new(
+            PhysicsBody3d::fixed(EntityId(9), [10, 10, 10]),
+            RigidBoxState3d::new(
+                Position::new3(20, 0, 0),
+                velocity,
+                AngularState3d::new(Orientation3d::IDENTITY, AngularVelocity3d::default()),
+            ),
+        );
+        let step = step_rigid_box_world_with_physics_engine(
+            &[fixed],
+            RigidBoxWorldConfig3d {
+                gravity: Velocity::new3(0, -10, 0),
+                timestep_numerator: 0,
+                timestep_denominator: 1,
+                angular_damping_milli: 1_000,
+                solver_passes: 4,
+            },
+            RotatingContactSearchConfig3d {
+                coarse_samples: 4,
+                refinement_steps: 2,
+            },
+            AngularSubstepPolicy3d::default(),
+        )
+        .expect("fixed body should round-trip through the adapter");
+
+        assert_eq!(step.boxes[0].state.linear_velocity, velocity);
     }
 
     fn playground_boxes() -> (Vec<RigidBox3d>, RigidBoxWorldConfig3d) {
