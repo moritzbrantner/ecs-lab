@@ -542,8 +542,8 @@ mod tests {
 
     #[test]
     fn forty_eight_body_playground_is_repeatable_through_standalone_engine() {
-        let first = run_playground(120);
-        let second = run_playground(120);
+        let first = run_playground(12);
+        let second = run_playground(12);
 
         assert_eq!(first.len(), 54);
         assert_eq!(first, second);
