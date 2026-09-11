@@ -11,6 +11,7 @@ mod impact;
 mod interactions;
 mod liquid;
 mod oriented_box;
+mod physics_engine_adapter;
 mod repeated_rotating_frame;
 mod rigid_box_free_flight;
 mod rigid_box_world;
@@ -63,6 +64,10 @@ pub use interactions::{
 pub use liquid::{LiquidError3d, LiquidVolume3d, liquid_operations};
 pub use oriented_box::{
     ObbAxisFeature3d, ObbContactSeed3d, OrientedBox3d, OrientedBoxError3d, obb_contact_seed,
+};
+pub use physics_engine_adapter::{
+    PhysicsEngineAdapterError3d, PhysicsEngineAdapterStep3d,
+    step_rigid_box_world_with_physics_engine,
 };
 pub use repeated_rotating_frame::{
     MAX_REPEATED_ROTATING_EVENTS, MAX_REPEATED_ROTATING_TAIL_SEGMENTS,
