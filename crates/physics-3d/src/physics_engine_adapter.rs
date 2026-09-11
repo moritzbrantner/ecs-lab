@@ -4,12 +4,11 @@ use ecs_physics::{BodyKind, MATERIAL_SCALE};
 use ecs_workload::{EntityId, Position, Velocity};
 use physics_engine::{
     AngularState3d as EngineAngularState3d, AngularVelocity3d as EngineAngularVelocity3d,
-    BodyId as EngineBodyId, BodyKind as EngineBodyKind, Material as EngineMaterial,
-    Orientation3d as EngineOrientation3d, RigidBody as EngineRigidBody,
+    BodyId as EngineBodyId, MAX_REPEATED_ROTATING_EVENTS as ENGINE_MAX_REPEATED_ROTATING_EVENTS,
+    Material as EngineMaterial, Orientation3d as EngineOrientation3d, RigidBody as EngineRigidBody,
     RigidBox3d as EngineRigidBox3d, RigidBoxError3d as EngineRigidBoxError3d,
     RotatingWorld3d as EngineRotatingWorld3d, RotatingWorldConfig3d as EngineRotatingWorldConfig3d,
     RotatingWorldError3d as EngineRotatingWorldError3d, Vec3i as EngineVec3i,
-    MAX_REPEATED_ROTATING_EVENTS as ENGINE_MAX_REPEATED_ROTATING_EVENTS,
 };
 
 use crate::{
@@ -49,7 +48,11 @@ impl fmt::Display for PhysicsEngineAdapterError3d {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::DuplicateEntity(entity) => {
-                write!(formatter, "physics-engine adapter received duplicate entity {}", entity.0)
+                write!(
+                    formatter,
+                    "physics-engine adapter received duplicate entity {}",
+                    entity.0
+                )
             }
             Self::CoordinateOutOfRange(entity) => write!(
                 formatter,
@@ -79,13 +82,22 @@ impl fmt::Display for PhysicsEngineAdapterError3d {
                 write!(formatter, "physics-engine adapter arithmetic overflowed")
             }
             Self::AngularSubstep(error) => {
-                write!(formatter, "physics-engine adapter substep policy failed: {error}")
+                write!(
+                    formatter,
+                    "physics-engine adapter substep policy failed: {error}"
+                )
             }
             Self::EngineBody(error) => {
-                write!(formatter, "physics-engine adapter body conversion failed: {error}")
+                write!(
+                    formatter,
+                    "physics-engine adapter body conversion failed: {error}"
+                )
             }
             Self::EngineWorld(error) => {
-                write!(formatter, "physics-engine adapter world step failed: {error}")
+                write!(
+                    formatter,
+                    "physics-engine adapter world step failed: {error}"
+                )
             }
         }
     }
@@ -185,7 +197,10 @@ pub fn step_rigid_box_world_with_physics_engine(
     for engine_box in world.boxes() {
         let id = engine_box.body().id();
         let source = source_bodies
-            .get(&u32::try_from(id.0).map_err(|_| PhysicsEngineAdapterError3d::MissingSourceBody(id))?)
+            .get(
+                &u32::try_from(id.0)
+                    .map_err(|_| PhysicsEngineAdapterError3d::MissingSourceBody(id))?,
+            )
             .copied()
             .ok_or(PhysicsEngineAdapterError3d::MissingSourceBody(id))?;
         converted.push(from_engine_box(
@@ -240,7 +255,9 @@ fn to_engine_box(rigid_box: RigidBox3d) -> Result<EngineRigidBox3d, PhysicsEngin
         BodyKind::Dynamic => EngineRigidBody::dynamic(id, position, velocity, half_extents)
             .with_mass(rigid_box.body.mass_units)
             .with_material(material),
-        BodyKind::Fixed => EngineRigidBody::fixed(id, position, half_extents).with_material(material),
+        BodyKind::Fixed => {
+            EngineRigidBody::fixed(id, position, half_extents).with_material(material)
+        }
     };
     let angular = EngineAngularState3d::new(
         EngineOrientation3d::new(
@@ -297,10 +314,7 @@ fn from_engine_box(
     ))
 }
 
-fn coordinate_to_i32(
-    entity: EntityId,
-    value: i64,
-) -> Result<i32, PhysicsEngineAdapterError3d> {
+fn coordinate_to_i32(entity: EntityId, value: i64) -> Result<i32, PhysicsEngineAdapterError3d> {
     i32::try_from(value).map_err(|_| PhysicsEngineAdapterError3d::CoordinateOutOfRange(entity))
 }
 
@@ -378,18 +392,8 @@ mod tests {
     #[test]
     fn adapter_routes_frictional_obb_response_through_standalone_engine() {
         let boxes = [
-            dynamic(
-                1,
-                Position::new3(0, 0, 0),
-                Velocity::new3(60, 0, 40),
-                1_000,
-            ),
-            dynamic(
-                2,
-                Position::new3(19, 0, 0),
-                Velocity::new3(0, 0, 0),
-                0,
-            ),
+            dynamic(1, Position::new3(0, 0, 0), Velocity::new3(60, 0, 40), 1_000),
+            dynamic(2, Position::new3(19, 0, 0), Velocity::new3(0, 0, 0), 0),
         ];
         let step = step_rigid_box_world_with_physics_engine(
             &boxes,
