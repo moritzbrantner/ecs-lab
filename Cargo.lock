@@ -21,6 +21,7 @@ dependencies = [
  "ecs-sparse-set",
  "ecs-workload",
  "geometry-kernels",
+ "physics-engine",
  "spatial-kernels",
 ]
 
@@ -84,6 +85,11 @@ source = "git+https://github.com/moritzbrantner/rust-kernels?rev=986bff4dc8d13a6
 dependencies = [
  "spatial-kernels",
 ]
+
+[[package]]
+name = "physics-engine"
+version = "0.1.0"
+source = "git+https://github.com/moritzbrantner/physics-engine?rev=c7cfa336d00325cdbf6a3d95a82060ce08f056c2#c7cfa336d00325cdbf6a3d95a82060ce08f056c2"
 
 [[package]]
 name = "spatial-kernels"
