@@ -2,8 +2,9 @@ use std::sync::{Mutex, OnceLock};
 
 use ecs_physics::PhysicsMaterial;
 use ecs_physics_3d::{
-    AngularState3d, AngularVelocity3d, Orientation3d, PhysicsBody3d, RigidBox3d, RigidBoxState3d,
-    RigidBoxWorldConfig3d, RigidBoxWorldStats3d, oriented_box_vertices, step_rigid_box_world,
+    AngularState3d, AngularSubstepPolicy3d, AngularVelocity3d, Orientation3d, PhysicsBody3d,
+    RigidBox3d, RigidBoxState3d, RigidBoxWorldConfig3d, RotatingContactSearchConfig3d,
+    oriented_box_vertices, step_rigid_box_world_with_physics_engine,
 };
 use ecs_workload::{EntityId, Position, Velocity};
 
@@ -20,14 +21,25 @@ const FLOOR_INDEX: usize = 0;
 const PROJECTILE_INDEX: usize = 1;
 const FIRST_BLOCK_INDEX: usize = 2;
 const TOWER_BODY_COUNT: usize = FIRST_BLOCK_INDEX + TOWER_BLOCK_COUNT;
+const TOWER_CONTACT_SEARCH: RotatingContactSearchConfig3d = RotatingContactSearchConfig3d {
+    coarse_samples: 8,
+    refinement_steps: 4,
+};
 
 static TOWER_DEMO_STATE: OnceLock<Mutex<Option<TowerDemoState>>> = OnceLock::new();
+
+#[derive(Clone, Copy, Debug, Default)]
+struct TowerFrameStats {
+    spinning_bodies: usize,
+    sampled_events: usize,
+    tail_contacts: usize,
+}
 
 #[derive(Clone, Debug)]
 struct TowerFrame {
     boxes: Vec<RigidBox3d>,
     vertices: Vec<[Position; 8]>,
-    stats: RigidBoxWorldStats3d,
+    stats: TowerFrameStats,
 }
 
 struct TowerDemoState {
@@ -38,7 +50,7 @@ struct TowerDemoState {
 impl TowerDemoState {
     fn new() -> Option<Self> {
         let boxes = initial_boxes()?;
-        let initial = capture_frame(boxes, RigidBoxWorldStats3d::default())?;
+        let initial = capture_frame(boxes, TowerFrameStats::default())?;
         Some(Self {
             config: RigidBoxWorldConfig3d {
                 gravity: Velocity::new3(0, -10 * TOWER_EXTENT_SCALE, 0),
@@ -58,8 +70,23 @@ impl TowerDemoState {
         let target = usize::try_from(steps).ok()?;
         while self.frames.len() <= target {
             let previous = self.frames.last()?.boxes.clone();
-            let next = step_rigid_box_world(&previous, self.config).ok()?;
-            self.frames.push(capture_frame(next.boxes, next.stats)?);
+            let next = step_rigid_box_world_with_physics_engine(
+                &previous,
+                self.config,
+                TOWER_CONTACT_SEARCH,
+                AngularSubstepPolicy3d::default(),
+            )
+            .ok()?;
+            let stats = TowerFrameStats {
+                spinning_bodies: next
+                    .boxes
+                    .iter()
+                    .filter(|rigid_box| !rigid_box.state.angular.angular_velocity.is_zero())
+                    .count(),
+                sampled_events: next.sampled_events,
+                tail_contacts: next.tail_contacts,
+            };
+            self.frames.push(capture_frame(next.boxes, stats)?);
         }
         self.frames.get(target)
     }
@@ -134,7 +161,7 @@ fn projectile_body() -> RigidBox3d {
     )
 }
 
-fn capture_frame(boxes: Vec<RigidBox3d>, stats: RigidBoxWorldStats3d) -> Option<TowerFrame> {
+fn capture_frame(boxes: Vec<RigidBox3d>, stats: TowerFrameStats) -> Option<TowerFrame> {
     let vertices = boxes
         .iter()
         .map(|rigid_box| {
@@ -237,22 +264,23 @@ pub extern "C" fn physics_tower_demo_spinning_bodies(steps: u32) -> u32 {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn physics_tower_demo_contacts(steps: u32) -> u32 {
-    with_frame(steps, |frame| u32::try_from(frame.stats.contacts).ok()).unwrap_or_default()
+pub extern "C" fn physics_tower_demo_sampled_events(steps: u32) -> u32 {
+    with_frame(steps, |frame| {
+        u32::try_from(frame.stats.sampled_events).ok()
+    })
+    .unwrap_or_default()
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn physics_tower_demo_impulsive_contacts(steps: u32) -> u32 {
+pub extern "C" fn physics_tower_demo_tail_contacts(steps: u32) -> u32 {
     with_frame(steps, |frame| {
-        u32::try_from(frame.stats.impulsive_contacts).ok()
+        u32::try_from(frame.stats.tail_contacts).ok()
     })
     .unwrap_or_default()
 }
 
 #[cfg(test)]
 mod tests {
-    use ecs_physics_3d::{OrientedBox3d, obb_contact_seed};
-
     use super::*;
 
     #[test]
@@ -298,25 +326,22 @@ mod tests {
     }
 
     #[test]
-    fn tower_fixture_never_finishes_with_floor_penetration() {
+    fn tower_fixture_never_finishes_below_floor_surface() {
         let mut state = TowerDemoState::new().expect("valid tower fixture");
         for step in 0..=240 {
             let frame = state.ensure_frame(step).expect("valid tower frame");
             let floor = frame.boxes[FLOOR_INDEX];
-            for rigid_box in &frame.boxes[PROJECTILE_INDEX..] {
-                let floor_shape = OrientedBox3d::new(
-                    floor.state.center,
-                    floor.body.half_extents,
-                    floor.state.angular.orientation,
+            let floor_top = floor
+                .state
+                .center
+                .y
+                .checked_add(i64::from(floor.body.half_extents[1]))
+                .expect("floor top should be representable");
+            for (body_index, vertices) in frame.vertices.iter().enumerate().skip(PROJECTILE_INDEX) {
+                assert!(
+                    vertices.iter().all(|vertex| vertex.y >= floor_top),
+                    "body {body_index} penetrated below the floor surface at frame {step}"
                 );
-                let body_shape = OrientedBox3d::new(
-                    rigid_box.state.center,
-                    rigid_box.body.half_extents,
-                    rigid_box.state.angular.orientation,
-                );
-                let contact = obb_contact_seed(floor_shape, body_shape)
-                    .expect("valid floor and dynamic OBB geometry");
-                assert!(contact.is_none_or(|value| value.overlap_numerator == 0));
             }
         }
     }
