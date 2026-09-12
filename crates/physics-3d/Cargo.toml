@@ -12,7 +12,7 @@ ecs-physics = { path = "../physics" }
 ecs-reference = { path = "../reference" }
 ecs-workload = { path = "../workload" }
 geometry-kernels = { git = "https://github.com/moritzbrantner/rust-kernels", rev = "986bff4dc8d13a64b90fab3a9f7f02bb8d1aa35e" }
-physics-engine = { git = "https://github.com/moritzbrantner/physics-engine", rev = "8ea513395ad6893e45da7d6fa983b6cd3949a4ac" }
+physics-engine = { git = "https://github.com/moritzbrantner/physics-engine", rev = "9339a6630019ecaf0a7612bfa3bf4e80451738fb" }
 spatial-kernels = { git = "https://github.com/moritzbrantner/rust-kernels", rev = "986bff4dc8d13a64b90fab3a9f7f02bb8d1aa35e" }
 
 [dev-dependencies]
