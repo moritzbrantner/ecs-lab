@@ -102,7 +102,7 @@ jobs:
 
       - name: Run long tower physics acceptance
         working-directory: candidate
-        run: cargo test --locked -p ecs-web-demo tower_long_horizon_regression -- --ignored --nocapture
+        run: cargo test --locked --release -p ecs-web-demo tower_long_horizon_regression -- --ignored --nocapture
 
       - name: Prepare renderer build tooling
         run: |
