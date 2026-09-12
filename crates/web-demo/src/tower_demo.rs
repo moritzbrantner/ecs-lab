@@ -287,52 +287,41 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tower_remains_quiescent_before_projectile_reaches_front_face() {
-        let mut state = TowerDemoState::new().expect("valid tower fixture");
-        for step in 0..=30 {
-            let frame = state.ensure_frame(step).expect("valid tower frame");
-            for rigid_box in &frame.boxes[FIRST_BLOCK_INDEX..] {
-                assert_eq!(
-                    rigid_box.state.angular.angular_velocity,
-                    AngularVelocity3d::default(),
-                    "tower block {} started spinning before impact at frame {step}",
-                    rigid_box.body.entity.0
-                );
-                assert_eq!(
-                    rigid_box.state.angular.orientation,
-                    Orientation3d::IDENTITY,
-                    "tower block {} rotated before impact at frame {step}",
-                    rigid_box.body.entity.0
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn trebuchet_impact_spins_multiple_tower_blocks() {
+    fn tower_preserves_behavior_through_long_horizon() {
         let mut state = TowerDemoState::new().expect("valid tower fixture");
         let mut maximum_spinning_blocks = 0_usize;
         let mut projectile_passed_front_face = false;
-        for step in 1..=180 {
-            let frame = state.ensure_frame(step).expect("valid tower frame");
-            let spinning_blocks = frame.boxes[FIRST_BLOCK_INDEX..]
-                .iter()
-                .filter(|rigid_box| !rigid_box.state.angular.angular_velocity.is_zero())
-                .count();
-            maximum_spinning_blocks = maximum_spinning_blocks.max(spinning_blocks);
-            projectile_passed_front_face |=
-                frame.boxes[PROJECTILE_INDEX].state.center.x > TOWER_SCALE;
-        }
 
-        assert!(projectile_passed_front_face);
-        assert!(maximum_spinning_blocks >= 4);
-    }
-
-    #[test]
-    fn tower_fixture_never_finishes_below_floor_surface() {
-        let mut state = TowerDemoState::new().expect("valid tower fixture");
         for step in 0..=240 {
             let frame = state.ensure_frame(step).expect("valid tower frame");
+
+            if step <= 30 {
+                for rigid_box in &frame.boxes[FIRST_BLOCK_INDEX..] {
+                    assert_eq!(
+                        rigid_box.state.angular.angular_velocity,
+                        AngularVelocity3d::default(),
+                        "tower block {} started spinning before impact at frame {step}",
+                        rigid_box.body.entity.0
+                    );
+                    assert_eq!(
+                        rigid_box.state.angular.orientation,
+                        Orientation3d::IDENTITY,
+                        "tower block {} rotated before impact at frame {step}",
+                        rigid_box.body.entity.0
+                    );
+                }
+            }
+
+            if step <= 180 {
+                let spinning_blocks = frame.boxes[FIRST_BLOCK_INDEX..]
+                    .iter()
+                    .filter(|rigid_box| !rigid_box.state.angular.angular_velocity.is_zero())
+                    .count();
+                maximum_spinning_blocks = maximum_spinning_blocks.max(spinning_blocks);
+                projectile_passed_front_face |=
+                    frame.boxes[PROJECTILE_INDEX].state.center.x > TOWER_SCALE;
+            }
+
             let floor = frame.boxes[FLOOR_INDEX];
             let floor_top = floor
                 .state
@@ -347,6 +336,9 @@ mod tests {
                 );
             }
         }
+
+        assert!(projectile_passed_front_face);
+        assert!(maximum_spinning_blocks >= 4);
     }
 
     #[test]
