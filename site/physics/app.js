@@ -967,7 +967,7 @@ async function main() {
 
     const dynamicCount = frames[0].entities.filter((entity) => !entity.fixed).length;
     runtimeStatus.textContent =
-      `Rust/Wasm ready. ${dynamicCount} dynamic bodies; ecs-physics-3d owns linear/angular integration, discrete OBB SAT/contact response, mass/material response, orientation, and oriented broad-phase evidence. The browser only projects exported state; this demo does not claim rotational CCD.`;
+      `Rust/Wasm ready. ${dynamicCount} dynamic bodies; physics-engine owns rotating-world integration, sampled collision-event search, OBB contact response, restitution, and friction. ecs-physics-3d owns ECS/scenario mapping, frame-level angular damping, and exported consumer evidence. The browser only projects exported state; rotational collision discovery remains sampled, not analytic CCD.`;
     if (!("gpu" in navigator)) {
       webgpuEnabled.disabled = true;
       webgpuStatus.textContent = "WebGPU is unavailable; Rust physics and the Canvas 3D fallback remain usable.";
