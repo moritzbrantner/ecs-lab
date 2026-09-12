@@ -12,21 +12,18 @@ use physics_engine::{
 };
 
 use crate::{
-    AngularState3d, AngularSubstepError3d, AngularSubstepPolicy3d, AngularVelocity3d,
-    Orientation3d, RigidBox3d, RigidBoxState3d, RigidBoxWorldConfig3d,
-    RotatingContactSearchConfig3d, required_angular_substeps,
+    AngularState3d, AngularSubstepPolicy3d, AngularVelocity3d, Orientation3d, RigidBox3d,
+    RigidBoxState3d, RigidBoxWorldConfig3d, RotatingContactSearchConfig3d,
 };
 
 /// Result of one ECS-facing frame advanced by the standalone `physics-engine` rotating world.
-///
-/// The adapter deliberately reports only evidence the standalone engine exposes directly. Legacy
-/// frontier/contact-set inspection remains owned by the old experimental solver until that code is
-/// deleted after consumer migration.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PhysicsEngineAdapterStep3d {
     pub boxes: Vec<RigidBox3d>,
     pub sampled_events: usize,
     pub tail_contacts: usize,
+    /// Compatibility evidence for the former ECS-owned pre-segmentation layer.
+    /// The standalone engine now owns the complete requested frame, so this is always one.
     pub substeps: u8,
 }
 
@@ -39,7 +36,6 @@ pub enum PhysicsEngineAdapterError3d {
     DampingOutOfRange(u16),
     MissingSourceBody(EngineBodyId),
     ArithmeticOverflow,
-    AngularSubstep(AngularSubstepError3d),
     EngineBody(EngineRigidBoxError3d),
     EngineWorld(EngineRotatingWorldError3d),
 }
@@ -81,12 +77,6 @@ impl fmt::Display for PhysicsEngineAdapterError3d {
             Self::ArithmeticOverflow => {
                 write!(formatter, "physics-engine adapter arithmetic overflowed")
             }
-            Self::AngularSubstep(error) => {
-                write!(
-                    formatter,
-                    "physics-engine adapter substep policy failed: {error}"
-                )
-            }
             Self::EngineBody(error) => {
                 write!(
                     formatter,
@@ -105,12 +95,6 @@ impl fmt::Display for PhysicsEngineAdapterError3d {
 
 impl std::error::Error for PhysicsEngineAdapterError3d {}
 
-impl From<AngularSubstepError3d> for PhysicsEngineAdapterError3d {
-    fn from(value: AngularSubstepError3d) -> Self {
-        Self::AngularSubstep(value)
-    }
-}
-
 impl From<EngineRigidBoxError3d> for PhysicsEngineAdapterError3d {
     fn from(value: EngineRigidBoxError3d) -> Self {
         Self::EngineBody(value)
@@ -126,38 +110,35 @@ impl From<EngineRotatingWorldError3d> for PhysicsEngineAdapterError3d {
 /// Advances ECS-owned rigid-box state through the standalone `physics-engine` authority.
 ///
 /// Entity IDs and component-shaped body metadata remain consumer concerns. The adapter converts that
-/// state into engine-local IDs/materials/rigid boxes, executes the engine's bounded sampled rotating
-/// event pipeline, then maps the resulting pose and velocities back to the existing ECS-facing types.
-/// Angular damping remains explicit consumer policy and is applied exactly once after the requested
-/// frame, matching the playground's established contract. If the existing bounded angular policy asks
-/// for more than one sample, the requested rational timestep is split evenly and every substep is still
-/// executed by `physics-engine`; no collision implementation is duplicated here.
+/// state into engine-local IDs/materials/rigid boxes, executes one complete requested frame through the
+/// engine's bounded sampled rotating-event pipeline, then maps the resulting pose and velocities back to
+/// the existing ECS-facing types. Angular damping remains explicit consumer policy and is applied exactly
+/// once after the requested frame.
 ///
-/// Rotational event discovery therefore inherits the standalone engine's explicit limitation: it remains
-/// sampled rotational collision handling rather than analytic rotational CCD.
+/// The former ECS-owned angular pre-segmentation policy is intentionally no longer applied here. High-spin,
+/// repeated-event, persistent-tail, and fail-closed progression belong to `physics-engine`; retaining a
+/// second pre-dispatch cap in this adapter could reject a frame before the authoritative engine sees it.
+/// The `substep_policy` argument remains temporarily for source compatibility and is removed with the
+/// superseded local rotating-solver surface.
+///
+/// Rotational event discovery inherits the standalone engine's explicit limitation: it remains sampled
+/// rotational collision handling rather than analytic rotational CCD.
 ///
 /// # Errors
 ///
 /// Returns [`PhysicsEngineAdapterError3d`] when ECS state cannot be represented by the standalone engine,
-/// material/damping bounds are invalid, the angular substep policy rejects the frame, or the engine fails
-/// closed while advancing the world.
+/// material/damping bounds are invalid, or the engine fails closed while advancing the world.
 pub fn step_rigid_box_world_with_physics_engine(
     boxes: &[RigidBox3d],
     config: RigidBoxWorldConfig3d,
     search_config: RotatingContactSearchConfig3d,
-    substep_policy: AngularSubstepPolicy3d,
+    _substep_policy: AngularSubstepPolicy3d,
 ) -> Result<PhysicsEngineAdapterStep3d, PhysicsEngineAdapterError3d> {
     if config.angular_damping_milli > MATERIAL_SCALE {
         return Err(PhysicsEngineAdapterError3d::DampingOutOfRange(
             config.angular_damping_milli,
         ));
     }
-
-    let substeps = required_angular_substeps(boxes, config, substep_policy)?;
-    let substep_denominator = config
-        .timestep_denominator
-        .checked_mul(i32::from(substeps))
-        .ok_or(PhysicsEngineAdapterError3d::ArithmeticOverflow)?;
 
     let mut source_bodies = BTreeMap::new();
     let mut world = EngineRotatingWorld3d::new(EngineRotatingWorldConfig3d {
@@ -181,17 +162,7 @@ pub fn step_rigid_box_world_with_physics_engine(
         world.add_box(to_engine_box(*rigid_box)?)?;
     }
 
-    let mut sampled_events = 0_usize;
-    let mut tail_contacts = 0_usize;
-    for _ in 0..substeps {
-        let report = world.step(config.timestep_numerator, substep_denominator)?;
-        sampled_events = sampled_events
-            .checked_add(report.stats.sampled_events)
-            .ok_or(PhysicsEngineAdapterError3d::ArithmeticOverflow)?;
-        tail_contacts = tail_contacts
-            .checked_add(report.stats.tail_contacts)
-            .ok_or(PhysicsEngineAdapterError3d::ArithmeticOverflow)?;
-    }
+    let report = world.step(config.timestep_numerator, config.timestep_denominator)?;
 
     let mut converted = Vec::with_capacity(source_bodies.len());
     for engine_box in world.boxes() {
@@ -212,9 +183,9 @@ pub fn step_rigid_box_world_with_physics_engine(
 
     Ok(PhysicsEngineAdapterStep3d {
         boxes: converted,
-        sampled_events,
-        tail_contacts,
-        substeps,
+        sampled_events: report.stats.sampled_events,
+        tail_contacts: report.stats.tail_contacts,
+        substeps: 1,
     })
 }
 
@@ -421,6 +392,7 @@ mod tests {
         assert!(step.boxes[0].state.linear_velocity.z.abs() < 40);
         assert!(!step.boxes[0].state.angular.angular_velocity.is_zero());
         assert!(step.sampled_events >= 1 || step.tail_contacts >= 1);
+        assert_eq!(step.substeps, 1);
     }
 
     #[test]
