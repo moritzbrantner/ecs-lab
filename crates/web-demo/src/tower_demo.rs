@@ -57,7 +57,7 @@ impl TowerDemoState {
                 timestep_numerator: 1,
                 timestep_denominator: i32::try_from(TOWER_DEMO_FPS).ok()?,
                 angular_damping_milli: 996,
-                solver_passes: 16,
+                solver_passes: 10,
             },
             frames: vec![initial],
         })
