@@ -12,7 +12,11 @@ pub struct RigidBoxState3d {
 
 impl RigidBoxState3d {
     #[must_use]
-    pub const fn new(center: Position, linear_velocity: Velocity, angular: AngularState3d) -> Self {
+    pub const fn new(
+        center: Position,
+        linear_velocity: Velocity,
+        angular: AngularState3d,
+    ) -> Self {
         Self {
             center,
             linear_velocity,
