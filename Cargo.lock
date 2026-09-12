@@ -89,7 +89,7 @@ dependencies = [
 [[package]]
 name = "physics-engine"
 version = "0.1.0"
-source = "git+https://github.com/moritzbrantner/physics-engine?rev=c7cfa336d00325cdbf6a3d95a82060ce08f056c2#c7cfa336d00325cdbf6a3d95a82060ce08f056c2"
+source = "git+https://github.com/moritzbrantner/physics-engine?rev=a9d5e63ba0a063969a2cbe5ee77a56ef156aa78b#a9d5e63ba0a063969a2cbe5ee77a56ef156aa78b"
 
 [[package]]
 name = "spatial-kernels"
