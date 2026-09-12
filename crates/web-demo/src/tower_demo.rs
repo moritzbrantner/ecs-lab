@@ -76,12 +76,6 @@ impl TowerDemoState {
                 TOWER_CONTACT_SEARCH,
                 AngularSubstepPolicy3d::default(),
             )
-            .inspect_err(|error| {
-                eprintln!(
-                    "tower physics failed while constructing frame {}: {error:?}",
-                    self.frames.len()
-                );
-            })
             .ok()?;
             let stats = TowerFrameStats {
                 spinning_bodies: next
@@ -286,15 +280,30 @@ pub extern "C" fn physics_tower_demo_tail_contacts(steps: u32) -> u32 {
 mod tests {
     use super::*;
 
+    fn assert_above_floor(frame: &TowerFrame, step: u32) {
+        let floor = frame.boxes[FLOOR_INDEX];
+        let floor_top = floor
+            .state
+            .center
+            .y
+            .checked_add(i64::from(floor.body.half_extents[1]))
+            .expect("floor top should be representable");
+        for (body_index, vertices) in frame.vertices.iter().enumerate().skip(PROJECTILE_INDEX) {
+            assert!(
+                vertices.iter().all(|vertex| vertex.y >= floor_top),
+                "body {body_index} penetrated below the floor surface at frame {step}"
+            );
+        }
+    }
+
     #[test]
-    fn tower_preserves_behavior_through_long_horizon() {
+    fn tower_fast_slice_preserves_preimpact_floor_and_impact_behavior() {
         let mut state = TowerDemoState::new().expect("valid tower fixture");
         let mut maximum_spinning_blocks = 0_usize;
         let mut projectile_passed_front_face = false;
 
-        for step in 0..=240 {
+        for step in 0..=60 {
             let frame = state.ensure_frame(step).expect("valid tower frame");
-
             if step <= 30 {
                 for rigid_box in &frame.boxes[FIRST_BLOCK_INDEX..] {
                     assert_eq!(
@@ -312,6 +321,29 @@ mod tests {
                 }
             }
 
+            let spinning_blocks = frame.boxes[FIRST_BLOCK_INDEX..]
+                .iter()
+                .filter(|rigid_box| !rigid_box.state.angular.angular_velocity.is_zero())
+                .count();
+            maximum_spinning_blocks = maximum_spinning_blocks.max(spinning_blocks);
+            projectile_passed_front_face |=
+                frame.boxes[PROJECTILE_INDEX].state.center.x > TOWER_SCALE;
+            assert_above_floor(frame, step);
+        }
+
+        assert!(projectile_passed_front_face);
+        assert!(maximum_spinning_blocks >= 4);
+    }
+
+    #[test]
+    #[ignore = "long deterministic tower acceptance runs in Runtime evidence and Moonlight"]
+    fn tower_long_horizon_regression() {
+        let mut state = TowerDemoState::new().expect("valid tower fixture");
+        let mut maximum_spinning_blocks = 0_usize;
+        let mut projectile_passed_front_face = false;
+
+        for step in 0..=240 {
+            let frame = state.ensure_frame(step).expect("valid tower frame");
             if step <= 180 {
                 let spinning_blocks = frame.boxes[FIRST_BLOCK_INDEX..]
                     .iter()
@@ -321,20 +353,7 @@ mod tests {
                 projectile_passed_front_face |=
                     frame.boxes[PROJECTILE_INDEX].state.center.x > TOWER_SCALE;
             }
-
-            let floor = frame.boxes[FLOOR_INDEX];
-            let floor_top = floor
-                .state
-                .center
-                .y
-                .checked_add(i64::from(floor.body.half_extents[1]))
-                .expect("floor top should be representable");
-            for (body_index, vertices) in frame.vertices.iter().enumerate().skip(PROJECTILE_INDEX) {
-                assert!(
-                    vertices.iter().all(|vertex| vertex.y >= floor_top),
-                    "body {body_index} penetrated below the floor surface at frame {step}"
-                );
-            }
+            assert_above_floor(frame, step);
         }
 
         assert!(projectile_passed_front_face);
