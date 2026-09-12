@@ -76,6 +76,12 @@ impl TowerDemoState {
                 TOWER_CONTACT_SEARCH,
                 AngularSubstepPolicy3d::default(),
             )
+            .inspect_err(|error| {
+                eprintln!(
+                    "tower physics failed while constructing frame {}: {error:?}",
+                    self.frames.len()
+                );
+            })
             .ok()?;
             let stats = TowerFrameStats {
                 spinning_bodies: next
