@@ -273,10 +273,7 @@ pub extern "C" fn physics_tower_demo_sampled_events(steps: u32) -> u32 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn physics_tower_demo_tail_contacts(steps: u32) -> u32 {
-    with_frame(steps, |frame| {
-        u32::try_from(frame.stats.tail_contacts).ok()
-    })
-    .unwrap_or_default()
+    with_frame(steps, |frame| u32::try_from(frame.stats.tail_contacts).ok()).unwrap_or_default()
 }
 
 #[cfg(test)]
