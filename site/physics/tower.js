@@ -114,8 +114,8 @@ function readFrame(step) {
     step,
     bodies,
     spinningBodies: wasm.physics_tower_demo_spinning_bodies(step),
-    contacts: wasm.physics_tower_demo_contacts(step),
-    impulsiveContacts: wasm.physics_tower_demo_impulsive_contacts(step),
+    sampledEvents: wasm.physics_tower_demo_sampled_events(step),
+    tailContacts: wasm.physics_tower_demo_tail_contacts(step),
   };
 }
 
@@ -488,10 +488,10 @@ function projectileCenter(frame) {
 
 function updateStatus(frame) {
   const projectile = projectileCenter(frame);
-  const event = frame.impulsiveContacts > 0
-    ? `${frame.impulsiveContacts} impulsive ${frame.impulsiveContacts === 1 ? "contact" : "contacts"}`
-    : `${frame.contacts} resting/touching contacts`;
-  status.textContent = `Rust frame ${frame.step}/60 s · ball x ${projectile[0].toFixed(1)}, y ${projectile[1].toFixed(1)} · ${frame.spinningBodies} dynamic bodies spinning · ${event}. The renderer draws the projectile as a sphere from its Rust-owned center and proxy radius; collision response is still the current Rust OBB proxy in this slice.`;
+  const evidence = frame.sampledEvents > 0
+    ? `${frame.sampledEvents} sampled physics-engine ${frame.sampledEvents === 1 ? "event frontier" : "event frontiers"}`
+    : `${frame.tailContacts} persistent tail contacts`;
+  status.textContent = `Rust frame ${frame.step}/60 s · ball x ${projectile[0].toFixed(1)}, y ${projectile[1].toFixed(1)} · ${frame.spinningBodies} dynamic bodies spinning · ${evidence}. physics-engine owns rotating-world collision search and response; ECS Lab exports the resulting state and renders the projectile as a sphere from its proxy-box center and radius.`;
 }
 
 function setFrame(step) {
@@ -556,8 +556,8 @@ async function loadPhysicsWasm() {
     "physics_tower_demo_vertex_y",
     "physics_tower_demo_vertex_z",
     "physics_tower_demo_spinning_bodies",
-    "physics_tower_demo_contacts",
-    "physics_tower_demo_impulsive_contacts",
+    "physics_tower_demo_sampled_events",
+    "physics_tower_demo_tail_contacts",
   ];
   for (const name of required) {
     if (typeof instance.exports[name] !== "function") {
