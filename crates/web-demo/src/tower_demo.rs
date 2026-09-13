@@ -4,7 +4,7 @@ use ecs_physics::PhysicsMaterial;
 use ecs_physics_3d::{
     AngularState3d, AngularSubstepPolicy3d, AngularVelocity3d, Orientation3d, PhysicsBody3d,
     RigidBox3d, RigidBoxState3d, RigidBoxWorldConfig3d, RotatingContactSearchConfig3d,
-    oriented_box_vertices, step_rigid_box_world_with_physics_engine,
+    oriented_box_vertices, physics_engine_boxes_penetrate, step_rigid_box_world_with_physics_engine,
 };
 use ecs_workload::{EntityId, Position, Velocity};
 
@@ -286,35 +286,16 @@ pub extern "C" fn physics_tower_demo_tail_contacts(steps: u32) -> u32 {
 mod tests {
     use super::*;
 
-    fn assert_above_floor(frame: &TowerFrame, step: u32) {
+    fn assert_no_floor_penetration(frame: &TowerFrame, step: u32) {
         let floor = frame.boxes[FLOOR_INDEX];
-        let floor_top = floor
-            .state
-            .center
-            .y
-            .checked_add(i64::from(floor.body.half_extents[1]))
-            .expect("floor top should be representable");
-        for (body_index, vertices) in frame.vertices.iter().enumerate().skip(PROJECTILE_INDEX) {
-            let minimum_y = vertices
-                .iter()
-                .map(|vertex| vertex.y)
-                .min()
-                .expect("rigid box has vertices");
-            if minimum_y < floor_top {
-                let rigid_box = frame.boxes[body_index];
-                panic!(
-                    "body {body_index} / entity {} penetrated below the floor surface at frame {step}: min_y={minimum_y}, floor_top={floor_top}, center={:?}, linear_velocity={:?}, orientation={:?}, angular_velocity={:?}, x_range={:?}..={:?}, z_range={:?}..={:?}",
-                    rigid_box.body.entity.0,
-                    rigid_box.state.center,
-                    rigid_box.state.linear_velocity,
-                    rigid_box.state.angular.orientation,
-                    rigid_box.state.angular.angular_velocity,
-                    vertices.iter().map(|vertex| vertex.x).min(),
-                    vertices.iter().map(|vertex| vertex.x).max(),
-                    vertices.iter().map(|vertex| vertex.z).min(),
-                    vertices.iter().map(|vertex| vertex.z).max(),
-                );
-            }
+        for (body_index, rigid_box) in frame.boxes.iter().enumerate().skip(PROJECTILE_INDEX) {
+            let penetrates = physics_engine_boxes_penetrate(floor, *rigid_box)
+                .expect("physics-engine floor/body geometry should remain valid");
+            assert!(
+                !penetrates,
+                "body {body_index} / entity {} penetrated the finite floor collider at frame {step}",
+                rigid_box.body.entity.0
+            );
         }
     }
 
@@ -350,7 +331,7 @@ mod tests {
             maximum_spinning_blocks = maximum_spinning_blocks.max(spinning_blocks);
             projectile_passed_front_face |=
                 frame.boxes[PROJECTILE_INDEX].state.center.x > TOWER_SCALE;
-            assert_above_floor(frame, step);
+            assert_no_floor_penetration(frame, step);
         }
 
         assert!(projectile_passed_front_face);
@@ -375,7 +356,7 @@ mod tests {
                 projectile_passed_front_face |=
                     frame.boxes[PROJECTILE_INDEX].state.center.x > TOWER_SCALE;
             }
-            assert_above_floor(frame, step);
+            assert_no_floor_penetration(frame, step);
         }
 
         assert!(projectile_passed_front_face);
