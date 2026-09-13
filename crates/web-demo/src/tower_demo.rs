@@ -295,10 +295,25 @@ mod tests {
             .checked_add(i64::from(floor.body.half_extents[1]))
             .expect("floor top should be representable");
         for (body_index, vertices) in frame.vertices.iter().enumerate().skip(PROJECTILE_INDEX) {
-            assert!(
-                vertices.iter().all(|vertex| vertex.y >= floor_top),
-                "body {body_index} penetrated below the floor surface at frame {step}"
-            );
+            let minimum_y = vertices
+                .iter()
+                .map(|vertex| vertex.y)
+                .min()
+                .expect("rigid box has vertices");
+            if minimum_y < floor_top {
+                let rigid_box = frame.boxes[body_index];
+                panic!(
+                    "body {body_index} / entity {} penetrated below the floor surface at frame {step}: min_y={minimum_y}, floor_top={floor_top}, center={:?}, velocity={:?}, angular_velocity={:?}, x_range={:?}..={:?}, z_range={:?}..={:?}",
+                    rigid_box.body.entity.0,
+                    rigid_box.state.center,
+                    rigid_box.state.velocity,
+                    rigid_box.state.angular.angular_velocity,
+                    vertices.iter().map(|vertex| vertex.x).min(),
+                    vertices.iter().map(|vertex| vertex.x).max(),
+                    vertices.iter().map(|vertex| vertex.z).min(),
+                    vertices.iter().map(|vertex| vertex.z).max(),
+                );
+            }
         }
     }
 
