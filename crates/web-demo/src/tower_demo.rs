@@ -303,10 +303,11 @@ mod tests {
             if minimum_y < floor_top {
                 let rigid_box = frame.boxes[body_index];
                 panic!(
-                    "body {body_index} / entity {} penetrated below the floor surface at frame {step}: min_y={minimum_y}, floor_top={floor_top}, center={:?}, velocity={:?}, angular_velocity={:?}, x_range={:?}..={:?}, z_range={:?}..={:?}",
+                    "body {body_index} / entity {} penetrated below the floor surface at frame {step}: min_y={minimum_y}, floor_top={floor_top}, center={:?}, linear_velocity={:?}, orientation={:?}, angular_velocity={:?}, x_range={:?}..={:?}, z_range={:?}..={:?}",
                     rigid_box.body.entity.0,
                     rigid_box.state.center,
-                    rigid_box.state.velocity,
+                    rigid_box.state.linear_velocity,
+                    rigid_box.state.angular.orientation,
                     rigid_box.state.angular.angular_velocity,
                     vertices.iter().map(|vertex| vertex.x).min(),
                     vertices.iter().map(|vertex| vertex.x).max(),
