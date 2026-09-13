@@ -66,7 +66,7 @@ pub use oriented_box::{
     ObbAxisFeature3d, ObbContactSeed3d, OrientedBox3d, OrientedBoxError3d, obb_contact_seed,
 };
 pub use physics_engine_adapter::{
-    PhysicsEngineAdapterError3d, PhysicsEngineAdapterStep3d,
+    PhysicsEngineAdapterError3d, PhysicsEngineAdapterStep3d, physics_engine_boxes_penetrate,
     step_rigid_box_world_with_physics_engine,
 };
 pub use repeated_rotating_frame::{
