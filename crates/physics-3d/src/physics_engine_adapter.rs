@@ -5,10 +5,12 @@ use ecs_workload::{EntityId, Position, Velocity};
 use physics_engine::{
     AngularState3d as EngineAngularState3d, AngularVelocity3d as EngineAngularVelocity3d,
     BodyId as EngineBodyId, MAX_REPEATED_ROTATING_EVENTS as ENGINE_MAX_REPEATED_ROTATING_EVENTS,
-    Material as EngineMaterial, Orientation3d as EngineOrientation3d, RigidBody as EngineRigidBody,
+    Material as EngineMaterial, Orientation3d as EngineOrientation3d,
+    OrientedBoxError3d as EngineOrientedBoxError3d, RigidBody as EngineRigidBody,
     RigidBox3d as EngineRigidBox3d, RigidBoxError3d as EngineRigidBoxError3d,
     RotatingWorld3d as EngineRotatingWorld3d, RotatingWorldConfig3d as EngineRotatingWorldConfig3d,
     RotatingWorldError3d as EngineRotatingWorldError3d, Vec3i as EngineVec3i,
+    obb_contact_seed as engine_obb_contact_seed,
 };
 
 use crate::{
@@ -41,6 +43,7 @@ pub enum PhysicsEngineAdapterError3d {
     ArithmeticOverflow,
     AngularSubstep(AngularSubstepError3d),
     EngineBody(EngineRigidBoxError3d),
+    EngineGeometry(EngineOrientedBoxError3d),
     EngineWorld(EngineRotatingWorldError3d),
 }
 
@@ -93,6 +96,12 @@ impl fmt::Display for PhysicsEngineAdapterError3d {
                     "physics-engine adapter body conversion failed: {error}"
                 )
             }
+            Self::EngineGeometry(error) => {
+                write!(
+                    formatter,
+                    "physics-engine adapter geometry query failed: {error}"
+                )
+            }
             Self::EngineWorld(error) => {
                 write!(
                     formatter,
@@ -117,10 +126,38 @@ impl From<EngineRigidBoxError3d> for PhysicsEngineAdapterError3d {
     }
 }
 
+impl From<EngineOrientedBoxError3d> for PhysicsEngineAdapterError3d {
+    fn from(value: EngineOrientedBoxError3d) -> Self {
+        Self::EngineGeometry(value)
+    }
+}
+
 impl From<EngineRotatingWorldError3d> for PhysicsEngineAdapterError3d {
     fn from(value: EngineRotatingWorldError3d) -> Self {
         Self::EngineWorld(value)
     }
+}
+
+/// Reports whether two ECS-facing rigid boxes positively overlap according to standalone
+/// `physics-engine` OBB geometry.
+///
+/// Zero-depth touching is not penetration. The query deliberately delegates SAT/contact evidence to the
+/// standalone engine instead of retaining a second collision implementation in ECS Lab.
+///
+/// # Errors
+///
+/// Returns [`PhysicsEngineAdapterError3d`] when either ECS body cannot be represented by the engine or
+/// the engine rejects the OBB geometry query.
+pub fn physics_engine_boxes_penetrate(
+    left: RigidBox3d,
+    right: RigidBox3d,
+) -> Result<bool, PhysicsEngineAdapterError3d> {
+    let left = to_engine_box(left)?;
+    let right = to_engine_box(right)?;
+    Ok(
+        engine_obb_contact_seed(left.oriented_box(), right.oriented_box())?
+            .is_some_and(|contact| contact.overlap_numerator > 0),
+    )
 }
 
 /// Advances ECS-owned rigid-box state through the standalone `physics-engine` authority.
@@ -375,7 +412,7 @@ mod tests {
         RigidBoxWorldConfig3d, RotatingContactSearchConfig3d,
     };
 
-    use super::step_rigid_box_world_with_physics_engine;
+    use super::{physics_engine_boxes_penetrate, step_rigid_box_world_with_physics_engine};
 
     fn dynamic(
         entity: u32,
@@ -392,6 +429,27 @@ mod tests {
                 AngularState3d::new(Orientation3d::IDENTITY, AngularVelocity3d::default()),
             ),
         )
+    }
+
+    #[test]
+    fn engine_geometry_query_distinguishes_touching_from_penetration() {
+        let left = dynamic(1, Position::new3(0, 0, 0), Velocity::new3(0, 0, 0), 0);
+        let touching = dynamic(2, Position::new3(20, 0, 0), Velocity::new3(0, 0, 0), 0);
+        let penetrating = dynamic(3, Position::new3(19, 0, 0), Velocity::new3(0, 0, 0), 0);
+        let separated = dynamic(4, Position::new3(21, 0, 0), Velocity::new3(0, 0, 0), 0);
+
+        assert!(
+            !physics_engine_boxes_penetrate(left, touching)
+                .expect("touching engine geometry should be valid")
+        );
+        assert!(
+            physics_engine_boxes_penetrate(left, penetrating)
+                .expect("overlapping engine geometry should be valid")
+        );
+        assert!(
+            !physics_engine_boxes_penetrate(left, separated)
+                .expect("separated engine geometry should be valid")
+        );
     }
 
     #[test]
