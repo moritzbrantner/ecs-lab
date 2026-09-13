@@ -4,7 +4,7 @@ use ecs_physics::PhysicsMaterial;
 use ecs_physics_3d::{
     AngularState3d, AngularSubstepPolicy3d, AngularVelocity3d, Orientation3d, PhysicsBody3d,
     RigidBox3d, RigidBoxState3d, RigidBoxWorldConfig3d, RotatingContactSearchConfig3d,
-    oriented_box_vertices, physics_engine_boxes_penetrate, step_rigid_box_world_with_physics_engine,
+    oriented_box_vertices, step_rigid_box_world_with_physics_engine,
 };
 use ecs_workload::{EntityId, Position, Velocity};
 
@@ -284,6 +284,8 @@ pub extern "C" fn physics_tower_demo_tail_contacts(steps: u32) -> u32 {
 
 #[cfg(test)]
 mod tests {
+    use ecs_physics_3d::physics_engine_boxes_penetrate;
+
     use super::*;
 
     fn assert_no_floor_penetration(frame: &TowerFrame, step: u32) {
