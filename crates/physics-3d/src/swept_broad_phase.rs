@@ -54,29 +54,6 @@ pub(crate) fn swept_candidate_pairs(
     candidate_pairs_for_bounds(&bounds, cell_size_units)
 }
 
-/// Builds deterministic spatial-hash candidates for already conservative integer world-space AABBs.
-///
-/// This is the reusable discrete counterpart to [`swept_candidate_pairs`]. The supplied bounds remain
-/// authoritative: the hash only removes pairs that cannot share a covered grid cell. `None` requests an
-/// all-pairs fallback when coordinates or cell coverage exceed the exact/cheap grid contract.
-pub(crate) fn aabb_candidate_pairs(bounds: &[BroadPhaseBounds3d]) -> Option<Vec<(usize, usize)>> {
-    if bounds.len() < 2 {
-        return Some(Vec::new());
-    }
-
-    let mut cell_size_units = 1_i64;
-    for body in bounds.iter().filter(|body| body.kind == BodyKind::Dynamic) {
-        for axis in 0..3 {
-            let span = body.maximum[axis].checked_sub(body.minimum[axis])?;
-            if span < 0 {
-                return None;
-            }
-            cell_size_units = cell_size_units.max(span.max(1));
-        }
-    }
-    candidate_pairs_for_bounds(bounds, cell_size_units)
-}
-
 fn candidate_pairs_for_bounds(
     bounds: &[BroadPhaseBounds3d],
     cell_size_units: i64,
@@ -207,10 +184,7 @@ mod tests {
 
     use ecs_physics::BodyKind;
 
-    use super::{
-        BroadPhaseBounds3d, SweptBroadPhaseBody, aabb_candidate_pairs, swept_bounds,
-        swept_candidate_pairs,
-    };
+    use super::{BroadPhaseBounds3d, SweptBroadPhaseBody, swept_bounds, swept_candidate_pairs};
 
     const SCALE: i128 = 1_i128 << 32;
 
@@ -225,14 +199,6 @@ mod tests {
             center_scaled: center.map(|value| i128::from(value) * SCALE),
             half_extents,
             velocity,
-        }
-    }
-
-    fn bounds(kind: BodyKind, minimum: [i64; 3], maximum: [i64; 3]) -> BroadPhaseBounds3d {
-        BroadPhaseBounds3d {
-            kind,
-            minimum,
-            maximum,
         }
     }
 
@@ -267,21 +233,6 @@ mod tests {
         let pairs = swept_candidate_pairs(&bodies, SCALE, SCALE).expect("grid should be usable");
         assert!(pairs.len() < bodies.len() * (bodies.len() - 1) / 2);
         assert!(pairs.is_empty());
-    }
-
-    #[test]
-    fn arbitrary_world_aabbs_share_the_same_deterministic_hash() {
-        let bodies = [
-            bounds(BodyKind::Dynamic, [-4, -2, -2], [4, 2, 2]),
-            bounds(BodyKind::Dynamic, [3, -2, -2], [9, 2, 2]),
-            bounds(BodyKind::Dynamic, [40, -2, -2], [44, 2, 2]),
-            bounds(BodyKind::Fixed, [-2, -6, -2], [2, -4, 2]),
-        ];
-        let pairs = aabb_candidate_pairs(&bodies).expect("grid should be usable");
-
-        assert!(pairs.contains(&(0, 1)));
-        assert!(!pairs.contains(&(0, 2)));
-        assert!(!pairs.contains(&(1, 2)));
     }
 
     #[test]
@@ -325,18 +276,5 @@ mod tests {
             body(BodyKind::Dynamic, [10, 0, 0], [1, 1, 1], [0, 0, 0]),
         ];
         assert!(swept_candidate_pairs(&bodies, SCALE, SCALE).is_none());
-    }
-
-    #[test]
-    fn arbitrary_bounds_outside_exact_grid_request_fallback() {
-        let bodies = [
-            bounds(
-                BodyKind::Dynamic,
-                [-(1_i64 << 25), 0, 0],
-                [-(1_i64 << 25) + 2, 2, 2],
-            ),
-            bounds(BodyKind::Dynamic, [0, 0, 0], [2, 2, 2]),
-        ];
-        assert!(aabb_candidate_pairs(&bodies).is_none());
     }
 }
