@@ -1,13 +1,10 @@
 use std::fmt;
 
-use ecs_physics::{BodyKind, MATERIAL_SCALE};
+use ecs_physics::BodyKind;
 
-use crate::{
-    RigidBox3d, RigidBoxWorldConfig3d, RigidBoxWorldError3d, RigidBoxWorldStats3d,
-    RigidBoxWorldStep3d, rigid_box_world::step_rigid_box_world as step_rigid_box_world_once,
-};
+use crate::{RigidBox3d, RigidBoxWorldConfig3d};
 
-/// Maximum bounded angular substeps accepted by this approximation layer.
+/// Maximum bounded angular substeps accepted by the ECS-to-engine adapter policy.
 pub const MAX_ANGULAR_SUBSTEPS: u8 = 16;
 /// Default maximum conservative angular displacement per substep, in `1e-6` radians.
 pub const DEFAULT_MAX_ANGULAR_STEP_UNITS: u32 = 125_000;
@@ -35,9 +32,10 @@ impl Default for AngularSubstepPolicy3d {
 pub enum AngularSubstepError3d {
     ZeroAngularStep,
     SubstepCapOutOfRange(u8),
+    NegativeTimestepNumerator(i32),
+    NonPositiveTimestepDenominator(i32),
     RequiredSubstepsExceeded { required: u128, maximum: u8 },
     ArithmeticOverflow,
-    World(RigidBoxWorldError3d),
 }
 
 impl fmt::Display for AngularSubstepError3d {
@@ -51,33 +49,29 @@ impl fmt::Display for AngularSubstepError3d {
                 formatter,
                 "angular substep cap must be 1..={MAX_ANGULAR_SUBSTEPS}, got {value}"
             ),
+            Self::NegativeTimestepNumerator(value) => write!(
+                formatter,
+                "angular substep timestep numerator must be non-negative, got {value}"
+            ),
+            Self::NonPositiveTimestepDenominator(value) => write!(
+                formatter,
+                "angular substep timestep denominator must be positive, got {value}"
+            ),
             Self::RequiredSubstepsExceeded { required, maximum } => write!(
                 formatter,
                 "angular motion requires {required} substeps but the configured cap is {maximum}"
             ),
             Self::ArithmeticOverflow => write!(formatter, "angular substep arithmetic overflowed"),
-            Self::World(error) => write!(formatter, "angular substep world step failed: {error}"),
         }
     }
 }
 
 impl std::error::Error for AngularSubstepError3d {}
 
-impl From<RigidBoxWorldError3d> for AngularSubstepError3d {
-    fn from(value: RigidBoxWorldError3d) -> Self {
-        Self::World(value)
-    }
-}
-
 /// Returns the deterministic equal-substep count required by `policy` for one requested frame.
 ///
-/// The bound uses the L1 norm of dynamic angular velocity as a conservative, square-root-free upper
-/// bound on angular speed. The calculation stays in exact integer/rational units and therefore does not
-/// make platform floating point part of collision timing. Slow or non-rotating scenes remain one step.
-///
-/// This is a bounded discrete approximation policy, not rotational CCD. A substep count greater than one
-/// increases the number of orientation/contact samples inside the frame but does not solve an analytic
-/// earliest time of impact.
+/// ECS Lab retains this count because frame-level damping is consumer policy. Every resulting substep is
+/// executed by `physics-engine`; this function does not integrate motion or resolve contacts.
 ///
 /// # Errors
 ///
@@ -90,15 +84,14 @@ pub fn required_angular_substeps(
 ) -> Result<u8, AngularSubstepError3d> {
     validate_policy(policy)?;
     if config.timestep_numerator < 0 {
-        return Err(
-            RigidBoxWorldError3d::NegativeTimestepNumerator(config.timestep_numerator).into(),
-        );
+        return Err(AngularSubstepError3d::NegativeTimestepNumerator(
+            config.timestep_numerator,
+        ));
     }
     if config.timestep_denominator <= 0 {
-        return Err(RigidBoxWorldError3d::NonPositiveTimestepDenominator(
+        return Err(AngularSubstepError3d::NonPositiveTimestepDenominator(
             config.timestep_denominator,
-        )
-        .into());
+        ));
     }
 
     let maximum_speed = boxes
@@ -134,72 +127,6 @@ pub fn required_angular_substeps(
     u8::try_from(required).map_err(|_| AngularSubstepError3d::ArithmeticOverflow)
 }
 
-/// Advances one requested rigid-box frame through a bounded number of deterministic angular substeps.
-///
-/// Each substep uses an equal rational fraction of the original timestep. Angular damping is deliberately
-/// disabled on intermediate samples and applied only on the final sample, preserving its existing
-/// once-per-requested-frame meaning. Candidate/contact counters accumulate across samples while
-/// `spinning_bodies` reports the final state only.
-///
-/// The ordinary [`crate::step_rigid_box_world`] API remains available and unchanged. Callers opt into
-/// this approximation explicitly until the rotational-CCD horizon has enough evidence to justify making
-/// it the canonical stepping policy.
-///
-/// # Errors
-///
-/// Returns [`AngularSubstepError3d`] when the policy cannot represent the requested angular motion, the
-/// rational substep denominator overflows, accumulated evidence overflows, or an underlying world step
-/// fails.
-pub fn step_rigid_box_world_substepped(
-    boxes: &[RigidBox3d],
-    config: RigidBoxWorldConfig3d,
-    policy: AngularSubstepPolicy3d,
-) -> Result<RigidBoxWorldStep3d, AngularSubstepError3d> {
-    let substeps = required_angular_substeps(boxes, config, policy)?;
-    if substeps == 1 {
-        return step_rigid_box_world_once(boxes, config).map_err(Into::into);
-    }
-
-    let substep_denominator = config
-        .timestep_denominator
-        .checked_mul(i32::from(substeps))
-        .ok_or(AngularSubstepError3d::ArithmeticOverflow)?;
-    let mut current = boxes.to_vec();
-    let mut accumulated = RigidBoxWorldStats3d::default();
-
-    for index in 0..substeps {
-        let final_substep = index + 1 == substeps;
-        let mut substep_config = config;
-        substep_config.timestep_denominator = substep_denominator;
-        if !final_substep {
-            substep_config.angular_damping_milli = MATERIAL_SCALE;
-        }
-
-        let step = step_rigid_box_world_once(&current, substep_config)?;
-        accumulated.candidate_pairs = accumulated
-            .candidate_pairs
-            .checked_add(step.stats.candidate_pairs)
-            .ok_or(AngularSubstepError3d::ArithmeticOverflow)?;
-        accumulated.contacts = accumulated
-            .contacts
-            .checked_add(step.stats.contacts)
-            .ok_or(AngularSubstepError3d::ArithmeticOverflow)?;
-        accumulated.impulsive_contacts = accumulated
-            .impulsive_contacts
-            .checked_add(step.stats.impulsive_contacts)
-            .ok_or(AngularSubstepError3d::ArithmeticOverflow)?;
-        if final_substep {
-            accumulated.spinning_bodies = step.stats.spinning_bodies;
-        }
-        current = step.boxes;
-    }
-
-    Ok(RigidBoxWorldStep3d {
-        boxes: current,
-        stats: accumulated,
-    })
-}
-
 fn validate_policy(policy: AngularSubstepPolicy3d) -> Result<(), AngularSubstepError3d> {
     if policy.max_angular_step_units == 0 {
         return Err(AngularSubstepError3d::ZeroAngularStep);
@@ -221,6 +148,7 @@ fn angular_l1_units(rigid_box: &RigidBox3d) -> Option<u128> {
 
 #[cfg(test)]
 mod tests {
+    use ecs_physics::MATERIAL_SCALE;
     use ecs_workload::{EntityId, Position, Velocity};
 
     use crate::{
@@ -240,16 +168,11 @@ mod tests {
         }
     }
 
-    fn dynamic_box(
-        entity: u32,
-        half_extents: [i32; 3],
-        center: Position,
-        angular_velocity: AngularVelocity3d,
-    ) -> RigidBox3d {
+    fn dynamic_box(angular_velocity: AngularVelocity3d) -> RigidBox3d {
         RigidBox3d::new(
-            PhysicsBody3d::dynamic(EntityId(entity), half_extents),
+            PhysicsBody3d::dynamic(EntityId(1), [10, 10, 10]),
             RigidBoxState3d::new(
-                center,
+                Position::new3(0, 20, 0),
                 Velocity::new3(0, 0, 0),
                 AngularState3d::new(Orientation3d::IDENTITY, angular_velocity),
             ),
@@ -257,35 +180,23 @@ mod tests {
     }
 
     #[test]
-    fn slow_spin_matches_the_existing_single_step_bit_for_bit() {
-        let boxes = [dynamic_box(
-            1,
-            [10, 10, 10],
-            Position::new3(0, 20, 0),
-            AngularVelocity3d::new(10_000, 20_000, -10_000),
-        )];
-        let expected =
-            step_rigid_box_world_once(&boxes, config()).expect("valid direct world step");
-        let actual =
-            step_rigid_box_world_substepped(&boxes, config(), AngularSubstepPolicy3d::default())
-                .expect("slow spin should remain one step");
+    fn slow_spin_remains_one_engine_substep() {
+        let boxes = [dynamic_box(AngularVelocity3d::new(10_000, 20_000, -10_000))];
 
         assert_eq!(
             required_angular_substeps(&boxes, config(), AngularSubstepPolicy3d::default())
                 .expect("valid policy"),
             1
         );
-        assert_eq!(actual, expected);
     }
 
     #[test]
-    fn high_spin_uses_multiple_equal_substeps() {
-        let boxes = [dynamic_box(
-            1,
-            [10, 10, 10],
-            Position::new3(0, 20, 0),
-            AngularVelocity3d::new(0, 0, 12 * ANGULAR_VELOCITY_SCALE),
-        )];
+    fn high_spin_uses_multiple_equal_engine_substeps() {
+        let boxes = [dynamic_box(AngularVelocity3d::new(
+            0,
+            0,
+            12 * ANGULAR_VELOCITY_SCALE,
+        ))];
         let policy = AngularSubstepPolicy3d {
             max_angular_step_units: 50_000,
             max_substeps: 8,
@@ -299,12 +210,11 @@ mod tests {
 
     #[test]
     fn excessive_spin_fails_closed_at_the_configured_cap() {
-        let boxes = [dynamic_box(
-            1,
-            [10, 10, 10],
-            Position::new3(0, 20, 0),
-            AngularVelocity3d::new(0, 0, 60 * ANGULAR_VELOCITY_SCALE),
-        )];
+        let boxes = [dynamic_box(AngularVelocity3d::new(
+            0,
+            0,
+            60 * ANGULAR_VELOCITY_SCALE,
+        ))];
         let policy = AngularSubstepPolicy3d {
             max_angular_step_units: 50_000,
             max_substeps: 8,
@@ -320,39 +230,14 @@ mod tests {
     }
 
     #[test]
-    fn substeps_observe_a_rotational_contact_missed_by_the_single_endpoint() {
-        let boxes = [
-            dynamic_box(
-                1,
-                [20, 2, 2],
-                Position::new3(0, 0, 0),
-                AngularVelocity3d::new(0, 0, 230 * ANGULAR_VELOCITY_SCALE),
-            ),
-            RigidBox3d::new(
-                PhysicsBody3d::fixed(EntityId(2), [2, 2, 2]),
-                RigidBoxState3d::new(
-                    Position::new3(10, 10, 0),
-                    Velocity::new3(0, 0, 0),
-                    AngularState3d::new(Orientation3d::IDENTITY, AngularVelocity3d::default()),
-                ),
-            ),
-        ];
-        let direct = step_rigid_box_world_once(&boxes, config()).expect("valid direct world step");
-        let substepped = step_rigid_box_world_substepped(
-            &boxes,
-            config(),
-            AngularSubstepPolicy3d {
-                max_angular_step_units: 800_000,
-                max_substeps: 8,
-            },
-        )
-        .expect("bounded intermediate rotation samples");
+    fn malformed_timestep_is_rejected_before_engine_dispatch() {
+        let boxes = [dynamic_box(AngularVelocity3d::default())];
+        let mut invalid = config();
+        invalid.timestep_denominator = 0;
 
-        assert_eq!(direct.stats.contacts, 0);
-        assert!(substepped.stats.contacts > 0);
-        assert_ne!(
-            substepped.boxes[0].state.center,
-            direct.boxes[0].state.center
+        assert_eq!(
+            required_angular_substeps(&boxes, invalid, AngularSubstepPolicy3d::default()),
+            Err(AngularSubstepError3d::NonPositiveTimestepDenominator(0))
         );
     }
 }
