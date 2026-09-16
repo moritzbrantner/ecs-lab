@@ -118,14 +118,29 @@ pub struct WorldSnapshot {
 }
 
 impl WorldSnapshot {
+    /// Creates the canonical observable world representation.
+    ///
+    /// Entity order is part of the snapshot foundation rather than something every consumer should
+    /// repeatedly reconstruct. Canonicalizing once here lets physics, controllers, liquids and other
+    /// read-only systems perform deterministic binary lookup without allocating a temporary index.
     #[must_use]
-    pub fn new(entities: Vec<EntitySnapshot>) -> Self {
+    pub fn new(mut entities: Vec<EntitySnapshot>) -> Self {
+        entities.sort_unstable_by_key(|entity| entity.id);
         Self { entities }
     }
 
     #[must_use]
     pub fn entities(&self) -> &[EntitySnapshot] {
         &self.entities
+    }
+
+    /// Returns one entity from the canonical snapshot without allocating an auxiliary map.
+    #[must_use]
+    pub fn entity(&self, id: EntityId) -> Option<&EntitySnapshot> {
+        self.entities
+            .binary_search_by_key(&id, |entity| entity.id)
+            .ok()
+            .map(|index| &self.entities[index])
     }
 }
 
@@ -176,7 +191,9 @@ impl Generator {
 
 #[cfg(test)]
 mod tests {
-    use super::{EntityId, Operation, Position, Velocity, Workload};
+    use super::{
+        EntityId, EntitySnapshot, Operation, Position, Velocity, Workload, WorldSnapshot,
+    };
 
     #[test]
     fn workload_preserves_operation_order() {
@@ -193,6 +210,26 @@ mod tests {
     fn two_axis_constructors_preserve_the_legacy_z_zero_plane() {
         assert_eq!(Position::new(2, 3), Position::new3(2, 3, 0));
         assert_eq!(Velocity::new(4, 5), Velocity::new3(4, 5, 0));
+    }
+
+    #[test]
+    fn world_snapshot_canonicalizes_once_and_supports_direct_lookup() {
+        let first = EntitySnapshot {
+            id: EntityId(1),
+            position: Some(Position::new(1, 2)),
+            velocity: None,
+        };
+        let third = EntitySnapshot {
+            id: EntityId(3),
+            position: Some(Position::new(3, 4)),
+            velocity: Some(Velocity::new(5, 6)),
+        };
+        let snapshot = WorldSnapshot::new(vec![third, first]);
+
+        assert_eq!(snapshot.entities(), [first, third]);
+        assert_eq!(snapshot.entity(EntityId(1)), Some(&first));
+        assert_eq!(snapshot.entity(EntityId(3)), Some(&third));
+        assert_eq!(snapshot.entity(EntityId(2)), None);
     }
 
     #[test]
