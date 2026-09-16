@@ -7,6 +7,7 @@ rust-version.workspace = true
 
 [dependencies]
 ecs-physics = { path = "../physics" }
+ecs-physics-3d = { path = "../physics-3d" }
 ecs-physics-scenarios = { path = "../physics-scenarios" }
 ecs-reference = { path = "../reference" }
 ecs-sparse-set = { path = "../sparse-set" }
