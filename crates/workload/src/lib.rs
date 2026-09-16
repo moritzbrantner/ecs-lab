@@ -127,10 +127,7 @@ impl WorldSnapshot {
     /// temporary index.
     #[must_use]
     pub fn new(mut entities: Vec<EntitySnapshot>) -> Self {
-        if !entities
-            .windows(2)
-            .all(|pair| pair[0].id <= pair[1].id)
-        {
+        if !entities.windows(2).all(|pair| pair[0].id <= pair[1].id) {
             entities.sort_unstable_by_key(|entity| entity.id);
         }
         Self { entities }
