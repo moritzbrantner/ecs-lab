@@ -1,9 +1,6 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    fmt,
-};
+use std::{borrow::Cow, collections::BTreeSet, fmt};
 
-use ecs_workload::{EntityId, EntitySnapshot, Operation, Position, Velocity, WorldSnapshot};
+use ecs_workload::{EntityId, Operation, Position, Velocity, WorldSnapshot};
 use geometry_kernels::aabb_aabb;
 use spatial_kernels::Aabb;
 
@@ -216,13 +213,14 @@ impl std::error::Error for PhysicsError {}
 /// Produces one deterministic physics step from an observable ECS snapshot.
 ///
 /// Dynamic bodies use semi-implicit Euler integration. Every body pair is then visited in
-/// ascending entity-id order. Cheap exact-integer axis separation rejects obviously distant pairs
-/// before the reusable collision kernel is called. Derived f32 AABBs are cached and rebuilt only
-/// after motion or positional correction. Possible contacts still pass through `geometry-kernels`,
-/// which owns the AABB overlap decision; this crate owns deterministic positional correction plus
-/// integer mass, restitution, and contact-friction response. Returned operations are ordinary ECS
-/// workload operations, so storage candidates can consume the same result without implementing a
-/// physics-specific trait.
+/// ascending entity-id order. Canonically ordered body input is borrowed directly; out-of-order callers
+/// retain the compatibility copy-and-sort path. Cheap exact-integer axis separation rejects obviously
+/// distant pairs before the reusable collision kernel is called. Derived f32 AABBs are cached and rebuilt
+/// only after motion or positional correction. Possible contacts still pass through `geometry-kernels`,
+/// which owns the AABB overlap decision; this crate owns deterministic positional correction plus integer
+/// mass, restitution, and contact-friction response. Returned operations are ordinary ECS workload
+/// operations, so storage candidates can consume the same result without implementing a physics-specific
+/// trait.
 ///
 /// Material coefficients use thousandths: `0` is none and [`MATERIAL_SCALE`] is the full value.
 /// Restitution combines by taking the higher coefficient, while friction takes the higher
@@ -244,14 +242,11 @@ pub fn step(
         return Err(PhysicsError::NonPositiveTicks(ticks));
     }
 
-    let snapshots = snapshot_by_id(snapshot);
-    let mut ordered_bodies = bodies.to_vec();
-    ordered_bodies.sort_unstable_by_key(|body| body.entity);
-    reject_duplicate_bodies(&ordered_bodies)?;
-
+    let ordered_bodies = canonical_bodies(bodies)?;
     let mut states = ordered_bodies
-        .into_iter()
-        .map(|body| BodyState::from_body(body, &snapshots))
+        .iter()
+        .copied()
+        .map(|body| BodyState::from_body(body, snapshot))
         .collect::<Result<Vec<_>, _>>()?;
 
     for state in &mut states {
@@ -296,12 +291,18 @@ pub fn step(
     })
 }
 
-fn snapshot_by_id(snapshot: &WorldSnapshot) -> BTreeMap<EntityId, EntitySnapshot> {
-    snapshot
-        .entities()
-        .iter()
-        .map(|entity| (entity.id, *entity))
-        .collect()
+fn canonical_bodies(bodies: &[PhysicsBody]) -> Result<Cow<'_, [PhysicsBody]>, PhysicsError> {
+    if bodies
+        .windows(2)
+        .all(|pair| pair[0].entity < pair[1].entity)
+    {
+        return Ok(Cow::Borrowed(bodies));
+    }
+
+    let mut ordered = bodies.to_vec();
+    ordered.sort_unstable_by_key(|body| body.entity);
+    reject_duplicate_bodies(&ordered)?;
+    Ok(Cow::Owned(ordered))
 }
 
 fn reject_duplicate_bodies(bodies: &[PhysicsBody]) -> Result<(), PhysicsError> {
@@ -328,10 +329,7 @@ struct BodyState {
 }
 
 impl BodyState {
-    fn from_body(
-        body: PhysicsBody,
-        snapshots: &BTreeMap<EntityId, EntitySnapshot>,
-    ) -> Result<Self, PhysicsError> {
+    fn from_body(body: PhysicsBody, snapshot: &WorldSnapshot) -> Result<Self, PhysicsError> {
         if body.half_extents.iter().any(|extent| *extent < 0) {
             return Err(PhysicsError::InvalidHalfExtents(body.entity));
         }
@@ -351,8 +349,8 @@ impl BodyState {
             ));
         }
 
-        let entity = snapshots
-            .get(&body.entity)
+        let entity = snapshot
+            .entity(body.entity)
             .ok_or(PhysicsError::MissingEntity(body.entity))?;
         let position = entity
             .position
@@ -805,6 +803,8 @@ fn exact_i64_to_f32(value: i64) -> f32 {
 
 #[cfg(test)]
 mod tests {
+    use std::borrow::Cow;
+
     use ecs_reference::ReferenceWorld;
     use ecs_workload::{
         EntityId, EntitySnapshot, Operation, Position, Velocity, Workload, WorldSnapshot,
@@ -812,7 +812,7 @@ mod tests {
 
     use super::{
         ContactNormal, PhysicsBody, PhysicsConfig, PhysicsError, PhysicsMaterial, PhysicsStepStats,
-        step,
+        canonical_bodies, step,
     };
 
     const NO_GRAVITY: PhysicsConfig = PhysicsConfig {
@@ -1085,6 +1085,18 @@ mod tests {
         assert_eq!(physics.stats().resolved_contacts, 0);
         assert_eq!(physics.contacts()[0].penetration, 0);
         assert!(physics.is_supported(dynamic));
+    }
+
+    #[test]
+    fn canonical_body_input_is_borrowed_without_copying() {
+        let bodies = [
+            PhysicsBody::dynamic(EntityId(1), [1, 1]),
+            PhysicsBody::dynamic(EntityId(2), [1, 1]),
+        ];
+        assert!(matches!(canonical_bodies(&bodies), Ok(Cow::Borrowed(_))));
+
+        let reversed = [bodies[1], bodies[0]];
+        assert!(matches!(canonical_bodies(&reversed), Ok(Cow::Owned(_))));
     }
 
     #[test]
