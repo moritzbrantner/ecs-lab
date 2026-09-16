@@ -16,7 +16,11 @@ const NO_GRAVITY_3D: PhysicsConfig3d = PhysicsConfig3d {
 
 pub(super) fn run(smoke: bool, fingerprint: &str) {
     let (dynamic_count, repetitions) = if smoke { (24, 3) } else { (96, 5) };
-    let (snapshot, bodies) = fixture(dynamic_count);
+    let dynamic_count_usize = must(
+        usize::try_from(dynamic_count),
+        "continuous 3D benchmark body count must fit usize",
+    );
+    let (snapshot, bodies) = fixture(dynamic_count, dynamic_count_usize);
 
     let preflight = must(
         step_3d(&snapshot, &bodies, NO_GRAVITY_3D, 1),
@@ -31,7 +35,7 @@ pub(super) fn run(smoke: bool, fingerprint: &str) {
         "continuous 3D benchmark must replay exactly before timing"
     );
     assert!(
-        preflight.stats().ccd_contacts > dynamic_count as usize,
+        preflight.stats().ccd_contacts > dynamic_count_usize,
         "continuous 3D benchmark must traverse more than one global CCD event"
     );
     assert!(
@@ -61,9 +65,13 @@ pub(super) fn run(smoke: bool, fingerprint: &str) {
     );
 }
 
-fn fixture(dynamic_count: u32) -> (WorldSnapshot, Vec<PhysicsBody3d>) {
-    let mut entities = Vec::with_capacity(dynamic_count.saturating_add(2) as usize);
-    let mut bodies = Vec::with_capacity(dynamic_count.saturating_add(2) as usize);
+fn fixture(
+    dynamic_count: u32,
+    dynamic_count_usize: usize,
+) -> (WorldSnapshot, Vec<PhysicsBody3d>) {
+    let capacity = dynamic_count_usize.saturating_add(2);
+    let mut entities = Vec::with_capacity(capacity);
+    let mut bodies = Vec::with_capacity(capacity);
     let bouncy = PhysicsMaterial::new(1_000, 0);
 
     for raw_id in 0..dynamic_count {
@@ -83,8 +91,8 @@ fn fixture(dynamic_count: u32) -> (WorldSnapshot, Vec<PhysicsBody3d>) {
         i32::try_from(wall_center_y + 2),
         "continuous 3D benchmark wall extent must fit i32",
     );
-    for (offset, x) in [(-WALL_X), WALL_X].into_iter().enumerate() {
-        let raw_id = dynamic_count.saturating_add(offset as u32);
+    for (offset, x) in [(0_u32, -WALL_X), (1_u32, WALL_X)] {
+        let raw_id = dynamic_count.saturating_add(offset);
         let entity = EntityId(raw_id);
         entities.push(EntitySnapshot {
             id: entity,
