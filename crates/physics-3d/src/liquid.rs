@@ -55,9 +55,7 @@ pub fn liquid_operations(
             return Err(LiquidError3d::ZeroMass(body.entity));
         }
         let state = snapshot
-            .entities()
-            .iter()
-            .find(|candidate| candidate.id == body.entity)
+            .entity(body.entity)
             .ok_or(LiquidError3d::MissingEntity(body.entity))?;
         let position = state
             .position
