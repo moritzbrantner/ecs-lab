@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use ecs_workload::EntityId;
 
 use crate::{Collider3d, ColliderError3d, collider_contact};
@@ -104,10 +106,26 @@ pub const fn pair_interaction(
     }
 }
 
+fn canonical_colliders(
+    colliders: &[InteractiveCollider3d],
+) -> Cow<'_, [InteractiveCollider3d]> {
+    if colliders
+        .windows(2)
+        .all(|pair| pair[0].entity <= pair[1].entity)
+    {
+        Cow::Borrowed(colliders)
+    } else {
+        let mut ordered = colliders.to_vec();
+        ordered.sort_unstable_by_key(|entry| entry.entity);
+        Cow::Owned(ordered)
+    }
+}
+
 /// Collects deterministic final-state sensor overlaps in canonical entity-pair order.
 ///
 /// Sensor overlap is observation only: this function cannot mutate ECS state or apply collision response.
-/// Filtering happens before shape evaluation, so masked pairs are not reported.
+/// Filtering happens before shape evaluation, so masked pairs are not reported. Canonically ordered input
+/// is borrowed directly; only out-of-order callers pay for the compatibility copy and sort.
 ///
 /// # Errors
 ///
@@ -116,8 +134,7 @@ pub const fn pair_interaction(
 pub fn sensor_events(
     colliders: &[InteractiveCollider3d],
 ) -> Result<Vec<SensorEvent3d>, ColliderError3d> {
-    let mut ordered = colliders.to_vec();
-    ordered.sort_unstable_by_key(|entry| entry.entity);
+    let ordered = canonical_colliders(colliders);
     let mut events = Vec::new();
 
     for left_index in 0..ordered.len() {
@@ -140,13 +157,15 @@ pub fn sensor_events(
 
 #[cfg(test)]
 mod tests {
+    use std::borrow::Cow;
+
     use ecs_workload::{EntityId, Position};
 
     use crate::{Collider3d, ColliderShape3d};
 
     use super::{
         ColliderRole3d, CollisionFilter3d, InteractiveCollider3d, PairInteraction3d, SensorEvent3d,
-        pair_interaction, sensor_events,
+        canonical_colliders, pair_interaction, sensor_events,
     };
 
     fn sphere(entity: u32, x: i64, role: ColliderRole3d) -> InteractiveCollider3d {
@@ -176,6 +195,19 @@ mod tests {
         let sensor = sphere(2, 0, ColliderRole3d::Sensor);
         assert_eq!(pair_interaction(&solid, &sensor), PairInteraction3d::Sensor);
         assert_eq!(pair_interaction(&sensor, &solid), PairInteraction3d::Sensor);
+    }
+
+    #[test]
+    fn canonical_sensor_input_is_borrowed_without_copying() {
+        let colliders = [
+            sphere(2, 0, ColliderRole3d::Sensor),
+            sphere(5, 20, ColliderRole3d::Sensor),
+            sphere(9, 0, ColliderRole3d::Solid),
+        ];
+        assert!(matches!(canonical_colliders(&colliders), Cow::Borrowed(_)));
+
+        let reversed = [colliders[2], colliders[1], colliders[0]];
+        assert!(matches!(canonical_colliders(&reversed), Cow::Owned(_)));
     }
 
     #[test]
