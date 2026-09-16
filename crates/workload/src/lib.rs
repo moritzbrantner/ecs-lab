@@ -121,11 +121,18 @@ impl WorldSnapshot {
     /// Creates the canonical observable world representation.
     ///
     /// Entity order is part of the snapshot foundation rather than something every consumer should
-    /// repeatedly reconstruct. Canonicalizing once here lets physics, controllers, liquids and other
-    /// read-only systems perform deterministic binary lookup without allocating a temporary index.
+    /// repeatedly reconstruct. Backends that already emit canonical entity-id order keep their existing
+    /// vector untouched; only noncanonical callers pay for sorting. Physics, controllers, liquids and
+    /// other read-only systems can then perform deterministic binary lookup without allocating a
+    /// temporary index.
     #[must_use]
     pub fn new(mut entities: Vec<EntitySnapshot>) -> Self {
-        entities.sort_unstable_by_key(|entity| entity.id);
+        if !entities
+            .windows(2)
+            .all(|pair| pair[0].id <= pair[1].id)
+        {
+            entities.sort_unstable_by_key(|entity| entity.id);
+        }
         Self { entities }
     }
 
