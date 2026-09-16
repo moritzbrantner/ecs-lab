@@ -6,7 +6,7 @@
     "standard": ["format:check", "lint", "build", "test", "test:integration"],
     "performance": ["benchmark:smoke"]
   },
-  "requiredCapabilities": ["format:check", "lint", "build", "test"],
+  "requiredCapabilities": ["format:check", "lint", "build", "test", "benchmark:smoke"],
   "optionalCapabilities": ["test:integration"],
   "capabilityCommands": {
     ".": {
