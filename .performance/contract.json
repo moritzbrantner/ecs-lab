@@ -132,6 +132,33 @@
           "blocking": false
         }
       ]
+    },
+    {
+      "id": "continuous-3d-bouncing-lanes",
+      "kind": "stress",
+      "description": "Twenty-four isolated dynamic AABBs bounce repeatedly between two fixed walls in one continuous 3D step, exercising repeated global CCD event search and broad-phase reconstruction without dynamic-body contact ambiguity.",
+      "dimensions": {
+        "dynamic_bodies": 24,
+        "fixed_walls": 2,
+        "bodies": 26,
+        "frames": 1,
+        "repetitions": 3
+      },
+      "correctnessEvidence": [
+        "continuous 3D step succeeds",
+        "exact replay equality before timing",
+        "CCD contacts exceed dynamic body count to prove repeated global events",
+        "every CCD contact originates from a broad-phase candidate"
+      ],
+      "metrics": [
+        {
+          "name": "elapsed_ns",
+          "unit": "ns",
+          "direction": "lower",
+          "signal": "wall-clock",
+          "blocking": false
+        }
+      ]
     }
   ]
 }
