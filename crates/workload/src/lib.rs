@@ -191,9 +191,7 @@ impl Generator {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        EntityId, EntitySnapshot, Operation, Position, Velocity, Workload, WorldSnapshot,
-    };
+    use super::{EntityId, EntitySnapshot, Operation, Position, Velocity, Workload, WorldSnapshot};
 
     #[test]
     fn workload_preserves_operation_order() {
