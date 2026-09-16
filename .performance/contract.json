@@ -1,0 +1,137 @@
+{
+  "schemaVersion": 1,
+  "suite": "ecs-lab/benchmark-smoke",
+  "description": "Representative ECS integration contract. Storage parity and physics semantics are correctness gates; shared-runner elapsed time remains advisory while deterministic candidate/contact work is the preferred blocking signal as instrumentation expands.",
+  "scenarios": [
+    {
+      "id": "motion",
+      "kind": "common",
+      "description": "Replay and integrate a deterministic 1,000-entity motion workload through reference and sparse-set storage.",
+      "dimensions": {
+        "entities": 1000,
+        "rounds": 10,
+        "repetitions": 2,
+        "implementations": "reference+sparse-set"
+      },
+      "correctnessEvidence": [
+        "reference/sparse canonical snapshot equality",
+        "seeded workload",
+        "environment fingerprint"
+      ],
+      "metrics": [
+        {
+          "name": "elapsed_ns",
+          "unit": "ns",
+          "direction": "lower",
+          "signal": "wall-clock",
+          "blocking": false
+        }
+      ]
+    },
+    {
+      "id": "falling-boxes",
+      "kind": "journey",
+      "description": "Run a bounded physics-backed falling-box integration through both ECS storage implementations.",
+      "dimensions": {
+        "dynamic_bodies": 96,
+        "bodies": 97,
+        "frames": 12,
+        "repetitions": 2
+      },
+      "correctnessEvidence": [
+        "reference/sparse canonical snapshot equality",
+        "validated physics operations",
+        "environment fingerprint"
+      ],
+      "metrics": [
+        {
+          "name": "elapsed_ns",
+          "unit": "ns",
+          "direction": "lower",
+          "signal": "wall-clock",
+          "blocking": false
+        }
+      ]
+    },
+    {
+      "id": "material-step-sparse",
+      "kind": "scaling",
+      "description": "Sparse 96-body material step isolates candidate traversal and must not produce exact contacts.",
+      "dimensions": {
+        "bodies": 96,
+        "spacing": 8,
+        "frames": 1,
+        "repetitions": 3
+      },
+      "correctnessEvidence": [
+        "physics step succeeds",
+        "zero exact contacts in preflight"
+      ],
+      "metrics": [
+        {
+          "name": "contacts",
+          "unit": "contacts",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": true,
+          "budget": { "max": 0 }
+        },
+        {
+          "name": "candidate_pairs",
+          "unit": "pairs",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": true,
+          "budget": { "relativeRegressionPercent": 10 }
+        },
+        {
+          "name": "elapsed_ns",
+          "unit": "ns",
+          "direction": "lower",
+          "signal": "wall-clock",
+          "blocking": false
+        }
+      ]
+    },
+    {
+      "id": "material-step-dense",
+      "kind": "stress",
+      "description": "Dense 64-body material step exercises broad-phase candidates, exact contacts and material response.",
+      "dimensions": {
+        "bodies": 64,
+        "spacing": 1,
+        "frames": 1,
+        "repetitions": 3
+      },
+      "correctnessEvidence": [
+        "physics step succeeds",
+        "preflight proves non-zero contacts"
+      ],
+      "metrics": [
+        {
+          "name": "candidate_pairs",
+          "unit": "pairs",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": true,
+          "budget": { "relativeRegressionPercent": 10 }
+        },
+        {
+          "name": "resolved_contacts",
+          "unit": "contacts",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": true,
+          "budget": { "relativeRegressionPercent": 10 }
+        },
+        {
+          "name": "elapsed_ns",
+          "unit": "ns",
+          "direction": "lower",
+          "signal": "wall-clock",
+          "blocking": false
+        }
+      ]
+    }
+  ]
+}
