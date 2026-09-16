@@ -1,8 +1,4 @@
-use std::{
-    borrow::Cow,
-    collections::BTreeSet,
-    fmt,
-};
+use std::{borrow::Cow, collections::BTreeSet, fmt};
 
 use ecs_workload::{EntityId, Operation, Position, Velocity, WorldSnapshot};
 use geometry_kernels::aabb_aabb;
