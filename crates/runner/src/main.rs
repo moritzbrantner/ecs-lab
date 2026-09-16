@@ -1,3 +1,5 @@
+mod continuous_3d_benchmark;
+
 use std::{fmt::Display, hint::black_box, time::Instant};
 
 use ecs_physics::{PhysicsBody, PhysicsConfig, PhysicsMaterial, step};
@@ -63,6 +65,7 @@ fn run_benchmarks(smoke: bool, fingerprint: &str) {
     run_motion_benchmarks(smoke, fingerprint);
     run_falling_box_benchmarks(smoke, fingerprint);
     run_material_step_benchmarks(smoke, fingerprint);
+    continuous_3d_benchmark::run(smoke, fingerprint);
     run_bouncing_room_benchmarks(smoke, fingerprint);
 }
 
