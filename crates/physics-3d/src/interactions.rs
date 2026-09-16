@@ -106,9 +106,7 @@ pub const fn pair_interaction(
     }
 }
 
-fn canonical_colliders(
-    colliders: &[InteractiveCollider3d],
-) -> Cow<'_, [InteractiveCollider3d]> {
+fn canonical_colliders(colliders: &[InteractiveCollider3d]) -> Cow<'_, [InteractiveCollider3d]> {
     if colliders
         .windows(2)
         .all(|pair| pair[0].entity <= pair[1].entity)
