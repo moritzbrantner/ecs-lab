@@ -53,9 +53,7 @@ pub fn controller_operations(
     validate_input(input)?;
     validate_config(config)?;
     let state = snapshot
-        .entities()
-        .iter()
-        .find(|candidate| candidate.id == entity)
+        .entity(entity)
         .ok_or(ControllerError3d::MissingEntity(entity))?;
     let current = state
         .velocity

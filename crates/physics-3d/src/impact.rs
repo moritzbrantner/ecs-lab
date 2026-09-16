@@ -75,14 +75,10 @@ pub fn impact_evidence(
         .iter()
         .map(|body| (body.entity, *body))
         .collect::<BTreeMap<_, _>>();
-    let snapshots = snapshot
+    let mut final_velocities = snapshot
         .entities()
         .iter()
-        .map(|entity| (entity.id, *entity))
-        .collect::<BTreeMap<_, _>>();
-    let mut final_velocities = snapshots
-        .iter()
-        .filter_map(|(entity, state)| state.velocity.map(|velocity| (*entity, velocity)))
+        .filter_map(|state| state.velocity.map(|velocity| (state.id, velocity)))
         .collect::<BTreeMap<_, _>>();
 
     for operation in step.operations() {
@@ -96,8 +92,8 @@ pub fn impact_evidence(
         if body.kind == BodyKind::Fixed {
             continue;
         }
-        let state = snapshots
-            .get(&body.entity)
+        let state = snapshot
+            .entity(body.entity)
             .ok_or(ImpactError3d::MissingEntity(body.entity))?;
         let initial = state
             .velocity
@@ -192,9 +188,7 @@ pub fn destruction_operations(
     }
 
     let state = snapshot
-        .entities()
-        .iter()
-        .find(|entity| entity.id == target)
+        .entity(target)
         .ok_or(ImpactError3d::MissingEntity(target))?;
     let position = state
         .position
