@@ -49,6 +49,7 @@ name = "ecs-runner"
 version = "0.1.0"
 dependencies = [
  "ecs-physics",
+ "ecs-physics-3d",
  "ecs-physics-scenarios",
  "ecs-reference",
  "ecs-sparse-set",
