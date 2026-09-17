@@ -46,8 +46,20 @@ jobs:
           tier: fast
           install-mode: none
 
-      - name: Build Pages artifact
-        run: bash scripts/build-pages.sh
-
       - name: Exercise benchmark fixtures
         run: bash scripts/benchmark.sh smoke
+
+  build-pages:
+    name: Build or reuse validated Pages artifact
+    needs: validate
+    permissions:
+      actions: read
+      contents: read
+    uses: moritzbrantner/reusable-workflows/.github/workflows/build-artifact.yml@544af51c921b09b4452b7346347ec9effa58f179
+    with:
+      source_sha: ${{ github.event.pull_request.head.sha || github.sha }}
+      artifact_key: ecs-lab-pages-v1
+      build_command: bash scripts/build-pages.sh
+      artifact_paths: pages-dist
+      reuse_across_runs: true
+      artifact_retention_days: 7
