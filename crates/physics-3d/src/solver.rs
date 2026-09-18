@@ -1,16 +1,13 @@
-use std::{
-    cmp::Ordering,
-    collections::{BTreeMap, BTreeSet},
-};
+use std::{cmp::Ordering, collections::BTreeSet};
 
 use ecs_physics::{BodyKind, MATERIAL_SCALE, PhysicsMaterial};
-use ecs_workload::{EntityId, EntitySnapshot, Operation, Position, Velocity, WorldSnapshot};
+use ecs_workload::{EntityId, Operation, Position, Velocity, WorldSnapshot};
 use geometry_kernels::aabb_aabb;
 use spatial_kernels::Aabb;
 
 use crate::types::{
     ContactNormal3d, PhysicsBody3d, PhysicsConfig3d, PhysicsContact3d, PhysicsError3d,
-    PhysicsStep3d, PhysicsStep3dStats,
+    PhysicsStep3d, PhysicsStep3dStats, canonical_bodies,
 };
 
 const MAX_EXACT_F32_INTEGER: i64 = 16_777_216;
@@ -26,10 +23,10 @@ const MAX_STATIC_CORRECTION_PASSES: usize = 8;
 /// advancement uses deterministic Q32.32 subticks. Dynamic-vs-dynamic response remains the existing
 /// deterministic discrete path for this first CCD horizon.
 ///
-/// Positions and velocities remain integer ECS components. Body configuration and pair ordering are
-/// canonicalized by entity id, the reusable geometry kernel remains authoritative for discrete 3D
-/// overlap/touching, and this crate owns deterministic response and positional correction. Returned
-/// mutations remain ordinary ECS workload operations.
+/// Positions and velocities remain integer ECS components. Canonically ordered body input is borrowed
+/// directly; only out-of-order compatibility callers pay for sorting. The reusable geometry kernel
+/// remains authoritative for discrete 3D overlap/touching, and this crate owns deterministic response
+/// and positional correction. Returned mutations remain ordinary ECS workload operations.
 ///
 /// # Errors
 ///
@@ -46,14 +43,11 @@ pub fn step_3d(
         return Err(PhysicsError3d::NonPositiveTicks(ticks));
     }
 
-    let snapshots = snapshot_by_id(snapshot);
-    let mut ordered_bodies = bodies.to_vec();
-    ordered_bodies.sort_unstable_by_key(|body| body.entity);
-    reject_duplicate_bodies(&ordered_bodies)?;
-
+    let ordered_bodies = canonical_bodies(bodies)?;
     let mut body_states = ordered_bodies
-        .into_iter()
-        .map(|body| BodyState::from_body(body, &snapshots))
+        .iter()
+        .copied()
+        .map(|body| BodyState::from_body(body, snapshot))
         .collect::<Result<Vec<_>, _>>()?;
 
     let body_count = body_states.len();
@@ -117,23 +111,6 @@ pub fn step_3d(
     })
 }
 
-fn snapshot_by_id(snapshot: &WorldSnapshot) -> BTreeMap<EntityId, EntitySnapshot> {
-    snapshot
-        .entities()
-        .iter()
-        .map(|entity| (entity.id, *entity))
-        .collect()
-}
-
-fn reject_duplicate_bodies(bodies: &[PhysicsBody3d]) -> Result<(), PhysicsError3d> {
-    for pair in bodies.windows(2) {
-        if pair[0].entity == pair[1].entity {
-            return Err(PhysicsError3d::DuplicateBody(pair[0].entity));
-        }
-    }
-    Ok(())
-}
-
 #[derive(Clone, Copy, Debug)]
 struct BodyState {
     entity: EntityId,
@@ -148,10 +125,7 @@ struct BodyState {
 }
 
 impl BodyState {
-    fn from_body(
-        body: PhysicsBody3d,
-        snapshots: &BTreeMap<EntityId, EntitySnapshot>,
-    ) -> Result<Self, PhysicsError3d> {
+    fn from_body(body: PhysicsBody3d, snapshot: &WorldSnapshot) -> Result<Self, PhysicsError3d> {
         if body.half_extents.iter().any(|extent| *extent < 0) {
             return Err(PhysicsError3d::InvalidHalfExtents(body.entity));
         }
@@ -171,8 +145,8 @@ impl BodyState {
             ));
         }
 
-        let entity = snapshots
-            .get(&body.entity)
+        let entity = snapshot
+            .entity(body.entity)
             .ok_or(PhysicsError3d::MissingEntity(body.entity))?;
         let position = entity
             .position
