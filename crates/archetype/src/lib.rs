@@ -489,6 +489,49 @@ mod tests {
     }
 
     #[test]
+    fn storage_work_evidence_exposes_archetype_transition_tradeoff() {
+        let mut world = ArchetypeWorld::new();
+        let entity = EntityId(7);
+
+        assert_eq!(world.apply(Operation::Spawn(entity)), Ok(()));
+        assert_eq!(
+            world
+                .operation_work(Operation::SetPosition(entity, Position::new(1, 2)))
+                .structural_table_transitions,
+            1
+        );
+        assert_eq!(
+            world.apply(Operation::SetPosition(entity, Position::new(1, 2))),
+            Ok(())
+        );
+        assert_eq!(
+            world
+                .operation_work(Operation::SetVelocity(entity, Velocity::new(3, 4)))
+                .structural_table_transitions,
+            1
+        );
+        assert_eq!(
+            world.apply(Operation::SetVelocity(entity, Velocity::new(3, 4))),
+            Ok(())
+        );
+        assert_eq!(
+            world
+                .operation_work(Operation::SetPosition(entity, Position::new(5, 6)))
+                .structural_table_transitions,
+            0
+        );
+
+        let integration = world.operation_work(Operation::Integrate { ticks: 1 });
+        assert_eq!(integration.integration_rows_scanned, 1);
+        assert_eq!(integration.integrated_entities, 1);
+        assert_eq!(integration.component_lookups, 0);
+
+        let (_, snapshot_work) = world.snapshot_with_stats();
+        assert_eq!(snapshot_work.slots_scanned, 8);
+        assert_eq!(snapshot_work.entities_materialized, 1);
+    }
+
+    #[test]
     fn swap_remove_repairs_moved_motion_row_location() {
         let mut reference = ReferenceWorld::new();
         let mut archetype = ArchetypeWorld::new();
