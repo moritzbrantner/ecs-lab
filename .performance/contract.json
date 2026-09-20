@@ -115,6 +115,60 @@
       ]
     },
     {
+      "id": "component-churn",
+      "kind": "stress",
+      "description": "Replay 512 fully populated entities through eight rounds where half the entities remove and re-add Position or Velocity before integration, exposing structural migration costs.",
+      "dimensions": {
+        "entities": 512,
+        "rounds": 8,
+        "repetitions": 3,
+        "implementations": "reference+sparse-set+archetype-table"
+      },
+      "correctnessEvidence": [
+        "reference/sparse/archetype canonical snapshot equality",
+        "equal integrated-entity useful work across storage implementations",
+        "non-zero archetype structural table transitions",
+        "seeded workload"
+      ],
+      "metrics": [
+        {
+          "name": "integration_rows_scanned",
+          "unit": "rows",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "component_lookups",
+          "unit": "lookups",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "structural_table_transitions",
+          "unit": "transitions",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "snapshot_slots_scanned",
+          "unit": "slots",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "elapsed_ns",
+          "unit": "ns",
+          "direction": "lower",
+          "signal": "wall-clock",
+          "blocking": false
+        }
+      ]
+    },
+    {
       "id": "falling-boxes",
       "kind": "journey",
       "description": "Run a bounded physics-backed falling-box integration through reference, sparse-set, and archetype-table storage.",
