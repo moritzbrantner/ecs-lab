@@ -467,6 +467,48 @@ mod tests {
     }
 
     #[test]
+    fn component_churn_matches_reference_across_seeds() {
+        for seed in [0, 1, 17, 99, u32::MAX] {
+            let workload = Workload::component_churn_scenario(seed, 64, 8);
+            let mut reference = ReferenceWorld::new();
+            let mut cached = CachedSparseWorld::new();
+
+            assert_eq!(reference.replay(&workload), Ok(()));
+            assert_eq!(cached.replay(&workload), Ok(()));
+            assert_eq!(cached.snapshot(), reference.snapshot(), "seed {seed}");
+        }
+    }
+
+    #[test]
+    fn despawn_repairs_component_and_query_swap_indices() {
+        let mut reference = ReferenceWorld::new();
+        let mut cached = CachedSparseWorld::new();
+
+        for raw_id in 0..4 {
+            let entity = EntityId(raw_id);
+            for operation in [
+                Operation::Spawn(entity),
+                Operation::SetPosition(entity, Position::new(i64::from(raw_id), 0)),
+                Operation::SetVelocity(entity, Velocity::new(1, 1)),
+            ] {
+                assert_eq!(cached.apply(operation), reference.apply(operation));
+            }
+        }
+
+        for operation in [
+            Operation::Despawn(EntityId(1)),
+            Operation::Integrate { ticks: 3 },
+            Operation::RemoveVelocity(EntityId(2)),
+            Operation::SetVelocity(EntityId(2), Velocity::new(4, -1)),
+            Operation::Integrate { ticks: 2 },
+        ] {
+            assert_eq!(cached.apply(operation), reference.apply(operation));
+        }
+
+        assert_eq!(cached.snapshot(), reference.snapshot());
+    }
+
+    #[test]
     fn work_evidence_exposes_cached_query_tradeoff() {
         let mut cached = CachedSparseWorld::new();
         let first = EntityId(0);
