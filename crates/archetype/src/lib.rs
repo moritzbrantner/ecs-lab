@@ -169,7 +169,7 @@ impl ArchetypeWorld {
     /// swap-remove for compact storage; the location index is the canonical projection seam.
     #[must_use]
     pub fn snapshot(&self) -> WorldSnapshot {
-        self.snapshot_with_stats().0
+        WorldSnapshot::new(self.canonical_snapshot_entities())
     }
 
     #[must_use]
@@ -177,7 +177,7 @@ impl ArchetypeWorld {
         let slots_scanned = u64::try_from(self.locations.len()).unwrap_or(u64::MAX);
         let entities_materialized = u64::try_from(self.entity_count()).unwrap_or(u64::MAX);
         (
-            WorldSnapshot::new(self.canonical_snapshot_entities()),
+            self.snapshot(),
             SnapshotWorkStats {
                 slots_scanned,
                 entities_materialized,
