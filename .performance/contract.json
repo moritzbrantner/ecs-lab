@@ -6,15 +6,15 @@
     {
       "id": "motion",
       "kind": "common",
-      "description": "Replay and integrate a deterministic 1,000-entity motion workload through reference and sparse-set storage.",
+      "description": "Replay and integrate a deterministic 1,000-entity motion workload through reference, sparse-set, and archetype-table storage.",
       "dimensions": {
         "entities": 1000,
         "rounds": 10,
         "repetitions": 2,
-        "implementations": "reference+sparse-set"
+        "implementations": "reference+sparse-set+archetype-table"
       },
       "correctnessEvidence": [
-        "reference/sparse canonical snapshot equality",
+        "reference/sparse/archetype canonical snapshot equality",
         "seeded workload",
         "environment fingerprint"
       ],
@@ -31,15 +31,16 @@
     {
       "id": "falling-boxes",
       "kind": "journey",
-      "description": "Run a bounded physics-backed falling-box integration through both ECS storage implementations.",
+      "description": "Run a bounded physics-backed falling-box integration through reference, sparse-set, and archetype-table storage.",
       "dimensions": {
         "dynamic_bodies": 96,
         "bodies": 97,
         "frames": 12,
-        "repetitions": 2
+        "repetitions": 2,
+        "implementations": "reference+sparse-set+archetype-table"
       },
       "correctnessEvidence": [
-        "reference/sparse canonical snapshot equality",
+        "reference/sparse/archetype canonical snapshot equality",
         "validated physics operations",
         "environment fingerprint"
       ],
@@ -74,7 +75,9 @@
           "direction": "lower",
           "signal": "operation-count",
           "blocking": true,
-          "budget": { "max": 0 }
+          "budget": {
+            "max": 0
+          }
         },
         {
           "name": "candidate_pairs",
@@ -82,7 +85,9 @@
           "direction": "lower",
           "signal": "operation-count",
           "blocking": true,
-          "budget": { "relativeRegressionPercent": 10 }
+          "budget": {
+            "relativeRegressionPercent": 10
+          }
         },
         {
           "name": "elapsed_ns",
@@ -114,7 +119,9 @@
           "direction": "lower",
           "signal": "operation-count",
           "blocking": true,
-          "budget": { "relativeRegressionPercent": 10 }
+          "budget": {
+            "relativeRegressionPercent": 10
+          }
         },
         {
           "name": "resolved_contacts",
@@ -122,7 +129,9 @@
           "direction": "lower",
           "signal": "operation-count",
           "blocking": true,
-          "budget": { "relativeRegressionPercent": 10 }
+          "budget": {
+            "relativeRegressionPercent": 10
+          }
         },
         {
           "name": "elapsed_ns",

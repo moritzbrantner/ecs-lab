@@ -1,5 +1,6 @@
 use std::{fmt::Display, hint::black_box, time::Instant};
 
+use ecs_archetype::ArchetypeWorld;
 use ecs_physics::{PhysicsBody, PhysicsConfig, PhysicsMaterial, step};
 use ecs_physics_scenarios::{BouncingRoomScenario, FallingBoxesScenario};
 use ecs_reference::ReferenceWorld;
@@ -75,9 +76,14 @@ fn run_motion_benchmarks(smoke: bool, fingerprint: &str) {
     let workload = Workload::motion_scenario(BENCHMARK_SEED, entity_count, rounds);
     let reference_expected = reference_motion_snapshot(&workload);
     let sparse_expected = sparse_motion_snapshot(&workload);
+    let archetype_expected = archetype_motion_snapshot(&workload);
     assert_eq!(
         sparse_expected, reference_expected,
-        "motion benchmark fixture must prove storage parity before timing"
+        "motion benchmark fixture must prove sparse/reference parity before timing"
+    );
+    assert_eq!(
+        archetype_expected, reference_expected,
+        "motion benchmark fixture must prove archetype/reference parity before timing"
     );
 
     benchmark(
@@ -100,6 +106,16 @@ fn run_motion_benchmarks(smoke: bool, fingerprint: &str) {
         fingerprint,
         || sparse_motion_snapshot(black_box(&workload)),
     );
+    benchmark(
+        "motion",
+        "archetype-table",
+        entity_count,
+        rounds,
+        BENCHMARK_SEED,
+        repetitions,
+        fingerprint,
+        || archetype_motion_snapshot(black_box(&workload)),
+    );
 }
 
 fn reference_motion_snapshot(workload: &Workload) -> WorldSnapshot {
@@ -120,15 +136,29 @@ fn sparse_motion_snapshot(workload: &Workload) -> WorldSnapshot {
     world.snapshot()
 }
 
+fn archetype_motion_snapshot(workload: &Workload) -> WorldSnapshot {
+    let mut world = ArchetypeWorld::new();
+    must(
+        world.replay(workload),
+        "validated archetype motion benchmark replay must succeed",
+    );
+    world.snapshot()
+}
+
 fn run_falling_box_benchmarks(smoke: bool, fingerprint: &str) {
     let (dynamic_count, frames, repetitions) = if smoke { (96, 12, 2) } else { (512, 40, 3) };
     let scenario = FallingBoxesScenario::new(dynamic_count);
     let body_count = dynamic_count.saturating_add(1);
     let reference_expected = reference_falling_box_snapshot(&scenario, frames);
     let sparse_expected = sparse_falling_box_snapshot(&scenario, frames);
+    let archetype_expected = archetype_falling_box_snapshot(&scenario, frames);
     assert_eq!(
         sparse_expected, reference_expected,
-        "falling-box benchmark fixture must prove storage parity before timing"
+        "falling-box benchmark fixture must prove sparse/reference parity before timing"
+    );
+    assert_eq!(
+        archetype_expected, reference_expected,
+        "falling-box benchmark fixture must prove archetype/reference parity before timing"
     );
 
     benchmark(
@@ -150,6 +180,16 @@ fn run_falling_box_benchmarks(smoke: bool, fingerprint: &str) {
         repetitions,
         fingerprint,
         || sparse_falling_box_snapshot(&scenario, frames),
+    );
+    benchmark(
+        "falling-boxes",
+        "archetype-table",
+        body_count,
+        frames,
+        FALLING_BOX_SEED,
+        repetitions,
+        fingerprint,
+        || archetype_falling_box_snapshot(&scenario, frames),
     );
 }
 
@@ -189,6 +229,27 @@ fn sparse_falling_box_snapshot(scenario: &FallingBoxesScenario, frames: u32) -> 
             must(
                 world.apply(*operation),
                 "sparse storage must accept generated physics operation",
+            );
+        }
+    }
+    world.snapshot()
+}
+
+fn archetype_falling_box_snapshot(scenario: &FallingBoxesScenario, frames: u32) -> WorldSnapshot {
+    let mut world = ArchetypeWorld::new();
+    must(
+        world.replay(scenario.setup()),
+        "validated archetype falling-box setup must replay",
+    );
+    for _ in 0..frames {
+        let physics = must(
+            scenario.step(&world.snapshot()),
+            "validated archetype falling-box physics step must succeed",
+        );
+        for operation in physics.operations() {
+            must(
+                world.apply(*operation),
+                "archetype storage must accept generated physics operation",
             );
         }
     }
@@ -309,9 +370,14 @@ fn run_bouncing_room_benchmarks(smoke: bool, fingerprint: &str) {
     );
     let reference_expected = reference_bouncing_room_snapshot(&scenario, frames);
     let sparse_expected = sparse_bouncing_room_snapshot(&scenario, frames);
+    let archetype_expected = archetype_bouncing_room_snapshot(&scenario, frames);
     assert_eq!(
         sparse_expected, reference_expected,
-        "bouncing-room benchmark fixture must prove storage parity before timing"
+        "bouncing-room benchmark fixture must prove sparse/reference parity before timing"
+    );
+    assert_eq!(
+        archetype_expected, reference_expected,
+        "bouncing-room benchmark fixture must prove archetype/reference parity before timing"
     );
 
     benchmark(
@@ -333,6 +399,16 @@ fn run_bouncing_room_benchmarks(smoke: bool, fingerprint: &str) {
         repetitions,
         fingerprint,
         || sparse_bouncing_room_snapshot(&scenario, frames),
+    );
+    benchmark(
+        "bouncing-room",
+        "archetype-table",
+        body_count,
+        frames,
+        BOUNCING_ROOM_SEED,
+        repetitions,
+        fingerprint,
+        || archetype_bouncing_room_snapshot(&scenario, frames),
     );
 }
 
@@ -372,6 +448,27 @@ fn sparse_bouncing_room_snapshot(scenario: &BouncingRoomScenario, frames: u32) -
             must(
                 world.apply(*operation),
                 "sparse storage must accept bouncing-room operation",
+            );
+        }
+    }
+    world.snapshot()
+}
+
+fn archetype_bouncing_room_snapshot(scenario: &BouncingRoomScenario, frames: u32) -> WorldSnapshot {
+    let mut world = ArchetypeWorld::new();
+    must(
+        world.replay(scenario.setup()),
+        "validated archetype bouncing-room setup must replay",
+    );
+    for _ in 0..frames {
+        let physics = must(
+            scenario.step(&world.snapshot()),
+            "validated archetype bouncing-room physics step must succeed",
+        );
+        for operation in physics.operations() {
+            must(
+                world.apply(*operation),
+                "archetype storage must accept bouncing-room operation",
             );
         }
     }
