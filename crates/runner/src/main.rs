@@ -1,6 +1,7 @@
 use std::{fmt::Display, hint::black_box, time::Instant};
 
 use ecs_archetype::ArchetypeWorld;
+use ecs_cached_sparse::CachedSparseWorld;
 use ecs_physics::{PhysicsBody, PhysicsConfig, PhysicsMaterial, step};
 use ecs_physics_scenarios::{BouncingRoomScenario, FallingBoxesScenario};
 use ecs_reference::ReferenceWorld;
@@ -83,11 +84,17 @@ fn run_motion_benchmarks(smoke: bool, fingerprint: &str) {
     let (reference_expected, reference_work, reference_snapshot_work) =
         reference_workload_evidence(&workload);
     let (sparse_expected, sparse_work, sparse_snapshot_work) = sparse_workload_evidence(&workload);
+    let (cached_expected, cached_work, cached_snapshot_work) =
+        cached_sparse_workload_evidence(&workload);
     let (archetype_expected, archetype_work, archetype_snapshot_work) =
         archetype_workload_evidence(&workload);
     assert_eq!(
         sparse_expected, reference_expected,
         "motion benchmark fixture must prove sparse/reference parity before timing"
+    );
+    assert_eq!(
+        cached_expected, reference_expected,
+        "motion benchmark fixture must prove cached-sparse/reference parity before timing"
     );
     assert_eq!(
         archetype_expected, reference_expected,
@@ -100,6 +107,12 @@ fn run_motion_benchmarks(smoke: bool, fingerprint: &str) {
         reference_snapshot_work,
     );
     print_storage_work_evidence("motion", "sparse-set", sparse_work, sparse_snapshot_work);
+    print_storage_work_evidence(
+        "motion",
+        "cached-sparse",
+        cached_work,
+        cached_snapshot_work,
+    );
     print_storage_work_evidence(
         "motion",
         "archetype-table",
@@ -126,6 +139,16 @@ fn run_motion_benchmarks(smoke: bool, fingerprint: &str) {
         repetitions,
         fingerprint,
         || sparse_motion_snapshot(black_box(&workload)),
+    );
+    benchmark(
+        "motion",
+        "cached-sparse",
+        entity_count,
+        rounds,
+        BENCHMARK_SEED,
+        repetitions,
+        fingerprint,
+        || cached_sparse_motion_snapshot(black_box(&workload)),
     );
     benchmark(
         "motion",
@@ -154,6 +177,8 @@ fn run_mixed_motion_benchmarks(smoke: bool, fingerprint: &str) {
     let (reference_expected, reference_work, reference_snapshot_work) =
         reference_workload_evidence(&workload);
     let (sparse_expected, sparse_work, sparse_snapshot_work) = sparse_workload_evidence(&workload);
+    let (cached_expected, cached_work, cached_snapshot_work) =
+        cached_sparse_workload_evidence(&workload);
     let (archetype_expected, archetype_work, archetype_snapshot_work) =
         archetype_workload_evidence(&workload);
 
@@ -162,12 +187,29 @@ fn run_mixed_motion_benchmarks(smoke: bool, fingerprint: &str) {
         "mixed-motion fixture must prove sparse/reference parity before timing"
     );
     assert_eq!(
+        cached_expected, reference_expected,
+        "mixed-motion fixture must prove cached-sparse/reference parity before timing"
+    );
+    assert_eq!(
         archetype_expected, reference_expected,
         "mixed-motion fixture must prove archetype/reference parity before timing"
     );
     assert_eq!(
         archetype_work.integrated_entities, sparse_work.integrated_entities,
         "mixed-motion useful integration work must stay storage-independent"
+    );
+    assert_eq!(
+        cached_work.integrated_entities, sparse_work.integrated_entities,
+        "mixed-motion cached query must preserve useful integration work"
+    );
+    assert_eq!(
+        cached_work.integration_rows_scanned,
+        archetype_work.integration_rows_scanned,
+        "mixed-motion cached query should scan the same participating rows as archetype storage"
+    );
+    assert_eq!(
+        cached_work.component_lookups, 0,
+        "mixed-motion cached query should avoid per-row component lookups"
     );
     assert!(
         archetype_work.integration_rows_scanned < sparse_work.integration_rows_scanned,
@@ -192,6 +234,12 @@ fn run_mixed_motion_benchmarks(smoke: bool, fingerprint: &str) {
     );
     print_storage_work_evidence(
         "mixed-motion",
+        "cached-sparse",
+        cached_work,
+        cached_snapshot_work,
+    );
+    print_storage_work_evidence(
+        "mixed-motion",
         "archetype-table",
         archetype_work,
         archetype_snapshot_work,
@@ -216,6 +264,16 @@ fn run_mixed_motion_benchmarks(smoke: bool, fingerprint: &str) {
         repetitions,
         fingerprint,
         || sparse_motion_snapshot(black_box(&workload)),
+    );
+    benchmark(
+        "mixed-motion",
+        "cached-sparse",
+        entity_count,
+        rounds,
+        MIXED_MOTION_SEED,
+        repetitions,
+        fingerprint,
+        || cached_sparse_motion_snapshot(black_box(&workload)),
     );
     benchmark(
         "mixed-motion",
@@ -235,12 +293,18 @@ fn run_component_churn_benchmarks(smoke: bool, fingerprint: &str) {
     let (reference_expected, reference_work, reference_snapshot_work) =
         reference_workload_evidence(&workload);
     let (sparse_expected, sparse_work, sparse_snapshot_work) = sparse_workload_evidence(&workload);
+    let (cached_expected, cached_work, cached_snapshot_work) =
+        cached_sparse_workload_evidence(&workload);
     let (archetype_expected, archetype_work, archetype_snapshot_work) =
         archetype_workload_evidence(&workload);
 
     assert_eq!(
         sparse_expected, reference_expected,
         "component-churn fixture must prove sparse/reference parity before timing"
+    );
+    assert_eq!(
+        cached_expected, reference_expected,
+        "component-churn fixture must prove cached-sparse/reference parity before timing"
     );
     assert_eq!(
         archetype_expected, reference_expected,
@@ -254,6 +318,10 @@ fn run_component_churn_benchmarks(smoke: bool, fingerprint: &str) {
         archetype_work.structural_table_transitions > 0,
         "component-churn fixture must exercise archetype migrations"
     );
+    assert!(
+        cached_work.query_cache_updates > 0,
+        "component-churn fixture must exercise cached-query maintenance"
+    );
 
     print_storage_work_evidence(
         "component-churn",
@@ -266,6 +334,12 @@ fn run_component_churn_benchmarks(smoke: bool, fingerprint: &str) {
         "sparse-set",
         sparse_work,
         sparse_snapshot_work,
+    );
+    print_storage_work_evidence(
+        "component-churn",
+        "cached-sparse",
+        cached_work,
+        cached_snapshot_work,
     );
     print_storage_work_evidence(
         "component-churn",
@@ -293,6 +367,16 @@ fn run_component_churn_benchmarks(smoke: bool, fingerprint: &str) {
         repetitions,
         fingerprint,
         || sparse_motion_snapshot(black_box(&workload)),
+    );
+    benchmark(
+        "component-churn",
+        "cached-sparse",
+        entity_count,
+        rounds,
+        COMPONENT_CHURN_SEED,
+        repetitions,
+        fingerprint,
+        || cached_sparse_motion_snapshot(black_box(&workload)),
     );
     benchmark(
         "component-churn",
@@ -313,11 +397,12 @@ fn print_storage_work_evidence(
     snapshot: SnapshotWorkStats,
 ) {
     println!(
-        "storage_work scenario={scenario} implementation={implementation} integration_rows_scanned={} integrated_entities={} component_lookups={} structural_table_transitions={} snapshot_slots_scanned={} snapshot_entities_materialized={}",
+        "storage_work scenario={scenario} implementation={implementation} integration_rows_scanned={} integrated_entities={} component_lookups={} structural_table_transitions={} query_cache_updates={} snapshot_slots_scanned={} snapshot_entities_materialized={}",
         work.integration_rows_scanned,
         work.integrated_entities,
         work.component_lookups,
         work.structural_table_transitions,
+        work.query_cache_updates,
         snapshot.slots_scanned,
         snapshot.entities_materialized,
     );
@@ -355,6 +440,22 @@ fn sparse_workload_evidence(
     (snapshot, work, snapshot_work)
 }
 
+fn cached_sparse_workload_evidence(
+    workload: &Workload,
+) -> (WorldSnapshot, StorageWorkStats, SnapshotWorkStats) {
+    let mut world = CachedSparseWorld::new();
+    let mut work = StorageWorkStats::default();
+    for operation in workload.operations() {
+        work.accumulate(world.operation_work(*operation));
+        must(
+            world.apply(*operation),
+            "validated cached-sparse motion evidence replay must succeed",
+        );
+    }
+    let (snapshot, snapshot_work) = world.snapshot_with_stats();
+    (snapshot, work, snapshot_work)
+}
+
 fn archetype_workload_evidence(
     workload: &Workload,
 ) -> (WorldSnapshot, StorageWorkStats, SnapshotWorkStats) {
@@ -385,6 +486,15 @@ fn sparse_motion_snapshot(workload: &Workload) -> WorldSnapshot {
     must(
         world.replay(workload),
         "validated sparse motion benchmark replay must succeed",
+    );
+    world.snapshot()
+}
+
+fn cached_sparse_motion_snapshot(workload: &Workload) -> WorldSnapshot {
+    let mut world = CachedSparseWorld::new();
+    must(
+        world.replay(workload),
+        "validated cached-sparse motion benchmark replay must succeed",
     );
     world.snapshot()
 }
