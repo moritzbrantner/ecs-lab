@@ -6,7 +6,7 @@ A focused Rust laboratory for comparing entity-component-system storage models w
 
 `ecs-lab` is an experiment harness, not an ECS framework. Implementations are compared through shared workloads and observable state rather than forced behind a single performance-sensitive trait.
 
-The storage horizon covers a reference model, a sparse-set world, and later archetype/table experiments. Cross-repository reuse is deliberately explicit and pinned: low-level geometry/spatial kernels come from `rust-kernels`, while reusable rotating rigid-body simulation comes from the standalone `physics-engine`. Application and teaching repositories such as `collision-lab` remain independent consumers rather than implementation dependencies.
+The storage horizon covers a reference model, a sparse-set world, and an archetype-table world. The archetype candidate groups entities by component shape so Position+Velocity integration walks contiguous columns without a per-row component lookup; structural component changes instead pay explicit table-move costs. Cross-repository reuse is deliberately explicit and pinned: low-level geometry/spatial kernels come from `rust-kernels`, while reusable rotating rigid-body simulation comes from the standalone `physics-engine`. Application and teaching repositories such as `collision-lab` remain independent consumers rather than implementation dependencies.
 
 ## Physics workloads
 
