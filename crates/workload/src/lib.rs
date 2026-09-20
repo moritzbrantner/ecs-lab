@@ -197,7 +197,9 @@ impl StorageWorkStats {
         self.integrated_entities = self
             .integrated_entities
             .saturating_add(other.integrated_entities);
-        self.component_lookups = self.component_lookups.saturating_add(other.component_lookups);
+        self.component_lookups = self
+            .component_lookups
+            .saturating_add(other.component_lookups);
         self.structural_table_transitions = self
             .structural_table_transitions
             .saturating_add(other.structural_table_transitions);
@@ -324,10 +326,7 @@ mod tests {
 
         assert_eq!(velocity_sets, 3);
         assert_eq!(integrations, 3);
-        assert_eq!(
-            workload,
-            Workload::mixed_motion_scenario(17, 10, 3, 4)
-        );
+        assert_eq!(workload, Workload::mixed_motion_scenario(17, 10, 3, 4));
     }
 
     #[test]
