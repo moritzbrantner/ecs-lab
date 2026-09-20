@@ -11,7 +11,7 @@
         "entities": 1000,
         "rounds": 10,
         "repetitions": 2,
-        "implementations": "reference+sparse-set+archetype-table"
+        "implementations": "reference+sparse-set+cached-sparse+archetype-table"
       },
       "correctnessEvidence": [
         "reference/sparse/archetype canonical snapshot equality",
@@ -49,6 +49,13 @@
           "blocking": false
         },
         {
+          "name": "query_cache_updates",
+          "unit": "updates",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
           "name": "elapsed_ns",
           "unit": "ns",
           "direction": "lower",
@@ -67,14 +74,16 @@
         "velocity_stride": 4,
         "moving_entities": 250,
         "repetitions": 3,
-        "implementations": "reference+sparse-set+archetype-table"
+        "implementations": "reference+sparse-set+cached-sparse+archetype-table"
       },
       "correctnessEvidence": [
         "reference/sparse/archetype canonical snapshot equality",
         "equal integrated-entity useful work across storage implementations",
         "archetype integration scans fewer rows than sparse-set",
         "sparse-set performs component lookups while archetype motion columns do not",
-        "seeded workload"
+        "seeded workload",
+        "cached-sparse scans the same participating integration rows as archetype storage",
+        "cached-sparse performs zero per-row component lookups"
       ],
       "metrics": [
         {
@@ -101,6 +110,13 @@
         {
           "name": "snapshot_slots_scanned",
           "unit": "slots",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "query_cache_updates",
+          "unit": "updates",
           "direction": "lower",
           "signal": "operation-count",
           "blocking": false
@@ -122,13 +138,14 @@
         "entities": 512,
         "rounds": 8,
         "repetitions": 3,
-        "implementations": "reference+sparse-set+archetype-table"
+        "implementations": "reference+sparse-set+cached-sparse+archetype-table"
       },
       "correctnessEvidence": [
         "reference/sparse/archetype canonical snapshot equality",
         "equal integrated-entity useful work across storage implementations",
         "non-zero archetype structural table transitions",
-        "seeded workload"
+        "seeded workload",
+        "non-zero cached-sparse query maintenance"
       ],
       "metrics": [
         {
@@ -155,6 +172,13 @@
         {
           "name": "snapshot_slots_scanned",
           "unit": "slots",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "query_cache_updates",
+          "unit": "updates",
           "direction": "lower",
           "signal": "operation-count",
           "blocking": false
