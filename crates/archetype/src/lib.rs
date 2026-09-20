@@ -35,10 +35,19 @@ impl EntityTable {
     }
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct ComponentTable<T> {
     entities: Vec<EntityId>,
     values: Vec<T>,
+}
+
+impl<T> Default for ComponentTable<T> {
+    fn default() -> Self {
+        Self {
+            entities: Vec::new(),
+            values: Vec::new(),
+        }
+    }
 }
 
 impl<T> ComponentTable<T> {
