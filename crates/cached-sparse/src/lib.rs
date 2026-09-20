@@ -49,7 +49,8 @@ impl<T> SparseSet<T> {
     }
 
     fn get(&self, entity: EntityId) -> Option<&T> {
-        self.index(entity).and_then(|index| self.dense_values.get(index))
+        self.index(entity)
+            .and_then(|index| self.dense_values.get(index))
     }
 
     fn moved_entity_if_removed(&self, entity: EntityId) -> Option<EntityId> {
@@ -183,7 +184,7 @@ impl CachedSparseWorld {
     ///
     /// # Errors
     ///
-    /// Returns [WorkloadError] for invalid entity lifecycle operations.
+    /// Returns [`WorkloadError`] for invalid entity lifecycle operations.
     pub fn apply(&mut self, operation: Operation) -> Result<(), WorkloadError> {
         match operation {
             Operation::Spawn(entity) => {
@@ -197,15 +198,15 @@ impl CachedSparseWorld {
                 let position_removed = self.positions.remove(entity);
                 let velocity_removed = self.velocities.remove(entity);
                 self.refresh_motion(entity);
-                if let Some(removed) = position_removed {
-                    if let Some((moved, _)) = removed.moved {
-                        self.refresh_motion(moved);
-                    }
+                if let Some(removed) = position_removed
+                    && let Some((moved, _)) = removed.moved
+                {
+                    self.refresh_motion(moved);
                 }
-                if let Some(removed) = velocity_removed {
-                    if let Some((moved, _)) = removed.moved {
-                        self.refresh_motion(moved);
-                    }
+                if let Some(removed) = velocity_removed
+                    && let Some((moved, _)) = removed.moved
+                {
+                    self.refresh_motion(moved);
                 }
                 self.alive.remove(&entity);
                 Ok(())
@@ -220,10 +221,10 @@ impl CachedSparseWorld {
                 self.require_alive(entity)?;
                 let removed = self.positions.remove(entity);
                 self.refresh_motion(entity);
-                if let Some(removed) = removed {
-                    if let Some((moved, _)) = removed.moved {
-                        self.refresh_motion(moved);
-                    }
+                if let Some(removed) = removed
+                    && let Some((moved, _)) = removed.moved
+                {
+                    self.refresh_motion(moved);
                 }
                 Ok(())
             }
@@ -237,10 +238,10 @@ impl CachedSparseWorld {
                 self.require_alive(entity)?;
                 let removed = self.velocities.remove(entity);
                 self.refresh_motion(entity);
-                if let Some(removed) = removed {
-                    if let Some((moved, _)) = removed.moved {
-                        self.refresh_motion(moved);
-                    }
+                if let Some(removed) = removed
+                    && let Some((moved, _)) = removed.moved
+                {
+                    self.refresh_motion(moved);
                 }
                 Ok(())
             }
@@ -255,7 +256,7 @@ impl CachedSparseWorld {
     ///
     /// # Errors
     ///
-    /// Returns the first [WorkloadError] produced by the workload.
+    /// Returns the first [`WorkloadError`] produced by the workload.
     pub fn replay(&mut self, workload: &Workload) -> Result<(), WorkloadError> {
         for operation in workload.operations() {
             self.apply(*operation)?;
