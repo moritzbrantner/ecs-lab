@@ -133,6 +133,52 @@ impl Workload {
     }
 
     #[must_use]
+    pub fn component_churn_scenario(seed: u32, entity_count: u32, rounds: u32) -> Self {
+        let mut generator = Generator::new(seed);
+        let mut operations = Vec::new();
+
+        for raw_id in 0..entity_count {
+            let entity = EntityId(raw_id);
+            operations.push(Operation::Spawn(entity));
+            operations.push(Operation::SetPosition(
+                entity,
+                Position::new(generator.position(), generator.position()),
+            ));
+            operations.push(Operation::SetVelocity(
+                entity,
+                Velocity::new(generator.velocity(), generator.velocity()),
+            ));
+        }
+
+        for round in 0..rounds {
+            for raw_id in 0..entity_count {
+                let entity = EntityId(raw_id);
+                match raw_id.wrapping_add(round) % 4 {
+                    0 => {
+                        operations.push(Operation::RemoveVelocity(entity));
+                        operations.push(Operation::SetVelocity(
+                            entity,
+                            Velocity::new(generator.velocity(), generator.velocity()),
+                        ));
+                    }
+                    1 => {
+                        operations.push(Operation::RemovePosition(entity));
+                        operations.push(Operation::SetPosition(
+                            entity,
+                            Position::new(generator.position(), generator.position()),
+                        ));
+                    }
+                    _ => {}
+                }
+            }
+            let ticks = i32::from(generator.next_u32().to_le_bytes()[0] % 5 + 1);
+            operations.push(Operation::Integrate { ticks });
+        }
+
+        Self::new(operations)
+    }
+
+    #[must_use]
     pub fn operations(&self) -> &[Operation] {
         &self.operations
     }
@@ -327,6 +373,30 @@ mod tests {
         assert_eq!(velocity_sets, 3);
         assert_eq!(integrations, 3);
         assert_eq!(workload, Workload::mixed_motion_scenario(17, 10, 3, 4));
+    }
+
+    #[test]
+    fn component_churn_scenario_is_deterministic_and_restores_components() {
+        let workload = Workload::component_churn_scenario(17, 8, 2);
+        let removals = workload
+            .operations()
+            .iter()
+            .filter(|operation| {
+                matches!(
+                    operation,
+                    Operation::RemovePosition(_) | Operation::RemoveVelocity(_)
+                )
+            })
+            .count();
+        let integrations = workload
+            .operations()
+            .iter()
+            .filter(|operation| matches!(operation, Operation::Integrate { .. }))
+            .count();
+
+        assert_eq!(removals, 8);
+        assert_eq!(integrations, 2);
+        assert_eq!(workload, Workload::component_churn_scenario(17, 8, 2));
     }
 
     #[test]
