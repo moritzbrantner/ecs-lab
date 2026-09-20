@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
 
 use ecs_workload::{
-    EntityId, EntitySnapshot, Operation, Position, Velocity, Workload, WorkloadError, WorldSnapshot,
+    EntityId, EntitySnapshot, Operation, Position, SnapshotWorkStats, StorageWorkStats, Velocity,
+    Workload, WorkloadError, WorldSnapshot,
 };
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -71,7 +72,13 @@ impl ReferenceWorld {
 
     #[must_use]
     pub fn snapshot(&self) -> WorldSnapshot {
-        WorldSnapshot::new(
+        self.snapshot_with_stats().0
+    }
+
+    #[must_use]
+    pub fn snapshot_with_stats(&self) -> (WorldSnapshot, SnapshotWorkStats) {
+        let entity_count = u64::try_from(self.entities.len()).unwrap_or(u64::MAX);
+        let snapshot = WorldSnapshot::new(
             self.entities
                 .iter()
                 .map(|(&id, state)| EntitySnapshot {
@@ -80,7 +87,36 @@ impl ReferenceWorld {
                     velocity: state.velocity,
                 })
                 .collect(),
+        );
+        (
+            snapshot,
+            SnapshotWorkStats {
+                slots_scanned: entity_count,
+                entities_materialized: entity_count,
+            },
         )
+    }
+
+    #[must_use]
+    pub fn operation_work(&self, operation: Operation) -> StorageWorkStats {
+        if !matches!(operation, Operation::Integrate { .. }) {
+            return StorageWorkStats::default();
+        }
+
+        let integration_rows_scanned = u64::try_from(self.entities.len()).unwrap_or(u64::MAX);
+        let integrated_entities = u64::try_from(
+            self.entities
+                .values()
+                .filter(|state| state.position.is_some() && state.velocity.is_some())
+                .count(),
+        )
+        .unwrap_or(u64::MAX);
+
+        StorageWorkStats {
+            integration_rows_scanned,
+            integrated_entities,
+            ..StorageWorkStats::default()
+        }
     }
 
     fn spawn(&mut self, entity: EntityId) -> Result<(), WorkloadError> {
