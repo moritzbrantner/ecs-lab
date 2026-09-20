@@ -233,6 +233,7 @@ pub struct StorageWorkStats {
     pub integrated_entities: u64,
     pub component_lookups: u64,
     pub structural_table_transitions: u64,
+    pub query_cache_updates: u64,
 }
 
 impl StorageWorkStats {
@@ -249,6 +250,9 @@ impl StorageWorkStats {
         self.structural_table_transitions = self
             .structural_table_transitions
             .saturating_add(other.structural_table_transitions);
+        self.query_cache_updates = self
+            .query_cache_updates
+            .saturating_add(other.query_cache_updates);
     }
 }
 
