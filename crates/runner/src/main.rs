@@ -235,10 +235,7 @@ fn sparse_falling_box_snapshot(scenario: &FallingBoxesScenario, frames: u32) -> 
     world.snapshot()
 }
 
-fn archetype_falling_box_snapshot(
-    scenario: &FallingBoxesScenario,
-    frames: u32,
-) -> WorldSnapshot {
+fn archetype_falling_box_snapshot(scenario: &FallingBoxesScenario, frames: u32) -> WorldSnapshot {
     let mut world = ArchetypeWorld::new();
     must(
         world.replay(scenario.setup()),
@@ -457,10 +454,7 @@ fn sparse_bouncing_room_snapshot(scenario: &BouncingRoomScenario, frames: u32) -
     world.snapshot()
 }
 
-fn archetype_bouncing_room_snapshot(
-    scenario: &BouncingRoomScenario,
-    frames: u32,
-) -> WorldSnapshot {
+fn archetype_bouncing_room_snapshot(scenario: &BouncingRoomScenario, frames: u32) -> WorldSnapshot {
     let mut world = ArchetypeWorld::new();
     must(
         world.replay(scenario.setup()),
