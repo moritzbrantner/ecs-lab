@@ -22,8 +22,7 @@ impl<T> Default for SparseSet<T> {
     }
 }
 
-struct Removed<T> {
-    value: T,
+struct Removed {
     moved: Option<(EntityId, usize)>,
 }
 
@@ -63,13 +62,13 @@ impl<T> SparseSet<T> {
         }
     }
 
-    fn remove(&mut self, entity: EntityId) -> Option<Removed<T>> {
+    fn remove(&mut self, entity: EntityId) -> Option<Removed> {
         let slot = entity.0 as usize;
         let index = self.sparse.get(slot).copied().flatten()?;
         self.sparse[slot] = None;
 
         self.dense_entities.swap_remove(index);
-        let value = self.dense_values.swap_remove(index);
+        let _ = self.dense_values.swap_remove(index);
         let moved = if index < self.dense_entities.len() {
             let moved_entity = self.dense_entities[index];
             self.sparse[moved_entity.0 as usize] = Some(index);
@@ -78,7 +77,7 @@ impl<T> SparseSet<T> {
             None
         };
 
-        Some(Removed { value, moved })
+        Some(Removed { moved })
     }
 }
 
