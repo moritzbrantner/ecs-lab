@@ -100,6 +100,39 @@ impl Workload {
     }
 
     #[must_use]
+    pub fn mixed_motion_scenario(
+        seed: u32,
+        entity_count: u32,
+        rounds: u32,
+        velocity_stride: u32,
+    ) -> Self {
+        let mut generator = Generator::new(seed);
+        let mut operations = Vec::new();
+
+        for raw_id in 0..entity_count {
+            let entity = EntityId(raw_id);
+            operations.push(Operation::Spawn(entity));
+            operations.push(Operation::SetPosition(
+                entity,
+                Position::new(generator.position(), generator.position()),
+            ));
+            if velocity_stride != 0 && raw_id % velocity_stride == 0 {
+                operations.push(Operation::SetVelocity(
+                    entity,
+                    Velocity::new(generator.velocity(), generator.velocity()),
+                ));
+            }
+        }
+
+        for _ in 0..rounds {
+            let ticks = i32::from(generator.next_u32().to_le_bytes()[0] % 5 + 1);
+            operations.push(Operation::Integrate { ticks });
+        }
+
+        Self::new(operations)
+    }
+
+    #[must_use]
     pub fn operations(&self) -> &[Operation] {
         &self.operations
     }
@@ -272,6 +305,28 @@ mod tests {
         assert_ne!(
             Workload::motion_scenario(17, 32, 5),
             Workload::motion_scenario(18, 32, 5)
+        );
+    }
+
+    #[test]
+    fn mixed_motion_scenario_keeps_component_mix_deterministic() {
+        let workload = Workload::mixed_motion_scenario(17, 10, 3, 4);
+        let velocity_sets = workload
+            .operations()
+            .iter()
+            .filter(|operation| matches!(operation, Operation::SetVelocity(_, _)))
+            .count();
+        let integrations = workload
+            .operations()
+            .iter()
+            .filter(|operation| matches!(operation, Operation::Integrate { .. }))
+            .count();
+
+        assert_eq!(velocity_sets, 3);
+        assert_eq!(integrations, 3);
+        assert_eq!(
+            workload,
+            Workload::mixed_motion_scenario(17, 10, 3, 4)
         );
     }
 
