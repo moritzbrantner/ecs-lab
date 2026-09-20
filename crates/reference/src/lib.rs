@@ -72,13 +72,7 @@ impl ReferenceWorld {
 
     #[must_use]
     pub fn snapshot(&self) -> WorldSnapshot {
-        self.snapshot_with_stats().0
-    }
-
-    #[must_use]
-    pub fn snapshot_with_stats(&self) -> (WorldSnapshot, SnapshotWorkStats) {
-        let entity_count = u64::try_from(self.entities.len()).unwrap_or(u64::MAX);
-        let snapshot = WorldSnapshot::new(
+        WorldSnapshot::new(
             self.entities
                 .iter()
                 .map(|(&id, state)| EntitySnapshot {
@@ -87,9 +81,14 @@ impl ReferenceWorld {
                     velocity: state.velocity,
                 })
                 .collect(),
-        );
+        )
+    }
+
+    #[must_use]
+    pub fn snapshot_with_stats(&self) -> (WorldSnapshot, SnapshotWorkStats) {
+        let entity_count = u64::try_from(self.entities.len()).unwrap_or(u64::MAX);
         (
-            snapshot,
+            self.snapshot(),
             SnapshotWorkStats {
                 slots_scanned: entity_count,
                 entities_materialized: entity_count,
