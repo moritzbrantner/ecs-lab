@@ -151,8 +151,7 @@ fn run_mixed_motion_benchmarks(smoke: bool, fingerprint: &str) {
     );
     let (reference_expected, reference_work, reference_snapshot_work) =
         reference_workload_evidence(&workload);
-    let (sparse_expected, sparse_work, sparse_snapshot_work) =
-        sparse_workload_evidence(&workload);
+    let (sparse_expected, sparse_work, sparse_snapshot_work) = sparse_workload_evidence(&workload);
     let (archetype_expected, archetype_work, archetype_snapshot_work) =
         archetype_workload_evidence(&workload);
 
