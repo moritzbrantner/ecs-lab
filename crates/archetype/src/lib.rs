@@ -161,60 +161,54 @@ impl ArchetypeWorld {
         Ok(())
     }
 
+    /// Projects the observable world in canonical entity-id order.
+    ///
+    /// The location vector is already indexed by entity id, so snapshotting reuses that index instead
+    /// of concatenating four table orders and sorting the result. Table rows remain free to use
+    /// swap-remove for compact storage; the location index is the canonical projection seam.
     #[must_use]
     pub fn snapshot(&self) -> WorldSnapshot {
+        WorldSnapshot::new(self.canonical_snapshot_entities())
+    }
+
+    fn canonical_snapshot_entities(&self) -> Vec<EntitySnapshot> {
         let mut entities = Vec::with_capacity(self.entity_count());
 
-        entities.extend(
-            self.empty
-                .entities
-                .iter()
-                .copied()
-                .map(|id| EntitySnapshot {
-                    id,
-                    position: None,
-                    velocity: None,
-                }),
-        );
-        entities.extend(
-            self.positions
-                .entities
-                .iter()
-                .copied()
-                .zip(self.positions.values.iter().copied())
-                .map(|(id, position)| EntitySnapshot {
-                    id,
-                    position: Some(position),
-                    velocity: None,
-                }),
-        );
-        entities.extend(
-            self.velocities
-                .entities
-                .iter()
-                .copied()
-                .zip(self.velocities.values.iter().copied())
-                .map(|(id, velocity)| EntitySnapshot {
-                    id,
-                    position: None,
-                    velocity: Some(velocity),
-                }),
-        );
-        entities.extend(
-            self.motion
-                .entities
-                .iter()
-                .copied()
-                .zip(self.motion.positions.iter().copied())
-                .zip(self.motion.velocities.iter().copied())
-                .map(|((id, position), velocity)| EntitySnapshot {
-                    id,
-                    position: Some(position),
-                    velocity: Some(velocity),
-                }),
-        );
+        for (slot, location) in self.locations.iter().enumerate() {
+            let Some(location) = *location else {
+                continue;
+            };
+            let entity = self.snapshot_entity(location);
+            debug_assert_eq!(entity.id.0 as usize, slot);
+            entities.push(entity);
+        }
 
-        WorldSnapshot::new(entities)
+        entities
+    }
+
+    fn snapshot_entity(&self, location: Location) -> EntitySnapshot {
+        match location.table {
+            TableKind::Empty => EntitySnapshot {
+                id: self.empty.entities[location.index],
+                position: None,
+                velocity: None,
+            },
+            TableKind::Position => EntitySnapshot {
+                id: self.positions.entities[location.index],
+                position: Some(self.positions.values[location.index]),
+                velocity: None,
+            },
+            TableKind::Velocity => EntitySnapshot {
+                id: self.velocities.entities[location.index],
+                position: None,
+                velocity: Some(self.velocities.values[location.index]),
+            },
+            TableKind::Motion => EntitySnapshot {
+                id: self.motion.entities[location.index],
+                position: Some(self.motion.positions[location.index]),
+                velocity: Some(self.motion.velocities[location.index]),
+            },
+        }
     }
 
     fn spawn(&mut self, entity: EntityId) -> Result<(), WorkloadError> {
@@ -485,6 +479,43 @@ mod tests {
         }
 
         assert_eq!(archetype.snapshot(), reference.snapshot());
+    }
+
+    #[test]
+    fn snapshot_projection_reuses_entity_order_after_table_row_swaps() {
+        let mut world = ArchetypeWorld::new();
+
+        for entity in [EntityId(7), EntityId(1), EntityId(4)] {
+            assert_eq!(world.apply(Operation::Spawn(entity)), Ok(()));
+        }
+        assert_eq!(
+            world.apply(Operation::SetPosition(EntityId(7), Position::new(7, 0))),
+            Ok(())
+        );
+        assert_eq!(
+            world.apply(Operation::SetVelocity(EntityId(7), Velocity::new(1, 0))),
+            Ok(())
+        );
+        assert_eq!(
+            world.apply(Operation::SetPosition(EntityId(1), Position::new(1, 0))),
+            Ok(())
+        );
+        assert_eq!(
+            world.apply(Operation::SetVelocity(EntityId(4), Velocity::new(4, 0))),
+            Ok(())
+        );
+        assert_eq!(world.apply(Operation::RemoveVelocity(EntityId(7))), Ok(()));
+        assert_eq!(
+            world.apply(Operation::SetVelocity(EntityId(1), Velocity::new(2, 0))),
+            Ok(())
+        );
+
+        let projected = world.canonical_snapshot_entities();
+        assert_eq!(
+            projected.iter().map(|entity| entity.id).collect::<Vec<_>>(),
+            [EntityId(1), EntityId(4), EntityId(7)]
+        );
+        assert_eq!(world.snapshot().entities(), projected);
     }
 
     #[test]
