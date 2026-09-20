@@ -14,7 +14,7 @@
         "implementations": "reference+sparse-set+cached-sparse+archetype-table"
       },
       "correctnessEvidence": [
-        "reference/sparse/archetype canonical snapshot equality",
+        "reference/sparse/cached-sparse/archetype canonical snapshot equality",
         "seeded workload",
         "environment fingerprint",
         "deterministic storage-work evidence emitted outside timed repetitions"
@@ -77,7 +77,7 @@
         "implementations": "reference+sparse-set+cached-sparse+archetype-table"
       },
       "correctnessEvidence": [
-        "reference/sparse/archetype canonical snapshot equality",
+        "reference/sparse/cached-sparse/archetype canonical snapshot equality",
         "equal integrated-entity useful work across storage implementations",
         "archetype integration scans fewer rows than sparse-set",
         "sparse-set performs component lookups while archetype motion columns do not",
@@ -141,7 +141,7 @@
         "implementations": "reference+sparse-set+cached-sparse+archetype-table"
       },
       "correctnessEvidence": [
-        "reference/sparse/archetype canonical snapshot equality",
+        "reference/sparse/cached-sparse/archetype canonical snapshot equality",
         "equal integrated-entity useful work across storage implementations",
         "non-zero archetype structural table transitions",
         "seeded workload",
