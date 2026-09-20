@@ -68,7 +68,7 @@ impl<T> SparseSet<T> {
         self.sparse[slot] = None;
 
         self.dense_entities.swap_remove(index);
-        let _ = self.dense_values.swap_remove(index);
+        self.dense_values.swap_remove(index);
         let moved = if index < self.dense_entities.len() {
             let moved_entity = self.dense_entities[index];
             self.sparse[moved_entity.0 as usize] = Some(index);
