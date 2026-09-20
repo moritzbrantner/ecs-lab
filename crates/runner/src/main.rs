@@ -13,6 +13,7 @@ use ecs_workload::{
 const BENCHMARK_SEED: u32 = 0x5EED_CAFE;
 const MIXED_MOTION_SEED: u32 = 0xC0DE_4D1D;
 const MIXED_MOTION_VELOCITY_STRIDE: u32 = 4;
+const COMPONENT_CHURN_SEED: u32 = 0xC11A_7E55;
 const FALLING_BOX_SEED: u32 = 0;
 const MATERIAL_FIXTURE_SEED: u32 = 0x0BAD_5EED;
 const BOUNCING_ROOM_SEED: u32 = 0xB00C_E001;
@@ -66,6 +67,7 @@ fn run_demo() -> Result<(), Box<dyn std::error::Error>> {
 fn run_benchmarks(smoke: bool, fingerprint: &str) {
     run_motion_benchmarks(smoke, fingerprint);
     run_mixed_motion_benchmarks(smoke, fingerprint);
+    run_component_churn_benchmarks(smoke, fingerprint);
     run_falling_box_benchmarks(smoke, fingerprint);
     run_material_step_benchmarks(smoke, fingerprint);
     run_bouncing_room_benchmarks(smoke, fingerprint);
@@ -221,6 +223,83 @@ fn run_mixed_motion_benchmarks(smoke: bool, fingerprint: &str) {
         entity_count,
         rounds,
         MIXED_MOTION_SEED,
+        repetitions,
+        fingerprint,
+        || archetype_motion_snapshot(black_box(&workload)),
+    );
+}
+
+fn run_component_churn_benchmarks(smoke: bool, fingerprint: &str) {
+    let (entity_count, rounds, repetitions) = if smoke { (512, 8, 3) } else { (20_000, 20, 5) };
+    let workload = Workload::component_churn_scenario(COMPONENT_CHURN_SEED, entity_count, rounds);
+    let (reference_expected, reference_work, reference_snapshot_work) =
+        reference_workload_evidence(&workload);
+    let (sparse_expected, sparse_work, sparse_snapshot_work) = sparse_workload_evidence(&workload);
+    let (archetype_expected, archetype_work, archetype_snapshot_work) =
+        archetype_workload_evidence(&workload);
+
+    assert_eq!(
+        sparse_expected, reference_expected,
+        "component-churn fixture must prove sparse/reference parity before timing"
+    );
+    assert_eq!(
+        archetype_expected, reference_expected,
+        "component-churn fixture must prove archetype/reference parity before timing"
+    );
+    assert_eq!(
+        archetype_work.integrated_entities, sparse_work.integrated_entities,
+        "component-churn useful integration work must stay storage-independent"
+    );
+    assert!(
+        archetype_work.structural_table_transitions > 0,
+        "component-churn fixture must exercise archetype migrations"
+    );
+
+    print_storage_work_evidence(
+        "component-churn",
+        "reference",
+        reference_work,
+        reference_snapshot_work,
+    );
+    print_storage_work_evidence(
+        "component-churn",
+        "sparse-set",
+        sparse_work,
+        sparse_snapshot_work,
+    );
+    print_storage_work_evidence(
+        "component-churn",
+        "archetype-table",
+        archetype_work,
+        archetype_snapshot_work,
+    );
+
+    benchmark(
+        "component-churn",
+        "reference",
+        entity_count,
+        rounds,
+        COMPONENT_CHURN_SEED,
+        repetitions,
+        fingerprint,
+        || reference_motion_snapshot(black_box(&workload)),
+    );
+    benchmark(
+        "component-churn",
+        "sparse-set",
+        entity_count,
+        rounds,
+        COMPONENT_CHURN_SEED,
+        repetitions,
+        fingerprint,
+        || sparse_motion_snapshot(black_box(&workload)),
+    );
+    benchmark(
+        "component-churn",
+        "archetype-table",
+        entity_count,
+        rounds,
+        COMPONENT_CHURN_SEED,
         repetitions,
         fingerprint,
         || archetype_motion_snapshot(black_box(&workload)),
