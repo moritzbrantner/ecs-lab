@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{borrow::Cow, fmt};
 
 use ecs_physics::{BodyKind, MATERIAL_SCALE, PhysicsMaterial};
 use ecs_workload::{EntityId, Operation, Velocity};
@@ -46,6 +46,26 @@ impl PhysicsBody3d {
         self.material = material;
         self
     }
+}
+
+pub(crate) fn canonical_bodies(
+    bodies: &[PhysicsBody3d],
+) -> Result<Cow<'_, [PhysicsBody3d]>, PhysicsError3d> {
+    if bodies
+        .windows(2)
+        .all(|pair| pair[0].entity < pair[1].entity)
+    {
+        return Ok(Cow::Borrowed(bodies));
+    }
+
+    let mut ordered = bodies.to_vec();
+    ordered.sort_unstable_by_key(|body| body.entity);
+    for pair in ordered.windows(2) {
+        if pair[0].entity == pair[1].entity {
+            return Err(PhysicsError3d::DuplicateBody(pair[0].entity));
+        }
+    }
+    Ok(Cow::Owned(ordered))
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -192,3 +212,41 @@ impl fmt::Display for PhysicsError3d {
 }
 
 impl std::error::Error for PhysicsError3d {}
+
+#[cfg(test)]
+mod tests {
+    use std::borrow::Cow;
+
+    use ecs_workload::EntityId;
+
+    use super::{PhysicsBody3d, PhysicsError3d, canonical_bodies};
+
+    #[test]
+    fn canonical_body_input_is_borrowed_and_unsorted_input_is_canonicalized() {
+        let bodies = [
+            PhysicsBody3d::dynamic(EntityId(1), [1, 1, 1]),
+            PhysicsBody3d::fixed(EntityId(3), [1, 1, 1]),
+        ];
+        assert!(matches!(canonical_bodies(&bodies), Ok(Cow::Borrowed(_))));
+
+        let reversed = [bodies[1], bodies[0]];
+        let ordered = canonical_bodies(&reversed).expect("unsorted input should stay compatible");
+        assert!(matches!(ordered, Cow::Owned(_)));
+        assert_eq!(ordered[0].entity, EntityId(1));
+        assert_eq!(ordered[1].entity, EntityId(3));
+    }
+
+    #[test]
+    fn canonical_body_input_still_rejects_duplicates() {
+        let duplicate = EntityId(7);
+        let bodies = [
+            PhysicsBody3d::dynamic(duplicate, [1, 1, 1]),
+            PhysicsBody3d::fixed(duplicate, [2, 2, 2]),
+        ];
+
+        assert_eq!(
+            canonical_bodies(&bodies),
+            Err(PhysicsError3d::DuplicateBody(duplicate))
+        );
+    }
+}

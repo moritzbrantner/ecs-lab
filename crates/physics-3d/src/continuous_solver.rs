@@ -1,17 +1,14 @@
-use std::{
-    cmp::Ordering,
-    collections::{BTreeMap, BTreeSet},
-};
+use std::{cmp::Ordering, collections::BTreeSet};
 
 use ecs_physics::{BodyKind, MATERIAL_SCALE, PhysicsMaterial};
-use ecs_workload::{EntityId, EntitySnapshot, Operation, Position, Velocity, WorldSnapshot};
+use ecs_workload::{EntityId, Operation, Position, Velocity, WorldSnapshot};
 
 use crate::{
     solver::axis_fits_exact_f32,
     swept_broad_phase::{SweptBroadPhaseBody, swept_candidate_pairs},
     types::{
         ContactNormal3d, PhysicsBody3d, PhysicsConfig3d, PhysicsContact3d, PhysicsError3d,
-        PhysicsStep3d, PhysicsStep3dStats,
+        PhysicsStep3d, PhysicsStep3dStats, canonical_bodies,
     },
 };
 
@@ -30,7 +27,8 @@ const MAX_STABILIZATION_PASSES: usize = 8;
 /// bounded deterministic iteration: material restitution is allowed only on the first response pass,
 /// later passes are non-restorative constraint correction, and friction is applied once after normal
 /// convergence. Q32.32 positions remain private intra-step state and are quantized back to ordinary
-/// integer ECS positions before mutations are returned.
+/// integer ECS positions before mutations are returned. Canonically ordered body input is borrowed
+/// directly; only out-of-order compatibility callers pay for a copy and sort.
 ///
 /// # Errors
 ///
@@ -47,14 +45,11 @@ pub fn step_3d(
         return Err(PhysicsError3d::NonPositiveTicks(ticks));
     }
 
-    let snapshots = snapshot_by_id(snapshot);
-    let mut ordered_bodies = bodies.to_vec();
-    ordered_bodies.sort_unstable_by_key(|body| body.entity);
-    reject_duplicate_bodies(&ordered_bodies)?;
-
+    let ordered_bodies = canonical_bodies(bodies)?;
     let mut body_states = ordered_bodies
-        .into_iter()
-        .map(|body| BodyState::from_body(body, &snapshots))
+        .iter()
+        .copied()
+        .map(|body| BodyState::from_body(body, snapshot))
         .collect::<Result<Vec<_>, _>>()?;
 
     for state in &mut body_states {
@@ -136,23 +131,6 @@ pub fn step_3d(
     })
 }
 
-fn snapshot_by_id(snapshot: &WorldSnapshot) -> BTreeMap<EntityId, EntitySnapshot> {
-    snapshot
-        .entities()
-        .iter()
-        .map(|entity| (entity.id, *entity))
-        .collect()
-}
-
-fn reject_duplicate_bodies(bodies: &[PhysicsBody3d]) -> Result<(), PhysicsError3d> {
-    for pair in bodies.windows(2) {
-        if pair[0].entity == pair[1].entity {
-            return Err(PhysicsError3d::DuplicateBody(pair[0].entity));
-        }
-    }
-    Ok(())
-}
-
 #[derive(Clone, Copy, Debug)]
 struct ScaledPosition {
     values: [i128; 3],
@@ -211,10 +189,7 @@ struct BodyState {
 }
 
 impl BodyState {
-    fn from_body(
-        body: PhysicsBody3d,
-        snapshots: &BTreeMap<EntityId, EntitySnapshot>,
-    ) -> Result<Self, PhysicsError3d> {
+    fn from_body(body: PhysicsBody3d, snapshot: &WorldSnapshot) -> Result<Self, PhysicsError3d> {
         if body.half_extents.iter().any(|extent| *extent < 0) {
             return Err(PhysicsError3d::InvalidHalfExtents(body.entity));
         }
@@ -234,8 +209,8 @@ impl BodyState {
             ));
         }
 
-        let entity = snapshots
-            .get(&body.entity)
+        let entity = snapshot
+            .entity(body.entity)
             .ok_or(PhysicsError3d::MissingEntity(body.entity))?;
         let original_position = entity
             .position
