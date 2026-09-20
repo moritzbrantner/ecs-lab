@@ -1,7 +1,8 @@
 use std::collections::BTreeSet;
 
 use ecs_workload::{
-    EntityId, EntitySnapshot, Operation, Position, Velocity, Workload, WorkloadError, WorldSnapshot,
+    EntityId, EntitySnapshot, Operation, Position, SnapshotWorkStats, StorageWorkStats, Velocity,
+    Workload, WorkloadError, WorldSnapshot,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -142,7 +143,13 @@ impl SparseWorld {
 
     #[must_use]
     pub fn snapshot(&self) -> WorldSnapshot {
-        WorldSnapshot::new(
+        self.snapshot_with_stats().0
+    }
+
+    #[must_use]
+    pub fn snapshot_with_stats(&self) -> (WorldSnapshot, SnapshotWorkStats) {
+        let entity_count = u64::try_from(self.alive.len()).unwrap_or(u64::MAX);
+        let snapshot = WorldSnapshot::new(
             self.alive
                 .iter()
                 .map(|&id| EntitySnapshot {
@@ -151,7 +158,39 @@ impl SparseWorld {
                     velocity: self.velocities.get(id).copied(),
                 })
                 .collect(),
+        );
+        (
+            snapshot,
+            SnapshotWorkStats {
+                slots_scanned: entity_count,
+                entities_materialized: entity_count,
+            },
         )
+    }
+
+    #[must_use]
+    pub fn operation_work(&self, operation: Operation) -> StorageWorkStats {
+        if !matches!(operation, Operation::Integrate { .. }) {
+            return StorageWorkStats::default();
+        }
+
+        let integration_rows_scanned =
+            u64::try_from(self.positions.dense_entities.len()).unwrap_or(u64::MAX);
+        let integrated_entities = u64::try_from(
+            self.positions
+                .dense_entities
+                .iter()
+                .filter(|&&entity| self.velocities.get(entity).is_some())
+                .count(),
+        )
+        .unwrap_or(u64::MAX);
+
+        StorageWorkStats {
+            integration_rows_scanned,
+            integrated_entities,
+            component_lookups: integration_rows_scanned,
+            ..StorageWorkStats::default()
+        }
     }
 
     fn require_alive(&self, entity: EntityId) -> Result<(), WorkloadError> {
