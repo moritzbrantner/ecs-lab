@@ -107,12 +107,7 @@ fn run_motion_benchmarks(smoke: bool, fingerprint: &str) {
         reference_snapshot_work,
     );
     print_storage_work_evidence("motion", "sparse-set", sparse_work, sparse_snapshot_work);
-    print_storage_work_evidence(
-        "motion",
-        "cached-sparse",
-        cached_work,
-        cached_snapshot_work,
-    );
+    print_storage_work_evidence("motion", "cached-sparse", cached_work, cached_snapshot_work);
     print_storage_work_evidence(
         "motion",
         "archetype-table",
@@ -174,76 +169,7 @@ fn run_mixed_motion_benchmarks(smoke: bool, fingerprint: &str) {
         rounds,
         MIXED_MOTION_VELOCITY_STRIDE,
     );
-    let (reference_expected, reference_work, reference_snapshot_work) =
-        reference_workload_evidence(&workload);
-    let (sparse_expected, sparse_work, sparse_snapshot_work) = sparse_workload_evidence(&workload);
-    let (cached_expected, cached_work, cached_snapshot_work) =
-        cached_sparse_workload_evidence(&workload);
-    let (archetype_expected, archetype_work, archetype_snapshot_work) =
-        archetype_workload_evidence(&workload);
-
-    assert_eq!(
-        sparse_expected, reference_expected,
-        "mixed-motion fixture must prove sparse/reference parity before timing"
-    );
-    assert_eq!(
-        cached_expected, reference_expected,
-        "mixed-motion fixture must prove cached-sparse/reference parity before timing"
-    );
-    assert_eq!(
-        archetype_expected, reference_expected,
-        "mixed-motion fixture must prove archetype/reference parity before timing"
-    );
-    assert_eq!(
-        archetype_work.integrated_entities, sparse_work.integrated_entities,
-        "mixed-motion useful integration work must stay storage-independent"
-    );
-    assert_eq!(
-        cached_work.integrated_entities, sparse_work.integrated_entities,
-        "mixed-motion cached query must preserve useful integration work"
-    );
-    assert_eq!(
-        cached_work.integration_rows_scanned,
-        archetype_work.integration_rows_scanned,
-        "mixed-motion cached query should scan the same participating rows as archetype storage"
-    );
-    assert_eq!(
-        cached_work.component_lookups, 0,
-        "mixed-motion cached query should avoid per-row component lookups"
-    );
-    assert!(
-        archetype_work.integration_rows_scanned < sparse_work.integration_rows_scanned,
-        "mixed-motion fixture must expose archetype row-locality work reduction"
-    );
-    assert!(
-        sparse_work.component_lookups > 0 && archetype_work.component_lookups == 0,
-        "mixed-motion fixture must expose sparse lookup work versus archetype columns"
-    );
-
-    print_storage_work_evidence(
-        "mixed-motion",
-        "reference",
-        reference_work,
-        reference_snapshot_work,
-    );
-    print_storage_work_evidence(
-        "mixed-motion",
-        "sparse-set",
-        sparse_work,
-        sparse_snapshot_work,
-    );
-    print_storage_work_evidence(
-        "mixed-motion",
-        "cached-sparse",
-        cached_work,
-        cached_snapshot_work,
-    );
-    print_storage_work_evidence(
-        "mixed-motion",
-        "archetype-table",
-        archetype_work,
-        archetype_snapshot_work,
-    );
+    verify_mixed_motion_evidence(&workload);
 
     benchmark(
         "mixed-motion",
@@ -284,6 +210,78 @@ fn run_mixed_motion_benchmarks(smoke: bool, fingerprint: &str) {
         repetitions,
         fingerprint,
         || archetype_motion_snapshot(black_box(&workload)),
+    );
+}
+
+fn verify_mixed_motion_evidence(workload: &Workload) {
+    let (reference_expected, reference_work, reference_snapshot_work) =
+        reference_workload_evidence(workload);
+    let (sparse_expected, sparse_work, sparse_snapshot_work) = sparse_workload_evidence(workload);
+    let (cached_expected, cached_work, cached_snapshot_work) =
+        cached_sparse_workload_evidence(workload);
+    let (archetype_expected, archetype_work, archetype_snapshot_work) =
+        archetype_workload_evidence(workload);
+
+    assert_eq!(
+        sparse_expected, reference_expected,
+        "mixed-motion fixture must prove sparse/reference parity before timing"
+    );
+    assert_eq!(
+        cached_expected, reference_expected,
+        "mixed-motion fixture must prove cached-sparse/reference parity before timing"
+    );
+    assert_eq!(
+        archetype_expected, reference_expected,
+        "mixed-motion fixture must prove archetype/reference parity before timing"
+    );
+    assert_eq!(
+        archetype_work.integrated_entities, sparse_work.integrated_entities,
+        "mixed-motion useful integration work must stay storage-independent"
+    );
+    assert_eq!(
+        cached_work.integrated_entities, sparse_work.integrated_entities,
+        "mixed-motion cached query must preserve useful integration work"
+    );
+    assert_eq!(
+        cached_work.integration_rows_scanned, archetype_work.integration_rows_scanned,
+        "mixed-motion cached query should scan the same participating rows as archetype storage"
+    );
+    assert_eq!(
+        cached_work.component_lookups, 0,
+        "mixed-motion cached query should avoid per-row component lookups"
+    );
+    assert!(
+        archetype_work.integration_rows_scanned < sparse_work.integration_rows_scanned,
+        "mixed-motion fixture must expose archetype row-locality work reduction"
+    );
+    assert!(
+        sparse_work.component_lookups > 0 && archetype_work.component_lookups == 0,
+        "mixed-motion fixture must expose sparse lookup work versus archetype columns"
+    );
+
+    print_storage_work_evidence(
+        "mixed-motion",
+        "reference",
+        reference_work,
+        reference_snapshot_work,
+    );
+    print_storage_work_evidence(
+        "mixed-motion",
+        "sparse-set",
+        sparse_work,
+        sparse_snapshot_work,
+    );
+    print_storage_work_evidence(
+        "mixed-motion",
+        "cached-sparse",
+        cached_work,
+        cached_snapshot_work,
+    );
+    print_storage_work_evidence(
+        "mixed-motion",
+        "archetype-table",
+        archetype_work,
+        archetype_snapshot_work,
     );
 }
 
