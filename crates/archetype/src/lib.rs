@@ -1,5 +1,6 @@
 use ecs_workload::{
-    EntityId, EntitySnapshot, Operation, Position, Velocity, Workload, WorkloadError, WorldSnapshot,
+    EntityId, EntitySnapshot, Operation, Position, SnapshotWorkStats, StorageWorkStats, Velocity,
+    Workload, WorkloadError, WorldSnapshot,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -168,7 +169,47 @@ impl ArchetypeWorld {
     /// swap-remove for compact storage; the location index is the canonical projection seam.
     #[must_use]
     pub fn snapshot(&self) -> WorldSnapshot {
-        WorldSnapshot::new(self.canonical_snapshot_entities())
+        self.snapshot_with_stats().0
+    }
+
+    #[must_use]
+    pub fn snapshot_with_stats(&self) -> (WorldSnapshot, SnapshotWorkStats) {
+        let slots_scanned = u64::try_from(self.locations.len()).unwrap_or(u64::MAX);
+        let entities_materialized = u64::try_from(self.entity_count()).unwrap_or(u64::MAX);
+        (
+            WorldSnapshot::new(self.canonical_snapshot_entities()),
+            SnapshotWorkStats {
+                slots_scanned,
+                entities_materialized,
+            },
+        )
+    }
+
+    #[must_use]
+    pub fn operation_work(&self, operation: Operation) -> StorageWorkStats {
+        match operation {
+            Operation::Integrate { .. } => {
+                let row_count = u64::try_from(self.motion.entities.len()).unwrap_or(u64::MAX);
+                StorageWorkStats {
+                    integration_rows_scanned: row_count,
+                    integrated_entities: row_count,
+                    ..StorageWorkStats::default()
+                }
+            }
+            Operation::SetPosition(entity, _) => {
+                self.transition_work(entity, [TableKind::Empty, TableKind::Velocity])
+            }
+            Operation::RemovePosition(entity) => {
+                self.transition_work(entity, [TableKind::Position, TableKind::Motion])
+            }
+            Operation::SetVelocity(entity, _) => {
+                self.transition_work(entity, [TableKind::Empty, TableKind::Position])
+            }
+            Operation::RemoveVelocity(entity) => {
+                self.transition_work(entity, [TableKind::Velocity, TableKind::Motion])
+            }
+            Operation::Spawn(_) | Operation::Despawn(_) => StorageWorkStats::default(),
+        }
     }
 
     fn canonical_snapshot_entities(&self) -> Vec<EntitySnapshot> {
@@ -395,6 +436,21 @@ impl ArchetypeWorld {
     fn repair_moved(&mut self, moved: Option<EntityId>, table: TableKind, index: usize) {
         if let Some(entity) = moved {
             self.set_location(entity, table, index);
+        }
+    }
+
+    fn transition_work(
+        &self,
+        entity: EntityId,
+        transition_sources: [TableKind; 2],
+    ) -> StorageWorkStats {
+        let transitions = self
+            .location(entity)
+            .is_ok_and(|location| transition_sources.contains(&location.table));
+
+        StorageWorkStats {
+            structural_table_transitions: u64::from(transitions),
+            ..StorageWorkStats::default()
         }
     }
 }
