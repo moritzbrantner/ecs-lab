@@ -208,6 +208,30 @@ mod tests {
     }
 
     #[test]
+    fn storage_work_evidence_counts_reference_row_scans() {
+        let mut world = ReferenceWorld::new();
+        for operation in [
+            Operation::Spawn(EntityId(0)),
+            Operation::SetPosition(EntityId(0), Position::new(1, 2)),
+            Operation::SetVelocity(EntityId(0), Velocity::new(3, 4)),
+            Operation::Spawn(EntityId(1)),
+            Operation::SetPosition(EntityId(1), Position::new(5, 6)),
+        ] {
+            assert_eq!(world.apply(operation), Ok(()));
+        }
+
+        let work = world.operation_work(Operation::Integrate { ticks: 1 });
+        assert_eq!(work.integration_rows_scanned, 2);
+        assert_eq!(work.integrated_entities, 1);
+        assert_eq!(work.component_lookups, 0);
+        assert_eq!(work.structural_table_transitions, 0);
+
+        let (_, snapshot_work) = world.snapshot_with_stats();
+        assert_eq!(snapshot_work.slots_scanned, 2);
+        assert_eq!(snapshot_work.entities_materialized, 2);
+    }
+
+    #[test]
     fn rejects_duplicate_spawn_without_mutating_existing_entity() {
         let entity = EntityId(4);
         let mut world = ReferenceWorld::new();
