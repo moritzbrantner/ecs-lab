@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "suite": "ecs-lab/benchmark-smoke",
-  "description": "Representative ECS integration contract. Storage parity and physics semantics are correctness gates; shared-runner elapsed time remains advisory while deterministic candidate/contact work is the preferred blocking signal as instrumentation expands.",
+  "description": "Representative ECS integration contract. Storage parity and physics semantics are correctness gates; deterministic storage/collision work is first-class evidence while shared-runner elapsed time remains advisory.",
   "scenarios": [
     {
       "id": "motion",
@@ -16,9 +16,95 @@
       "correctnessEvidence": [
         "reference/sparse/archetype canonical snapshot equality",
         "seeded workload",
-        "environment fingerprint"
+        "environment fingerprint",
+        "deterministic storage-work evidence emitted outside timed repetitions"
       ],
       "metrics": [
+        {
+          "name": "integration_rows_scanned",
+          "unit": "rows",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "component_lookups",
+          "unit": "lookups",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "structural_table_transitions",
+          "unit": "transitions",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "snapshot_slots_scanned",
+          "unit": "slots",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "elapsed_ns",
+          "unit": "ns",
+          "direction": "lower",
+          "signal": "wall-clock",
+          "blocking": false
+        }
+      ]
+    },
+    {
+      "id": "mixed-motion",
+      "kind": "scaling",
+      "description": "Integrate 1,000 positioned entities for 20 rounds while only every fourth entity owns Velocity, exposing sparse component lookup work versus archetype-local motion rows.",
+      "dimensions": {
+        "entities": 1000,
+        "rounds": 20,
+        "velocity_stride": 4,
+        "moving_entities": 250,
+        "repetitions": 3,
+        "implementations": "reference+sparse-set+archetype-table"
+      },
+      "correctnessEvidence": [
+        "reference/sparse/archetype canonical snapshot equality",
+        "equal integrated-entity useful work across storage implementations",
+        "archetype integration scans fewer rows than sparse-set",
+        "sparse-set performs component lookups while archetype motion columns do not",
+        "seeded workload"
+      ],
+      "metrics": [
+        {
+          "name": "integration_rows_scanned",
+          "unit": "rows",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "component_lookups",
+          "unit": "lookups",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "structural_table_transitions",
+          "unit": "transitions",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "snapshot_slots_scanned",
+          "unit": "slots",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
         {
           "name": "elapsed_ns",
           "unit": "ns",
