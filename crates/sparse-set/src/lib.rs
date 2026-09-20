@@ -1,7 +1,8 @@
 use std::collections::BTreeSet;
 
 use ecs_workload::{
-    EntityId, EntitySnapshot, Operation, Position, Velocity, Workload, WorkloadError, WorldSnapshot,
+    EntityId, EntitySnapshot, Operation, Position, SnapshotWorkStats, StorageWorkStats, Velocity,
+    Workload, WorkloadError, WorldSnapshot,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -154,6 +155,43 @@ impl SparseWorld {
         )
     }
 
+    #[must_use]
+    pub fn snapshot_with_stats(&self) -> (WorldSnapshot, SnapshotWorkStats) {
+        let entity_count = u64::try_from(self.alive.len()).unwrap_or(u64::MAX);
+        (
+            self.snapshot(),
+            SnapshotWorkStats {
+                slots_scanned: entity_count,
+                entities_materialized: entity_count,
+            },
+        )
+    }
+
+    #[must_use]
+    pub fn operation_work(&self, operation: Operation) -> StorageWorkStats {
+        if !matches!(operation, Operation::Integrate { .. }) {
+            return StorageWorkStats::default();
+        }
+
+        let integration_rows_scanned =
+            u64::try_from(self.positions.dense_entities.len()).unwrap_or(u64::MAX);
+        let integrated_entities = u64::try_from(
+            self.positions
+                .dense_entities
+                .iter()
+                .filter(|&&entity| self.velocities.get(entity).is_some())
+                .count(),
+        )
+        .unwrap_or(u64::MAX);
+
+        StorageWorkStats {
+            integration_rows_scanned,
+            integrated_entities,
+            component_lookups: integration_rows_scanned,
+            ..StorageWorkStats::default()
+        }
+    }
+
     fn require_alive(&self, entity: EntityId) -> Result<(), WorkloadError> {
         if self.alive.contains(&entity) {
             Ok(())
@@ -219,6 +257,30 @@ mod tests {
                 .and_then(|entity| entity.position),
             Some(Position::new(6, 0))
         );
+    }
+
+    #[test]
+    fn storage_work_evidence_counts_sparse_component_lookups() {
+        let mut world = SparseWorld::new();
+        for operation in [
+            Operation::Spawn(EntityId(0)),
+            Operation::SetPosition(EntityId(0), Position::new(1, 2)),
+            Operation::SetVelocity(EntityId(0), Velocity::new(3, 4)),
+            Operation::Spawn(EntityId(1)),
+            Operation::SetPosition(EntityId(1), Position::new(5, 6)),
+        ] {
+            assert_eq!(world.apply(operation), Ok(()));
+        }
+
+        let work = world.operation_work(Operation::Integrate { ticks: 1 });
+        assert_eq!(work.integration_rows_scanned, 2);
+        assert_eq!(work.integrated_entities, 1);
+        assert_eq!(work.component_lookups, 2);
+        assert_eq!(work.structural_table_transitions, 0);
+
+        let (_, snapshot_work) = world.snapshot_with_stats();
+        assert_eq!(snapshot_work.slots_scanned, 2);
+        assert_eq!(snapshot_work.entities_materialized, 2);
     }
 
     #[test]
