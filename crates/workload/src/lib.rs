@@ -148,6 +148,35 @@ impl WorldSnapshot {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct StorageWorkStats {
+    pub integration_rows_scanned: u64,
+    pub integrated_entities: u64,
+    pub component_lookups: u64,
+    pub structural_table_transitions: u64,
+}
+
+impl StorageWorkStats {
+    pub fn accumulate(&mut self, other: Self) {
+        self.integration_rows_scanned = self
+            .integration_rows_scanned
+            .saturating_add(other.integration_rows_scanned);
+        self.integrated_entities = self
+            .integrated_entities
+            .saturating_add(other.integrated_entities);
+        self.component_lookups = self.component_lookups.saturating_add(other.component_lookups);
+        self.structural_table_transitions = self
+            .structural_table_transitions
+            .saturating_add(other.structural_table_transitions);
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct SnapshotWorkStats {
+    pub slots_scanned: u64,
+    pub entities_materialized: u64,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum WorkloadError {
     EntityAlreadyExists(EntityId),
