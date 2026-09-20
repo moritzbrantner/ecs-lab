@@ -82,10 +82,7 @@ impl MotionTable {
         index
     }
 
-    fn swap_remove(
-        &mut self,
-        index: usize,
-    ) -> (EntityId, Position, Velocity, Option<EntityId>) {
+    fn swap_remove(&mut self, index: usize) -> (EntityId, Position, Velocity, Option<EntityId>) {
         let removed_entity = self.entities.swap_remove(index);
         let removed_position = self.positions.swap_remove(index);
         let removed_velocity = self.velocities.swap_remove(index);
@@ -136,7 +133,7 @@ impl ArchetypeWorld {
     ///
     /// # Errors
     ///
-    /// Returns WorkloadError for invalid entity lifecycle operations.
+    /// Returns `WorkloadError` for invalid entity lifecycle operations.
     pub fn apply(&mut self, operation: Operation) -> Result<(), WorkloadError> {
         match operation {
             Operation::Spawn(entity) => self.spawn(entity),
@@ -156,7 +153,7 @@ impl ArchetypeWorld {
     ///
     /// # Errors
     ///
-    /// Returns the first WorkloadError produced by the workload.
+    /// Returns the first `WorkloadError` produced by the workload.
     pub fn replay(&mut self, workload: &Workload) -> Result<(), WorkloadError> {
         for operation in workload.operations() {
             self.apply(*operation)?;
@@ -168,11 +165,17 @@ impl ArchetypeWorld {
     pub fn snapshot(&self) -> WorldSnapshot {
         let mut entities = Vec::with_capacity(self.entity_count());
 
-        entities.extend(self.empty.entities.iter().copied().map(|id| EntitySnapshot {
-            id,
-            position: None,
-            velocity: None,
-        }));
+        entities.extend(
+            self.empty
+                .entities
+                .iter()
+                .copied()
+                .map(|id| EntitySnapshot {
+                    id,
+                    position: None,
+                    velocity: None,
+                }),
+        );
         entities.extend(
             self.positions
                 .entities
@@ -259,11 +262,7 @@ impl ArchetypeWorld {
         Ok(())
     }
 
-    fn set_position(
-        &mut self,
-        entity: EntityId,
-        position: Position,
-    ) -> Result<(), WorkloadError> {
+    fn set_position(&mut self, entity: EntityId, position: Position) -> Result<(), WorkloadError> {
         let location = self.location(entity)?;
         match location.table {
             TableKind::Empty => {
@@ -298,8 +297,7 @@ impl ArchetypeWorld {
                 self.set_location(entity, TableKind::Empty, index);
             }
             TableKind::Motion => {
-                let (removed, _position, velocity, moved) =
-                    self.motion.swap_remove(location.index);
+                let (removed, _position, velocity, moved) = self.motion.swap_remove(location.index);
                 debug_assert_eq!(removed, entity);
                 self.repair_moved(moved, TableKind::Motion, location.index);
                 let index = self.velocities.push(entity, velocity);
@@ -309,11 +307,7 @@ impl ArchetypeWorld {
         Ok(())
     }
 
-    fn set_velocity(
-        &mut self,
-        entity: EntityId,
-        velocity: Velocity,
-    ) -> Result<(), WorkloadError> {
+    fn set_velocity(&mut self, entity: EntityId, velocity: Velocity) -> Result<(), WorkloadError> {
         let location = self.location(entity)?;
         match location.table {
             TableKind::Empty => {
@@ -348,8 +342,7 @@ impl ArchetypeWorld {
                 self.set_location(entity, TableKind::Empty, index);
             }
             TableKind::Motion => {
-                let (removed, position, _velocity, moved) =
-                    self.motion.swap_remove(location.index);
+                let (removed, position, _velocity, moved) = self.motion.swap_remove(location.index);
                 debug_assert_eq!(removed, entity);
                 self.repair_moved(moved, TableKind::Motion, location.index);
                 let index = self.positions.push(entity, position);
