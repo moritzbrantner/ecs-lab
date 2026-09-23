@@ -7,8 +7,8 @@ use ecs_physics_scenarios::{BouncingRoomScenario, FallingBoxesScenario};
 use ecs_reference::ReferenceWorld;
 use ecs_sparse_set::SparseWorld;
 use ecs_workload::{
-    EntityId, EntitySnapshot, Operation, Position, SnapshotWorkStats, StorageWorkStats, Velocity,
-    Workload, WorldSnapshot,
+    EntityId, EntitySnapshot, Operation, Position, SnapshotWorkStats, StorageIndexStats,
+    StorageWorkStats, Velocity, Workload, WorldSnapshot,
 };
 
 const BENCHMARK_SEED: u32 = 0x5EED_CAFE;
@@ -81,12 +81,13 @@ fn run_motion_benchmarks(smoke: bool, fingerprint: &str) {
         (50_000, 50, 5)
     };
     let workload = Workload::motion_scenario(BENCHMARK_SEED, entity_count, rounds);
-    let (reference_expected, reference_work, reference_snapshot_work) =
+    let (reference_expected, reference_work, reference_snapshot_work, reference_index) =
         reference_workload_evidence(&workload);
-    let (sparse_expected, sparse_work, sparse_snapshot_work) = sparse_workload_evidence(&workload);
-    let (cached_expected, cached_work, cached_snapshot_work) =
+    let (sparse_expected, sparse_work, sparse_snapshot_work, sparse_index) =
+        sparse_workload_evidence(&workload);
+    let (cached_expected, cached_work, cached_snapshot_work, cached_index) =
         cached_sparse_workload_evidence(&workload);
-    let (archetype_expected, archetype_work, archetype_snapshot_work) =
+    let (archetype_expected, archetype_work, archetype_snapshot_work, archetype_index) =
         archetype_workload_evidence(&workload);
     assert_eq!(
         sparse_expected, reference_expected,
@@ -105,14 +106,28 @@ fn run_motion_benchmarks(smoke: bool, fingerprint: &str) {
         "reference",
         reference_work,
         reference_snapshot_work,
+        reference_index,
     );
-    print_storage_work_evidence("motion", "sparse-set", sparse_work, sparse_snapshot_work);
-    print_storage_work_evidence("motion", "cached-sparse", cached_work, cached_snapshot_work);
+    print_storage_work_evidence(
+        "motion",
+        "sparse-set",
+        sparse_work,
+        sparse_snapshot_work,
+        sparse_index,
+    );
+    print_storage_work_evidence(
+        "motion",
+        "cached-sparse",
+        cached_work,
+        cached_snapshot_work,
+        cached_index,
+    );
     print_storage_work_evidence(
         "motion",
         "archetype-table",
         archetype_work,
         archetype_snapshot_work,
+        archetype_index,
     );
 
     benchmark(
@@ -214,12 +229,13 @@ fn run_mixed_motion_benchmarks(smoke: bool, fingerprint: &str) {
 }
 
 fn verify_mixed_motion_evidence(workload: &Workload) {
-    let (reference_expected, reference_work, reference_snapshot_work) =
+    let (reference_expected, reference_work, reference_snapshot_work, reference_index) =
         reference_workload_evidence(workload);
-    let (sparse_expected, sparse_work, sparse_snapshot_work) = sparse_workload_evidence(workload);
-    let (cached_expected, cached_work, cached_snapshot_work) =
+    let (sparse_expected, sparse_work, sparse_snapshot_work, sparse_index) =
+        sparse_workload_evidence(workload);
+    let (cached_expected, cached_work, cached_snapshot_work, cached_index) =
         cached_sparse_workload_evidence(workload);
-    let (archetype_expected, archetype_work, archetype_snapshot_work) =
+    let (archetype_expected, archetype_work, archetype_snapshot_work, archetype_index) =
         archetype_workload_evidence(workload);
 
     assert_eq!(
@@ -268,36 +284,41 @@ fn verify_mixed_motion_evidence(workload: &Workload) {
         "reference",
         reference_work,
         reference_snapshot_work,
+        reference_index,
     );
     print_storage_work_evidence(
         "mixed-motion",
         "sparse-set",
         sparse_work,
         sparse_snapshot_work,
+        sparse_index,
     );
     print_storage_work_evidence(
         "mixed-motion",
         "cached-sparse",
         cached_work,
         cached_snapshot_work,
+        cached_index,
     );
     print_storage_work_evidence(
         "mixed-motion",
         "archetype-table",
         archetype_work,
         archetype_snapshot_work,
+        archetype_index,
     );
 }
 
 fn run_component_churn_benchmarks(smoke: bool, fingerprint: &str) {
     let (entity_count, rounds, repetitions) = if smoke { (512, 8, 3) } else { (20_000, 20, 5) };
     let workload = Workload::component_churn_scenario(COMPONENT_CHURN_SEED, entity_count, rounds);
-    let (reference_expected, reference_work, reference_snapshot_work) =
+    let (reference_expected, reference_work, reference_snapshot_work, reference_index) =
         reference_workload_evidence(&workload);
-    let (sparse_expected, sparse_work, sparse_snapshot_work) = sparse_workload_evidence(&workload);
-    let (cached_expected, cached_work, cached_snapshot_work) =
+    let (sparse_expected, sparse_work, sparse_snapshot_work, sparse_index) =
+        sparse_workload_evidence(&workload);
+    let (cached_expected, cached_work, cached_snapshot_work, cached_index) =
         cached_sparse_workload_evidence(&workload);
-    let (archetype_expected, archetype_work, archetype_snapshot_work) =
+    let (archetype_expected, archetype_work, archetype_snapshot_work, archetype_index) =
         archetype_workload_evidence(&workload);
 
     assert_eq!(
@@ -338,24 +359,28 @@ fn run_component_churn_benchmarks(smoke: bool, fingerprint: &str) {
         "reference",
         reference_work,
         reference_snapshot_work,
+        reference_index,
     );
     print_storage_work_evidence(
         "component-churn",
         "sparse-set",
         sparse_work,
         sparse_snapshot_work,
+        sparse_index,
     );
     print_storage_work_evidence(
         "component-churn",
         "cached-sparse",
         cached_work,
         cached_snapshot_work,
+        cached_index,
     );
     print_storage_work_evidence(
         "component-churn",
         "archetype-table",
         archetype_work,
         archetype_snapshot_work,
+        archetype_index,
     );
 
     benchmark(
@@ -405,9 +430,10 @@ fn print_storage_work_evidence(
     implementation: &str,
     work: StorageWorkStats,
     snapshot: SnapshotWorkStats,
+    index: StorageIndexStats,
 ) {
     println!(
-        "storage_work scenario={scenario} implementation={implementation} integration_rows_scanned={} integrated_entities={} component_lookups={} structural_table_transitions={} query_cache_updates={} snapshot_slots_scanned={} snapshot_entities_materialized={}",
+        "storage_work scenario={scenario} implementation={implementation} integration_rows_scanned={} integrated_entities={} component_lookups={} structural_table_transitions={} query_cache_updates={} snapshot_slots_scanned={} snapshot_entities_materialized={} entity_index_entries={} component_index_slots={} query_index_slots={} query_rows={}",
         work.integration_rows_scanned,
         work.integrated_entities,
         work.component_lookups,
@@ -415,12 +441,21 @@ fn print_storage_work_evidence(
         work.query_cache_updates,
         snapshot.slots_scanned,
         snapshot.entities_materialized,
+        index.entity_index_entries,
+        index.component_index_slots,
+        index.query_index_slots,
+        index.query_rows,
     );
 }
 
 fn reference_workload_evidence(
     workload: &Workload,
-) -> (WorldSnapshot, StorageWorkStats, SnapshotWorkStats) {
+) -> (
+    WorldSnapshot,
+    StorageWorkStats,
+    SnapshotWorkStats,
+    StorageIndexStats,
+) {
     let mut world = ReferenceWorld::new();
     let mut work = StorageWorkStats::default();
     for operation in workload.operations() {
@@ -431,12 +466,18 @@ fn reference_workload_evidence(
         );
     }
     let (snapshot, snapshot_work) = world.snapshot_with_stats();
-    (snapshot, work, snapshot_work)
+    let index = world.index_stats();
+    (snapshot, work, snapshot_work, index)
 }
 
 fn sparse_workload_evidence(
     workload: &Workload,
-) -> (WorldSnapshot, StorageWorkStats, SnapshotWorkStats) {
+) -> (
+    WorldSnapshot,
+    StorageWorkStats,
+    SnapshotWorkStats,
+    StorageIndexStats,
+) {
     let mut world = SparseWorld::new();
     let mut work = StorageWorkStats::default();
     for operation in workload.operations() {
@@ -447,12 +488,18 @@ fn sparse_workload_evidence(
         );
     }
     let (snapshot, snapshot_work) = world.snapshot_with_stats();
-    (snapshot, work, snapshot_work)
+    let index = world.index_stats();
+    (snapshot, work, snapshot_work, index)
 }
 
 fn cached_sparse_workload_evidence(
     workload: &Workload,
-) -> (WorldSnapshot, StorageWorkStats, SnapshotWorkStats) {
+) -> (
+    WorldSnapshot,
+    StorageWorkStats,
+    SnapshotWorkStats,
+    StorageIndexStats,
+) {
     let mut world = CachedSparseWorld::new();
     let mut work = StorageWorkStats::default();
     for operation in workload.operations() {
@@ -463,12 +510,18 @@ fn cached_sparse_workload_evidence(
         );
     }
     let (snapshot, snapshot_work) = world.snapshot_with_stats();
-    (snapshot, work, snapshot_work)
+    let index = world.index_stats();
+    (snapshot, work, snapshot_work, index)
 }
 
 fn archetype_workload_evidence(
     workload: &Workload,
-) -> (WorldSnapshot, StorageWorkStats, SnapshotWorkStats) {
+) -> (
+    WorldSnapshot,
+    StorageWorkStats,
+    SnapshotWorkStats,
+    StorageIndexStats,
+) {
     let mut world = ArchetypeWorld::new();
     let mut work = StorageWorkStats::default();
     for operation in workload.operations() {
@@ -479,7 +532,8 @@ fn archetype_workload_evidence(
         );
     }
     let (snapshot, snapshot_work) = world.snapshot_with_stats();
-    (snapshot, work, snapshot_work)
+    let index = world.index_stats();
+    (snapshot, work, snapshot_work, index)
 }
 
 fn reference_motion_snapshot(workload: &Workload) -> WorldSnapshot {
@@ -524,10 +578,15 @@ fn run_falling_box_benchmarks(smoke: bool, fingerprint: &str) {
     let body_count = dynamic_count.saturating_add(1);
     let reference_expected = reference_falling_box_snapshot(&scenario, frames);
     let sparse_expected = sparse_falling_box_snapshot(&scenario, frames);
+    let cached_expected = cached_sparse_falling_box_snapshot(&scenario, frames);
     let archetype_expected = archetype_falling_box_snapshot(&scenario, frames);
     assert_eq!(
         sparse_expected, reference_expected,
         "falling-box benchmark fixture must prove sparse/reference parity before timing"
+    );
+    assert_eq!(
+        cached_expected, reference_expected,
+        "falling-box benchmark fixture must prove cached-sparse/reference parity before timing"
     );
     assert_eq!(
         archetype_expected, reference_expected,
@@ -553,6 +612,16 @@ fn run_falling_box_benchmarks(smoke: bool, fingerprint: &str) {
         repetitions,
         fingerprint,
         || sparse_falling_box_snapshot(&scenario, frames),
+    );
+    benchmark(
+        "falling-boxes",
+        "cached-sparse",
+        body_count,
+        frames,
+        FALLING_BOX_SEED,
+        repetitions,
+        fingerprint,
+        || cached_sparse_falling_box_snapshot(&scenario, frames),
     );
     benchmark(
         "falling-boxes",
@@ -602,6 +671,30 @@ fn sparse_falling_box_snapshot(scenario: &FallingBoxesScenario, frames: u32) -> 
             must(
                 world.apply(*operation),
                 "sparse storage must accept generated physics operation",
+            );
+        }
+    }
+    world.snapshot()
+}
+
+fn cached_sparse_falling_box_snapshot(
+    scenario: &FallingBoxesScenario,
+    frames: u32,
+) -> WorldSnapshot {
+    let mut world = CachedSparseWorld::new();
+    must(
+        world.replay(scenario.setup()),
+        "validated cached-sparse falling-box setup must replay",
+    );
+    for _ in 0..frames {
+        let physics = must(
+            scenario.step(&world.snapshot()),
+            "validated cached-sparse falling-box physics step must succeed",
+        );
+        for operation in physics.operations() {
+            must(
+                world.apply(*operation),
+                "cached-sparse storage must accept generated physics operation",
             );
         }
     }
@@ -743,10 +836,15 @@ fn run_bouncing_room_benchmarks(smoke: bool, fingerprint: &str) {
     );
     let reference_expected = reference_bouncing_room_snapshot(&scenario, frames);
     let sparse_expected = sparse_bouncing_room_snapshot(&scenario, frames);
+    let cached_expected = cached_sparse_bouncing_room_snapshot(&scenario, frames);
     let archetype_expected = archetype_bouncing_room_snapshot(&scenario, frames);
     assert_eq!(
         sparse_expected, reference_expected,
         "bouncing-room benchmark fixture must prove sparse/reference parity before timing"
+    );
+    assert_eq!(
+        cached_expected, reference_expected,
+        "bouncing-room benchmark fixture must prove cached-sparse/reference parity before timing"
     );
     assert_eq!(
         archetype_expected, reference_expected,
@@ -772,6 +870,16 @@ fn run_bouncing_room_benchmarks(smoke: bool, fingerprint: &str) {
         repetitions,
         fingerprint,
         || sparse_bouncing_room_snapshot(&scenario, frames),
+    );
+    benchmark(
+        "bouncing-room",
+        "cached-sparse",
+        body_count,
+        frames,
+        BOUNCING_ROOM_SEED,
+        repetitions,
+        fingerprint,
+        || cached_sparse_bouncing_room_snapshot(&scenario, frames),
     );
     benchmark(
         "bouncing-room",
@@ -821,6 +929,30 @@ fn sparse_bouncing_room_snapshot(scenario: &BouncingRoomScenario, frames: u32) -
             must(
                 world.apply(*operation),
                 "sparse storage must accept bouncing-room operation",
+            );
+        }
+    }
+    world.snapshot()
+}
+
+fn cached_sparse_bouncing_room_snapshot(
+    scenario: &BouncingRoomScenario,
+    frames: u32,
+) -> WorldSnapshot {
+    let mut world = CachedSparseWorld::new();
+    must(
+        world.replay(scenario.setup()),
+        "validated cached-sparse bouncing-room setup must replay",
+    );
+    for _ in 0..frames {
+        let physics = must(
+            scenario.step(&world.snapshot()),
+            "validated cached-sparse bouncing-room physics step must succeed",
+        );
+        for operation in physics.operations() {
+            must(
+                world.apply(*operation),
+                "cached-sparse storage must accept bouncing-room operation",
             );
         }
     }
