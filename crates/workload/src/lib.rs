@@ -262,6 +262,19 @@ pub struct SnapshotWorkStats {
     pub entities_materialized: u64,
 }
 
+/// Deterministic logical footprint of storage indexes.
+///
+/// These counters describe retained logical entries/slots, not allocator-specific bytes or capacity.
+/// They are collected outside timed repetitions so storage candidates can expose memory/index trade-offs
+/// without perturbing their hot paths.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct StorageIndexStats {
+    pub entity_index_entries: u64,
+    pub component_index_slots: u64,
+    pub query_index_slots: u64,
+    pub query_rows: u64,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum WorkloadError {
     EntityAlreadyExists(EntityId),
