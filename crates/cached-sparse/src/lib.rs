@@ -1,8 +1,8 @@
 use std::collections::BTreeSet;
 
 use ecs_workload::{
-    EntityId, EntitySnapshot, Operation, Position, SnapshotWorkStats, StorageWorkStats, Velocity,
-    Workload, WorkloadError, WorldSnapshot,
+    EntityId, EntitySnapshot, Operation, Position, SnapshotWorkStats, StorageIndexStats,
+    StorageWorkStats, Velocity, Workload, WorkloadError, WorldSnapshot,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -291,6 +291,22 @@ impl CachedSparseWorld {
     }
 
     #[must_use]
+    pub fn index_stats(&self) -> StorageIndexStats {
+        StorageIndexStats {
+            entity_index_entries: u64::try_from(self.alive.len()).unwrap_or(u64::MAX),
+            component_index_slots: u64::try_from(
+                self.positions
+                    .sparse
+                    .len()
+                    .saturating_add(self.velocities.sparse.len()),
+            )
+            .unwrap_or(u64::MAX),
+            query_index_slots: u64::try_from(self.motion_query.sparse.len()).unwrap_or(u64::MAX),
+            query_rows: u64::try_from(self.motion_query.rows.len()).unwrap_or(u64::MAX),
+        }
+    }
+
+    #[must_use]
     pub fn operation_work(&self, operation: Operation) -> StorageWorkStats {
         match operation {
             Operation::Integrate { .. } => {
@@ -532,6 +548,12 @@ mod tests {
         assert_eq!(integration.integration_rows_scanned, 1);
         assert_eq!(integration.integrated_entities, 1);
         assert_eq!(integration.component_lookups, 0);
+
+        let index = cached.index_stats();
+        assert_eq!(index.entity_index_entries, 2);
+        assert_eq!(index.component_index_slots, 3);
+        assert_eq!(index.query_index_slots, 1);
+        assert_eq!(index.query_rows, 1);
 
         let removal = cached.operation_work(Operation::RemovePosition(first));
         assert!(removal.query_cache_updates >= 1);
