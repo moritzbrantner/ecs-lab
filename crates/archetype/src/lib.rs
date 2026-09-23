@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use ecs_workload::{
     EntityId, EntitySnapshot, Operation, Position, SnapshotWorkStats, StorageWorkStats, Velocity,
     Workload, WorkloadError, WorldSnapshot,
@@ -99,7 +101,7 @@ impl MotionTable {
 /// with no per-row sparse lookup. Structural changes pay the table-move cost instead.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ArchetypeWorld {
-    locations: Vec<Option<Location>>,
+    locations: BTreeMap<EntityId, Location>,
     empty: EntityTable,
     positions: ComponentTable<Position>,
     velocities: ComponentTable<Velocity>,
@@ -110,7 +112,7 @@ impl ArchetypeWorld {
     #[must_use]
     pub const fn new() -> Self {
         Self {
-            locations: Vec::new(),
+            locations: BTreeMap::new(),
             empty: EntityTable {
                 entities: Vec::new(),
             },
@@ -164,7 +166,7 @@ impl ArchetypeWorld {
 
     /// Projects the observable world in canonical entity-id order.
     ///
-    /// The location vector is already indexed by entity id, so snapshotting reuses that index instead
+    /// The ordered location map is keyed by entity id, so snapshotting reuses that live index instead
     /// of concatenating four table orders and sorting the result. Table rows remain free to use
     /// swap-remove for compact storage; the location index is the canonical projection seam.
     #[must_use]
@@ -215,12 +217,9 @@ impl ArchetypeWorld {
     fn canonical_snapshot_entities(&self) -> Vec<EntitySnapshot> {
         let mut entities = Vec::with_capacity(self.entity_count());
 
-        for (slot, location) in self.locations.iter().enumerate() {
-            let Some(location) = *location else {
-                continue;
-            };
+        for (&entity_id, &location) in &self.locations {
             let entity = self.snapshot_entity(location);
-            debug_assert_eq!(entity.id.0 as usize, slot);
+            debug_assert_eq!(entity.id, entity_id);
             entities.push(entity);
         }
 
@@ -253,17 +252,18 @@ impl ArchetypeWorld {
     }
 
     fn spawn(&mut self, entity: EntityId) -> Result<(), WorkloadError> {
-        self.ensure_slot(entity);
-        let slot = entity.0 as usize;
-        if self.locations[slot].is_some() {
+        if self.locations.contains_key(&entity) {
             return Err(WorkloadError::EntityAlreadyExists(entity));
         }
 
         let index = self.empty.push(entity);
-        self.locations[slot] = Some(Location {
-            table: TableKind::Empty,
-            index,
-        });
+        self.locations.insert(
+            entity,
+            Location {
+                table: TableKind::Empty,
+                index,
+            },
+        );
         Ok(())
     }
 
@@ -293,7 +293,7 @@ impl ArchetypeWorld {
             }
         }
 
-        self.locations[entity.0 as usize] = None;
+        self.locations.remove(&entity);
         Ok(())
     }
 
@@ -414,23 +414,15 @@ impl ArchetypeWorld {
             + self.motion.entities.len()
     }
 
-    fn ensure_slot(&mut self, entity: EntityId) {
-        let slot = entity.0 as usize;
-        if self.locations.len() <= slot {
-            self.locations.resize(slot + 1, None);
-        }
-    }
-
     fn location(&self, entity: EntityId) -> Result<Location, WorkloadError> {
         self.locations
-            .get(entity.0 as usize)
+            .get(&entity)
             .copied()
-            .flatten()
             .ok_or(WorkloadError::MissingEntity(entity))
     }
 
     fn set_location(&mut self, entity: EntityId, table: TableKind, index: usize) {
-        self.locations[entity.0 as usize] = Some(Location { table, index });
+        self.locations.insert(entity, Location { table, index });
     }
 
     fn repair_moved(&mut self, moved: Option<EntityId>, table: TableKind, index: usize) {
@@ -527,7 +519,7 @@ mod tests {
         assert_eq!(integration.component_lookups, 0);
 
         let (_, snapshot_work) = world.snapshot_with_stats();
-        assert_eq!(snapshot_work.slots_scanned, 8);
+        assert_eq!(snapshot_work.slots_scanned, 1);
         assert_eq!(snapshot_work.entities_materialized, 1);
     }
 
@@ -615,6 +607,37 @@ mod tests {
             [EntityId(1), EntityId(4), EntityId(7)]
         );
         assert_eq!(world.snapshot().entities(), projected);
+    }
+
+    #[test]
+    fn sparse_entity_ids_preserve_parity_without_high_water_scan() {
+        let mut reference = ReferenceWorld::new();
+        let mut archetype = ArchetypeWorld::new();
+        let high = EntityId(u32::MAX);
+
+        for operation in [
+            Operation::Spawn(high),
+            Operation::SetPosition(high, Position::new3(10, 20, 30)),
+            Operation::SetVelocity(high, Velocity::new3(1, -2, 3)),
+            Operation::Spawn(EntityId(2)),
+            Operation::SetPosition(EntityId(2), Position::new3(-4, 5, 6)),
+            Operation::Integrate { ticks: 2 },
+        ] {
+            assert_eq!(archetype.apply(operation), reference.apply(operation));
+            assert_eq!(archetype.snapshot(), reference.snapshot());
+        }
+
+        let (_, snapshot_work) = archetype.snapshot_with_stats();
+        assert_eq!(snapshot_work.slots_scanned, 2);
+        assert_eq!(snapshot_work.entities_materialized, 2);
+
+        let operation = Operation::Despawn(high);
+        assert_eq!(archetype.apply(operation), reference.apply(operation));
+        assert_eq!(archetype.snapshot(), reference.snapshot());
+
+        let (_, snapshot_work) = archetype.snapshot_with_stats();
+        assert_eq!(snapshot_work.slots_scanned, 1);
+        assert_eq!(snapshot_work.entities_materialized, 1);
     }
 
     #[test]
