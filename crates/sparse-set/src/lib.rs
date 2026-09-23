@@ -1,8 +1,8 @@
 use std::collections::BTreeSet;
 
 use ecs_workload::{
-    EntityId, EntitySnapshot, Operation, Position, SnapshotWorkStats, StorageWorkStats, Velocity,
-    Workload, WorkloadError, WorldSnapshot,
+    EntityId, EntitySnapshot, Operation, Position, SnapshotWorkStats, StorageIndexStats,
+    StorageWorkStats, Velocity, Workload, WorkloadError, WorldSnapshot,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -165,6 +165,18 @@ impl SparseWorld {
                 entities_materialized: entity_count,
             },
         )
+    }
+
+    #[must_use]
+    pub fn index_stats(&self) -> StorageIndexStats {
+        StorageIndexStats {
+            entity_index_entries: u64::try_from(self.alive.len()).unwrap_or(u64::MAX),
+            component_index_slots: u64::try_from(
+                self.positions.sparse.len().saturating_add(self.velocities.sparse.len()),
+            )
+            .unwrap_or(u64::MAX),
+            ..StorageIndexStats::default()
+        }
     }
 
     #[must_use]
