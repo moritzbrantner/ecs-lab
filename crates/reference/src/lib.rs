@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use ecs_workload::{
-    EntityId, EntitySnapshot, Operation, Position, SnapshotWorkStats, StorageWorkStats, Velocity,
-    Workload, WorkloadError, WorldSnapshot,
+    EntityId, EntitySnapshot, Operation, Position, SnapshotWorkStats, StorageIndexStats,
+    StorageWorkStats, Velocity, Workload, WorkloadError, WorldSnapshot,
 };
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -94,6 +94,14 @@ impl ReferenceWorld {
                 entities_materialized: entity_count,
             },
         )
+    }
+
+    #[must_use]
+    pub fn index_stats(&self) -> StorageIndexStats {
+        StorageIndexStats {
+            entity_index_entries: u64::try_from(self.entities.len()).unwrap_or(u64::MAX),
+            ..StorageIndexStats::default()
+        }
     }
 
     #[must_use]
