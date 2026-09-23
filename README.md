@@ -6,7 +6,7 @@ A focused Rust laboratory for comparing entity-component-system storage models w
 
 `ecs-lab` is an experiment harness, not an ECS framework. Implementations are compared through shared workloads and observable state rather than forced behind a single performance-sensitive trait.
 
-The storage horizon covers a reference model, a sparse-set world, a cached-query sparse world, and an archetype-table world. The cached-sparse candidate keeps independent sparse component stores but retains the Position+Velocity query and its dense indices, trading structural cache maintenance for lower iteration work. The archetype candidate groups entities by component shape so Position+Velocity integration walks contiguous columns without a per-row component lookup; structural component changes instead pay explicit table-move costs. Cross-repository reuse is deliberately explicit and pinned: low-level geometry/spatial kernels come from `rust-kernels`, while reusable rotating rigid-body simulation comes from the standalone `physics-engine`. Application and teaching repositories such as `collision-lab` remain independent consumers rather than implementation dependencies.
+The storage horizon covers a reference model, a sparse-set world, a cached-query sparse world, and an archetype-table world. The cached-sparse candidate keeps independent sparse component stores but retains the Position+Velocity query and its dense indices, trading structural cache maintenance for lower iteration work. The archetype candidate groups entities by component shape so Position+Velocity integration walks contiguous columns without a per-row component lookup; structural component changes instead pay explicit table-move costs. Deterministic evidence records both useful work and logical retained index entries/slots/rows outside timed repetitions; those footprint counters intentionally describe data-structure shape rather than allocator-specific bytes or capacity. Cross-repository reuse is deliberately explicit and pinned: low-level geometry/spatial kernels come from `rust-kernels`, while reusable rotating rigid-body simulation comes from the standalone `physics-engine`. Application and teaching repositories such as `collision-lab` remain independent consumers rather than implementation dependencies.
 
 ## Physics workloads
 
@@ -26,7 +26,7 @@ The camera is presentation state only. Drag inside the scene to orbit, Shift-dra
 
 WebGPU has two deliberately separate roles in the 3D demo. A raw browser WebGPU render pipeline draws the cutaway room when an adapter is available, with a Canvas 3D fallback otherwise. Separately, the existing WebGPU all-pairs compute path receives the exact Rust-produced final-frame 3D AABBs and is accepted only when its pair bitset matches Rust word-for-word. Neither GPU path owns physics response, contact-set iteration, or time-of-impact decisions.
 
-The deterministic `falling-boxes` fixture remains available as 2D benchmark/regression evidence. See `docs/experiments/physics.md` for the solver, compatibility, collision, and compute ownership contracts.
+The deterministic `falling-boxes` and material `BouncingRoomScenario` fixtures run through reference, sparse-set, cached-sparse, and archetype-table storage before timing, so the storage candidates also prove parity under physics-generated mutations. See `docs/experiments/physics.md` for the solver, compatibility, collision, and compute ownership contracts.
 
 ## Development
 
