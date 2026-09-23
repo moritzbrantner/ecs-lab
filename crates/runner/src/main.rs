@@ -235,12 +235,16 @@ fn verify_mixed_motion_evidence(workload: &Workload) {
         "mixed-motion fixture must prove archetype/reference parity before timing"
     );
     assert_eq!(
-        archetype_work.integrated_entities, sparse_work.integrated_entities,
-        "mixed-motion useful integration work must stay storage-independent"
+        sparse_work.integrated_entities, reference_work.integrated_entities,
+        "mixed-motion sparse useful integration work must match reference"
     );
     assert_eq!(
-        cached_work.integrated_entities, sparse_work.integrated_entities,
-        "mixed-motion cached query must preserve useful integration work"
+        cached_work.integrated_entities, reference_work.integrated_entities,
+        "mixed-motion cached useful integration work must match reference"
+    );
+    assert_eq!(
+        archetype_work.integrated_entities, reference_work.integrated_entities,
+        "mixed-motion archetype useful integration work must match reference"
     );
     assert_eq!(
         cached_work.integration_rows_scanned, archetype_work.integration_rows_scanned,
@@ -309,8 +313,16 @@ fn run_component_churn_benchmarks(smoke: bool, fingerprint: &str) {
         "component-churn fixture must prove archetype/reference parity before timing"
     );
     assert_eq!(
-        archetype_work.integrated_entities, sparse_work.integrated_entities,
-        "component-churn useful integration work must stay storage-independent"
+        sparse_work.integrated_entities, reference_work.integrated_entities,
+        "component-churn sparse useful integration work must match reference"
+    );
+    assert_eq!(
+        cached_work.integrated_entities, reference_work.integrated_entities,
+        "component-churn cached useful integration work must match reference"
+    );
+    assert_eq!(
+        archetype_work.integrated_entities, reference_work.integrated_entities,
+        "component-churn archetype useful integration work must match reference"
     );
     assert!(
         archetype_work.structural_table_transitions > 0,
