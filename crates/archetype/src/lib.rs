@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use ecs_workload::{
-    EntityId, EntitySnapshot, Operation, Position, SnapshotWorkStats, StorageWorkStats, Velocity,
-    Workload, WorkloadError, WorldSnapshot,
+    EntityId, EntitySnapshot, Operation, Position, SnapshotWorkStats, StorageIndexStats,
+    StorageWorkStats, Velocity, Workload, WorkloadError, WorldSnapshot,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -185,6 +185,14 @@ impl ArchetypeWorld {
                 entities_materialized,
             },
         )
+    }
+
+    #[must_use]
+    pub fn index_stats(&self) -> StorageIndexStats {
+        StorageIndexStats {
+            entity_index_entries: u64::try_from(self.locations.len()).unwrap_or(u64::MAX),
+            ..StorageIndexStats::default()
+        }
     }
 
     #[must_use]
@@ -630,6 +638,7 @@ mod tests {
         let (_, snapshot_work) = archetype.snapshot_with_stats();
         assert_eq!(snapshot_work.slots_scanned, 2);
         assert_eq!(snapshot_work.entities_materialized, 2);
+        assert_eq!(archetype.index_stats().entity_index_entries, 2);
 
         let operation = Operation::Despawn(high);
         assert_eq!(archetype.apply(operation), reference.apply(operation));
