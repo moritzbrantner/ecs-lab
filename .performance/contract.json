@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
   "suite": "ecs-lab/benchmark-smoke",
-  "description": "Representative ECS integration contract. Storage parity and physics semantics are correctness gates; deterministic storage/collision work is first-class evidence while shared-runner elapsed time remains advisory.",
+  "description": "Representative ECS integration contract. Storage parity and physics semantics are correctness gates; deterministic work plus logical index footprint are first-class evidence while shared-runner elapsed time remains advisory.",
   "scenarios": [
     {
       "id": "motion",
       "kind": "common",
-      "description": "Replay and integrate a deterministic 1,000-entity motion workload through reference, sparse-set, and archetype-table storage.",
+      "description": "Replay and integrate a deterministic 1,000-entity motion workload through reference, sparse-set, cached-sparse, and archetype-table storage.",
       "dimensions": {
         "entities": 1000,
         "rounds": 10,
@@ -17,7 +17,8 @@
         "reference/sparse/cached-sparse/archetype canonical snapshot equality",
         "seeded workload",
         "environment fingerprint",
-        "deterministic storage-work evidence emitted outside timed repetitions"
+        "deterministic storage-work evidence emitted outside timed repetitions",
+        "logical index footprint emitted outside timed repetitions"
       ],
       "metrics": [
         {
@@ -51,6 +52,34 @@
         {
           "name": "query_cache_updates",
           "unit": "updates",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "entity_index_entries",
+          "unit": "entries",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "component_index_slots",
+          "unit": "slots",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "query_index_slots",
+          "unit": "slots",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "query_rows",
+          "unit": "rows",
           "direction": "lower",
           "signal": "operation-count",
           "blocking": false
@@ -83,7 +112,8 @@
         "sparse-set performs component lookups while archetype motion columns do not",
         "seeded workload",
         "cached-sparse scans the same participating integration rows as archetype storage",
-        "cached-sparse performs zero per-row component lookups"
+        "cached-sparse performs zero per-row component lookups",
+        "logical index footprint emitted outside timed repetitions"
       ],
       "metrics": [
         {
@@ -117,6 +147,34 @@
         {
           "name": "query_cache_updates",
           "unit": "updates",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "entity_index_entries",
+          "unit": "entries",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "component_index_slots",
+          "unit": "slots",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "query_index_slots",
+          "unit": "slots",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "query_rows",
+          "unit": "rows",
           "direction": "lower",
           "signal": "operation-count",
           "blocking": false
@@ -145,7 +203,8 @@
         "equal integrated-entity useful work across storage implementations",
         "non-zero archetype structural table transitions",
         "seeded workload",
-        "non-zero cached-sparse query maintenance"
+        "non-zero cached-sparse query maintenance",
+        "logical index footprint emitted outside timed repetitions"
       ],
       "metrics": [
         {
@@ -184,6 +243,34 @@
           "blocking": false
         },
         {
+          "name": "entity_index_entries",
+          "unit": "entries",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "component_index_slots",
+          "unit": "slots",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "query_index_slots",
+          "unit": "slots",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "query_rows",
+          "unit": "rows",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
           "name": "elapsed_ns",
           "unit": "ns",
           "direction": "lower",
@@ -195,17 +282,42 @@
     {
       "id": "falling-boxes",
       "kind": "journey",
-      "description": "Run a bounded physics-backed falling-box integration through reference, sparse-set, and archetype-table storage.",
+      "description": "Run a bounded physics-backed falling-box integration through reference, sparse-set, cached-sparse, and archetype-table storage.",
       "dimensions": {
         "dynamic_bodies": 96,
         "bodies": 97,
         "frames": 12,
         "repetitions": 2,
-        "implementations": "reference+sparse-set+archetype-table"
+        "implementations": "reference+sparse-set+cached-sparse+archetype-table"
       },
       "correctnessEvidence": [
-        "reference/sparse/archetype canonical snapshot equality",
+        "reference/sparse/cached-sparse/archetype canonical snapshot equality",
         "validated physics operations",
+        "environment fingerprint"
+      ],
+      "metrics": [
+        {
+          "name": "elapsed_ns",
+          "unit": "ns",
+          "direction": "lower",
+          "signal": "wall-clock",
+          "blocking": false
+        }
+      ]
+    },
+    {
+      "id": "bouncing-room",
+      "kind": "journey",
+      "description": "Run the deterministic material-response room through reference, sparse-set, cached-sparse, and archetype-table storage.",
+      "dimensions": {
+        "bodies": 4,
+        "frames": 128,
+        "repetitions": 3,
+        "implementations": "reference+sparse-set+cached-sparse+archetype-table"
+      },
+      "correctnessEvidence": [
+        "reference/sparse/cached-sparse/archetype canonical snapshot equality",
+        "validated material-physics operations",
         "environment fingerprint"
       ],
       "metrics": [
