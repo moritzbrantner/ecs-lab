@@ -172,7 +172,10 @@ impl SparseWorld {
         StorageIndexStats {
             entity_index_entries: u64::try_from(self.alive.len()).unwrap_or(u64::MAX),
             component_index_slots: u64::try_from(
-                self.positions.sparse.len().saturating_add(self.velocities.sparse.len()),
+                self.positions
+                    .sparse
+                    .len()
+                    .saturating_add(self.velocities.sparse.len()),
             )
             .unwrap_or(u64::MAX),
             ..StorageIndexStats::default()
