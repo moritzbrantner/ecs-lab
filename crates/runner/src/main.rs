@@ -312,14 +312,59 @@ fn verify_mixed_motion_evidence(workload: &Workload) {
 fn run_component_churn_benchmarks(smoke: bool, fingerprint: &str) {
     let (entity_count, rounds, repetitions) = if smoke { (512, 8, 3) } else { (20_000, 20, 5) };
     let workload = Workload::component_churn_scenario(COMPONENT_CHURN_SEED, entity_count, rounds);
+    verify_component_churn_evidence(&workload);
+
+    benchmark(
+        "component-churn",
+        "reference",
+        entity_count,
+        rounds,
+        COMPONENT_CHURN_SEED,
+        repetitions,
+        fingerprint,
+        || reference_motion_snapshot(black_box(&workload)),
+    );
+    benchmark(
+        "component-churn",
+        "sparse-set",
+        entity_count,
+        rounds,
+        COMPONENT_CHURN_SEED,
+        repetitions,
+        fingerprint,
+        || sparse_motion_snapshot(black_box(&workload)),
+    );
+    benchmark(
+        "component-churn",
+        "cached-sparse",
+        entity_count,
+        rounds,
+        COMPONENT_CHURN_SEED,
+        repetitions,
+        fingerprint,
+        || cached_sparse_motion_snapshot(black_box(&workload)),
+    );
+    benchmark(
+        "component-churn",
+        "archetype-table",
+        entity_count,
+        rounds,
+        COMPONENT_CHURN_SEED,
+        repetitions,
+        fingerprint,
+        || archetype_motion_snapshot(black_box(&workload)),
+    );
+}
+
+fn verify_component_churn_evidence(workload: &Workload) {
     let (reference_expected, reference_work, reference_snapshot_work, reference_index) =
-        reference_workload_evidence(&workload);
+        reference_workload_evidence(workload);
     let (sparse_expected, sparse_work, sparse_snapshot_work, sparse_index) =
-        sparse_workload_evidence(&workload);
+        sparse_workload_evidence(workload);
     let (cached_expected, cached_work, cached_snapshot_work, cached_index) =
-        cached_sparse_workload_evidence(&workload);
+        cached_sparse_workload_evidence(workload);
     let (archetype_expected, archetype_work, archetype_snapshot_work, archetype_index) =
-        archetype_workload_evidence(&workload);
+        archetype_workload_evidence(workload);
 
     assert_eq!(
         sparse_expected, reference_expected,
@@ -381,47 +426,6 @@ fn run_component_churn_benchmarks(smoke: bool, fingerprint: &str) {
         archetype_work,
         archetype_snapshot_work,
         archetype_index,
-    );
-
-    benchmark(
-        "component-churn",
-        "reference",
-        entity_count,
-        rounds,
-        COMPONENT_CHURN_SEED,
-        repetitions,
-        fingerprint,
-        || reference_motion_snapshot(black_box(&workload)),
-    );
-    benchmark(
-        "component-churn",
-        "sparse-set",
-        entity_count,
-        rounds,
-        COMPONENT_CHURN_SEED,
-        repetitions,
-        fingerprint,
-        || sparse_motion_snapshot(black_box(&workload)),
-    );
-    benchmark(
-        "component-churn",
-        "cached-sparse",
-        entity_count,
-        rounds,
-        COMPONENT_CHURN_SEED,
-        repetitions,
-        fingerprint,
-        || cached_sparse_motion_snapshot(black_box(&workload)),
-    );
-    benchmark(
-        "component-churn",
-        "archetype-table",
-        entity_count,
-        rounds,
-        COMPONENT_CHURN_SEED,
-        repetitions,
-        fingerprint,
-        || archetype_motion_snapshot(black_box(&workload)),
     );
 }
 
