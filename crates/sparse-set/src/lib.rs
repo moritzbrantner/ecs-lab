@@ -244,7 +244,11 @@ impl SparseWorld {
                     continue;
                 };
                 let velocity = self.velocities.dense_values[velocity_index];
-                integrate_position(&mut self.positions.dense_values[position_index], velocity, ticks);
+                integrate_position(
+                    &mut self.positions.dense_values[position_index],
+                    velocity,
+                    ticks,
+                );
             }
         }
     }
