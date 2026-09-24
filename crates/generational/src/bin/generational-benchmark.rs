@@ -4,12 +4,17 @@ use ecs_generational::run_reuse_scenario;
 
 const CASES: &[(u32, u32)] = &[(2, 1_024), (16, 1_024), (256, 64)];
 
+fn parse_args(args: &[String]) -> Result<bool, String> {
+    match args {
+        [] => Ok(false),
+        [mode] if mode == "--bench" => Ok(true),
+        _ => Err("usage: generational-benchmark [--bench]".to_owned()),
+    }
+}
+
 fn main() -> Result<(), String> {
-    let timed = match std::env::args().nth(1).as_deref() {
-        None => false,
-        Some("--bench") => true,
-        Some(_) => return Err("usage: generational-benchmark [--bench]".to_owned()),
-    };
+    let args: Vec<_> = std::env::args().skip(1).collect();
+    let timed = parse_args(&args)?;
 
     for &(cycles, batch) in CASES {
         let evidence = run_reuse_scenario(cycles, batch);
@@ -45,4 +50,16 @@ fn main() -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn benchmark_arguments_reject_trailing_values() {
+        assert_eq!(parse_args(&[]), Ok(false));
+        assert_eq!(parse_args(&["--bench".to_owned()]), Ok(true));
+        assert!(parse_args(&["--bench".to_owned(), "extra".to_owned()]).is_err());
+    }
 }
