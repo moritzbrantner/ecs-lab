@@ -177,6 +177,12 @@ pub struct ReuseEvidence {
     pub stats: GenerationalStats,
 }
 
+/// Runs the deterministic spawn/despawn/reuse scenario.
+///
+/// # Panics
+///
+/// Panics only if the fixed scenario exhausts the representable slot space, which would violate
+/// the experiment's bounded batch-size invariant.
 #[must_use]
 pub fn run_reuse_scenario(cycles: u32, batch_size: u32) -> ReuseEvidence {
     let mut arena = GenerationalArena::new();
@@ -187,11 +193,10 @@ pub fn run_reuse_scenario(cycles: u32, batch_size: u32) -> ReuseEvidence {
         live_handles.clear();
         for offset in 0..batch_size {
             let logical = EntityId(cycle.saturating_mul(batch_size).saturating_add(offset));
-            live_handles.push(
-                arena
-                    .spawn(logical)
-                    .expect("fixed scenario must have slot capacity"),
-            );
+            let Ok(handle) = arena.spawn(logical) else {
+                panic!("fixed scenario must have slot capacity");
+            };
+            live_handles.push(handle);
         }
 
         if cycle > 0 {
