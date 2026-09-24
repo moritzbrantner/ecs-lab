@@ -93,8 +93,7 @@ impl ChangeTrackingExperiment {
                 self.stats.incremental_recomputations =
                     self.stats.incremental_recomputations.saturating_add(1);
             } else if self.incremental_projection.remove(&entity).is_some() {
-                self.stats.incremental_removals =
-                    self.stats.incremental_removals.saturating_add(1);
+                self.stats.incremental_removals = self.stats.incremental_removals.saturating_add(1);
             }
         }
         self.stats.checkpoints = self.stats.checkpoints.saturating_add(1);
@@ -173,7 +172,9 @@ fn derive(position: Position) -> i128 {
     let x = i128::from(position.x);
     let y = i128::from(position.y);
     let z = i128::from(position.z);
-    x * x + y * y + z * z
+    x.saturating_mul(x)
+        .saturating_add(y.saturating_mul(y))
+        .saturating_add(z.saturating_mul(z))
 }
 
 fn as_u64(value: usize) -> u64 {
@@ -223,6 +224,21 @@ mod tests {
             before.incremental_rows_scanned
         );
         assert_eq!(after.full_rows_scanned, before.full_rows_scanned + 1);
+    }
+
+    #[test]
+    fn projection_overflow_saturates_identically_for_full_and_incremental_paths() {
+        let entity = EntityId(7);
+        let position = Position::new3(i64::MAX, i64::MAX, i64::MAX);
+        let mut experiment = ChangeTrackingExperiment::new();
+
+        experiment.set_position(entity, position);
+        experiment.checkpoint();
+        assert_eq!(experiment.projection().get(&entity), Some(&i128::MAX));
+
+        experiment.set_position(entity, Position::new3(i64::MIN, i64::MIN, i64::MIN));
+        experiment.checkpoint();
+        assert_eq!(experiment.projection().get(&entity), Some(&i128::MAX));
     }
 
     #[test]
