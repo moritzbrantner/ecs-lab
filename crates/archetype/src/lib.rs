@@ -184,15 +184,12 @@ impl ArchetypeWorld {
 
         let (table, index) = match (position, velocity) {
             (None, None) => (TableKind::Empty, self.empty.push(entity)),
-            (Some(position), None) => {
-                (TableKind::Position, self.positions.push(entity, position))
-            }
-            (None, Some(velocity)) => {
-                (TableKind::Velocity, self.velocities.push(entity, velocity))
-            }
-            (Some(position), Some(velocity)) => {
-                (TableKind::Motion, self.motion.push(entity, position, velocity))
-            }
+            (Some(position), None) => (TableKind::Position, self.positions.push(entity, position)),
+            (None, Some(velocity)) => (TableKind::Velocity, self.velocities.push(entity, velocity)),
+            (Some(position), Some(velocity)) => (
+                TableKind::Motion,
+                self.motion.push(entity, position, velocity),
+            ),
         };
         self.set_location(entity, table, index);
         Ok(())
