@@ -17,12 +17,17 @@ fn measure(label: &str, mut run: impl FnMut()) {
     );
 }
 
+fn parse_args(args: &[String]) -> Result<bool, String> {
+    match args {
+        [] => Ok(false),
+        [mode] if mode == "--bench" => Ok(true),
+        _ => Err("usage: scheduler-benchmark [--bench]".to_owned()),
+    }
+}
+
 fn main() -> Result<(), String> {
-    let timed = match std::env::args().nth(1).as_deref() {
-        None => false,
-        Some("--bench") => true,
-        Some(_) => return Err("usage: scheduler-benchmark [--bench]".to_owned()),
-    };
+    let args: Vec<_> = std::env::args().skip(1).collect();
+    let timed = parse_args(&args)?;
 
     let serial = run_serial(16_384, 32);
     let parallel = run_parallel_systems(16_384, 32);
@@ -49,4 +54,16 @@ fn main() -> Result<(), String> {
         });
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn benchmark_arguments_reject_trailing_values() {
+        assert_eq!(parse_args(&[]), Ok(false));
+        assert_eq!(parse_args(&["--bench".to_owned()]), Ok(true));
+        assert!(parse_args(&["--bench".to_owned(), "extra".to_owned()]).is_err());
+    }
 }

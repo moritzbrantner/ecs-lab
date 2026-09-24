@@ -182,6 +182,11 @@ pub fn run_serial(entity_count: u32, rounds: u32) -> SchedulerEvidence {
     }
 }
 
+/// Executes the deterministic access-aware schedule with independent systems in parallel.
+///
+/// # Panics
+///
+/// Panics if the fixed scheduler contract no longer produces the expected two deterministic batches.
 #[must_use]
 pub fn run_parallel_systems(entity_count: u32, rounds: u32) -> SchedulerEvidence {
     let schedule = build_schedule(system_specs().to_vec());
@@ -213,6 +218,11 @@ pub fn run_parallel_systems(entity_count: u32, rounds: u32) -> SchedulerEvidence
     }
 }
 
+/// Executes each system with deterministic entity partitions.
+///
+/// # Panics
+///
+/// Panics when `worker_count` is zero.
 #[must_use]
 pub fn run_partitioned(
     entity_count: u32,

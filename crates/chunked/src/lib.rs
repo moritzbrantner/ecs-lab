@@ -1,4 +1,7 @@
-use ecs_workload::{EntityId, EntitySnapshot, Position, Velocity, WorldSnapshot};
+use ecs_reference::ReferenceWorld;
+use ecs_workload::{
+    EntityId, EntitySnapshot, Operation, Position, Velocity, Workload, WorldSnapshot,
+};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct FlatMotionWorld {
@@ -136,10 +139,10 @@ impl ChunkedMotionWorld {
         if needs_chunk {
             self.chunks.push(Chunk::with_capacity(self.chunk_size));
         }
-        self.chunks
-            .last_mut()
-            .expect("a chunk was created above")
-            .push(entity, position, velocity);
+        let Some(chunk) = self.chunks.last_mut() else {
+            panic!("a chunk must exist after capacity growth");
+        };
+        chunk.push(entity, position, velocity);
     }
 
     fn integrate(&mut self, ticks: i32) -> (u64, u64) {
@@ -193,6 +196,12 @@ pub struct ChunkedEvidence {
     pub stats: ChunkedStats,
 }
 
+/// Runs the flat/chunked layout experiment and proves both against the canonical reference world.
+///
+/// # Panics
+///
+/// Panics when `chunk_size` is zero or when either candidate diverges from the shared-workload
+/// reference snapshot.
 #[must_use]
 pub fn run_chunked_scenario(
     entity_count: u32,
@@ -200,16 +209,18 @@ pub fn run_chunked_scenario(
     chunk_size: usize,
 ) -> ChunkedEvidence {
     assert!(chunk_size > 0, "chunk_size must be non-zero");
+
+    let rows = fixture_rows(entity_count);
+    let workload = canonical_workload(&rows, rounds);
+    let mut reference = ReferenceWorld::new();
+    assert_eq!(reference.replay(&workload), Ok(()));
+    let expected = reference.snapshot();
+
     let mut flat = FlatMotionWorld::with_capacity(entity_count as usize);
     let mut chunked = ChunkedMotionWorld::new(chunk_size);
-
-    for raw_id in 0..entity_count {
-        let value = i64::from(raw_id);
-        let entity = EntityId(raw_id);
-        let position = Position::new3(value, value.saturating_mul(2), -value);
-        let velocity = Velocity::new3(1, -2, 3);
-        flat.push(entity, position, velocity);
-        chunked.push(entity, position, velocity);
+    for row in &rows {
+        flat.push(row.entity, row.position, row.velocity);
+        chunked.push(row.entity, row.position, row.velocity);
     }
     assert_eq!(flat.snapshot(), chunked.snapshot());
 
@@ -232,15 +243,87 @@ pub fn run_chunked_scenario(
         stats.chunk_rows_processed = stats.chunk_rows_processed.saturating_add(rows);
     }
 
-    let expected = flat.snapshot();
+    let flat_snapshot = flat.snapshot();
     let actual = chunked.snapshot();
-    assert_eq!(actual, expected);
+    assert_eq!(
+        flat_snapshot, expected,
+        "flat layout must match the canonical reference world"
+    );
+    assert_eq!(
+        actual, expected,
+        "chunked layout must match the canonical reference world"
+    );
     assert_eq!(stats.flat_rows_processed, stats.chunk_rows_processed);
 
     ChunkedEvidence {
         snapshot: actual,
         stats,
     }
+}
+
+/// Replays only the flat scalar layout used as the comparison candidate.
+#[must_use]
+pub fn replay_flat_scenario(entity_count: u32, rounds: u32) -> WorldSnapshot {
+    let rows = fixture_rows(entity_count);
+    let mut flat = FlatMotionWorld::with_capacity(rows.len());
+    for row in rows {
+        flat.push(row.entity, row.position, row.velocity);
+    }
+    for _ in 0..rounds {
+        flat.integrate(1);
+    }
+    flat.snapshot()
+}
+
+/// Replays only the chunked SoA layout.
+///
+/// # Panics
+///
+/// Panics when `chunk_size` is zero.
+#[must_use]
+pub fn replay_chunked_scenario(
+    entity_count: u32,
+    rounds: u32,
+    chunk_size: usize,
+) -> WorldSnapshot {
+    assert!(chunk_size > 0, "chunk_size must be non-zero");
+    let rows = fixture_rows(entity_count);
+    let mut chunked = ChunkedMotionWorld::new(chunk_size);
+    for row in rows {
+        chunked.push(row.entity, row.position, row.velocity);
+    }
+    for _ in 0..rounds {
+        chunked.integrate(1);
+    }
+    chunked.snapshot()
+}
+
+fn fixture_rows(entity_count: u32) -> Vec<Row> {
+    (0..entity_count).map(initial_row).collect()
+}
+
+fn initial_row(raw_id: u32) -> Row {
+    let value = i64::from(raw_id);
+    Row {
+        entity: EntityId(raw_id),
+        position: Position::new3(value, value.saturating_mul(2), -value),
+        velocity: Velocity::new3(1, -2, 3),
+    }
+}
+
+fn canonical_workload(rows: &[Row], rounds: u32) -> Workload {
+    let mut operations = Vec::new();
+    for row in rows {
+        operations.extend([
+            Operation::Spawn(row.entity),
+            Operation::SetPosition(row.entity, row.position),
+            Operation::SetVelocity(row.entity, row.velocity),
+        ]);
+    }
+    for _ in 0..rounds {
+        operations.push(Operation::Integrate { ticks: 1 });
+    }
+    Workload::new(operations)
 }
 
 fn integrate(position: &mut Position, velocity: Velocity, ticks: i64) {
@@ -287,6 +370,15 @@ mod tests {
                 assert_eq!(evidence.stats.partial_chunk_rows, expected_partial);
                 assert_eq!(evidence.snapshot.entities().len(), entity_count as usize);
             }
+        }
+    }
+
+    #[test]
+    fn dedicated_layout_replays_match_reference_checked_evidence() {
+        for chunk_size in [16_usize, 64, 256] {
+            let expected = run_chunked_scenario(129, 4, chunk_size).snapshot;
+            assert_eq!(replay_flat_scenario(129, 4), expected);
+            assert_eq!(replay_chunked_scenario(129, 4, chunk_size), expected);
         }
     }
 
