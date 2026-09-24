@@ -6,6 +6,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+ecs-reference = { path = "../reference" }
 ecs-workload = { path = "../workload" }
 
 [lints]
