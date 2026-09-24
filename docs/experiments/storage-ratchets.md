@@ -82,11 +82,12 @@ bash scripts/benchmark.sh storage
 ```
 
 The storage command performs the same preflight, then one warm-up and seven samples per
-fixture/backend. It reports median, minimum and maximum nanoseconds. Fixture generation,
-work probes and parity assertions are outside timing; world construction, replay, final
-canonical snapshot, and teardown are included consistently. These are end-to-end storage
-journeys, not isolated integration-loop timings. Compare runs in the same declared
-environment; do not infer portable speedups from a single hosted runner.
+fixture/backend. It reports median, minimum and maximum nanoseconds together with the
+declared environment fingerprint used for that run. Fixture generation, work probes and
+parity assertions are outside timing; world construction, replay, final canonical snapshot,
+and teardown are included consistently. These are end-to-end storage journeys, not isolated
+integration-loop timings. Compare runs only when their declared environment identity is
+equivalent; do not infer portable speedups from a single hosted runner.
 
 The existing `smoke` and `full` benchmark commands remain unchanged. The blocking ratchet
 uses the existing Validate job and Cargo build cache; it adds no profiler/environment
