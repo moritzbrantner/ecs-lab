@@ -69,6 +69,11 @@ jobs:
           operation: findings
           install-mode: none
 
+      - name: Enforce deterministic storage ratchets
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: bash scripts/storage-ratchet.sh
+
       - name: Exercise benchmark fixtures
         run: bash scripts/benchmark.sh smoke
 
