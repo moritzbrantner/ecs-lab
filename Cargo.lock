@@ -49,6 +49,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ecs-hybrid-storage"
+version = "0.1.0"
+dependencies = [
+ "ecs-sparse-index",
+ "ecs-sparse-set",
+ "ecs-workload",
+]
+
+[[package]]
 name = "ecs-physics"
 version = "0.1.0"
 dependencies = [
