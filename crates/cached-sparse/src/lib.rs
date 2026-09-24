@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 
+use ecs_sparse_index::PagedSparseIndex;
 use ecs_workload::{
     EntityId, EntitySnapshot, Operation, Position, SnapshotWorkStats, StorageIndexStats,
     StorageWorkStats, Velocity, Workload, WorkloadError, WorldSnapshot,
@@ -7,7 +8,7 @@ use ecs_workload::{
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct SparseSet<T> {
-    sparse: Vec<Option<usize>>,
+    sparse: PagedSparseIndex,
     dense_entities: Vec<EntityId>,
     dense_values: Vec<T>,
 }
@@ -15,7 +16,7 @@ struct SparseSet<T> {
 impl<T> Default for SparseSet<T> {
     fn default() -> Self {
         Self {
-            sparse: Vec::new(),
+            sparse: PagedSparseIndex::new(),
             dense_entities: Vec::new(),
             dense_values: Vec::new(),
         }
@@ -28,24 +29,20 @@ struct Removed {
 
 impl<T> SparseSet<T> {
     fn insert(&mut self, entity: EntityId, value: T) -> usize {
-        let slot = entity.0 as usize;
-        if self.sparse.len() <= slot {
-            self.sparse.resize(slot + 1, None);
-        }
-        if let Some(index) = self.sparse[slot] {
+        if let Some(index) = self.sparse.get(entity.0) {
             self.dense_values[index] = value;
             return index;
         }
 
         let index = self.dense_values.len();
-        self.sparse[slot] = Some(index);
+        self.sparse.set(entity.0, index);
         self.dense_entities.push(entity);
         self.dense_values.push(value);
         index
     }
 
     fn index(&self, entity: EntityId) -> Option<usize> {
-        self.sparse.get(entity.0 as usize).copied().flatten()
+        self.sparse.get(entity.0)
     }
 
     fn get(&self, entity: EntityId) -> Option<&T> {
@@ -64,15 +61,13 @@ impl<T> SparseSet<T> {
     }
 
     fn remove(&mut self, entity: EntityId) -> Option<Removed> {
-        let slot = entity.0 as usize;
-        let index = self.sparse.get(slot).copied().flatten()?;
-        self.sparse[slot] = None;
+        let index = self.sparse.remove(entity.0)?;
 
         self.dense_entities.swap_remove(index);
         self.dense_values.swap_remove(index);
         let moved = if index < self.dense_entities.len() {
             let moved_entity = self.dense_entities[index];
-            self.sparse[moved_entity.0 as usize] = Some(index);
+            self.sparse.set(moved_entity.0, index);
             Some((moved_entity, index))
         } else {
             None
@@ -91,13 +86,13 @@ struct MotionQueryRow {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct MotionQuery {
-    sparse: Vec<Option<usize>>,
+    sparse: PagedSparseIndex,
     rows: Vec<MotionQueryRow>,
 }
 
 impl MotionQuery {
     fn row_index(&self, entity: EntityId) -> Option<usize> {
-        self.sparse.get(entity.0 as usize).copied().flatten()
+        self.sparse.get(entity.0)
     }
 
     fn refresh(
@@ -118,24 +113,20 @@ impl MotionQuery {
                 }
             }
             (Some(position_index), Some(velocity_index), None) => {
-                let slot = entity.0 as usize;
-                if self.sparse.len() <= slot {
-                    self.sparse.resize(slot + 1, None);
-                }
                 let row_index = self.rows.len();
                 self.rows.push(MotionQueryRow {
                     entity,
                     position_index,
                     velocity_index,
                 });
-                self.sparse[slot] = Some(row_index);
+                self.sparse.set(entity.0, row_index);
                 1
             }
             (_, _, Some(row_index)) => {
-                self.sparse[entity.0 as usize] = None;
+                self.sparse.remove(entity.0);
                 self.rows.swap_remove(row_index);
                 if let Some(moved) = self.rows.get(row_index).copied() {
-                    self.sparse[moved.entity.0 as usize] = Some(row_index);
+                    self.sparse.set(moved.entity.0, row_index);
                 }
                 1
             }
@@ -164,17 +155,17 @@ impl CachedSparseWorld {
         Self {
             alive: BTreeSet::new(),
             positions: SparseSet {
-                sparse: Vec::new(),
+                sparse: PagedSparseIndex::new(),
                 dense_entities: Vec::new(),
                 dense_values: Vec::new(),
             },
             velocities: SparseSet {
-                sparse: Vec::new(),
+                sparse: PagedSparseIndex::new(),
                 dense_entities: Vec::new(),
                 dense_values: Vec::new(),
             },
             motion_query: MotionQuery {
-                sparse: Vec::new(),
+                sparse: PagedSparseIndex::new(),
                 rows: Vec::new(),
             },
         }
@@ -294,14 +285,12 @@ impl CachedSparseWorld {
     pub fn index_stats(&self) -> StorageIndexStats {
         StorageIndexStats {
             entity_index_entries: u64::try_from(self.alive.len()).unwrap_or(u64::MAX),
-            component_index_slots: u64::try_from(
-                self.positions
-                    .sparse
-                    .len()
-                    .saturating_add(self.velocities.sparse.len()),
-            )
-            .unwrap_or(u64::MAX),
-            query_index_slots: u64::try_from(self.motion_query.sparse.len()).unwrap_or(u64::MAX),
+            component_index_slots: self
+                .positions
+                .sparse
+                .allocated_slots()
+                .saturating_add(self.velocities.sparse.allocated_slots()),
+            query_index_slots: self.motion_query.sparse.allocated_slots(),
             query_rows: u64::try_from(self.motion_query.rows.len()).unwrap_or(u64::MAX),
         }
     }
@@ -551,12 +540,39 @@ mod tests {
 
         let index = cached.index_stats();
         assert_eq!(index.entity_index_entries, 2);
-        assert_eq!(index.component_index_slots, 3);
-        assert_eq!(index.query_index_slots, 1);
+        assert_eq!(index.component_index_slots, 2 * 256);
+        assert_eq!(index.query_index_slots, 256);
         assert_eq!(index.query_rows, 1);
 
         let removal = cached.operation_work(Operation::RemovePosition(first));
         assert!(removal.query_cache_updates >= 1);
+    }
+
+    #[test]
+    fn distant_entity_ids_keep_component_and_query_indices_bounded() {
+        let high = EntityId(u32::MAX);
+        let low = EntityId(2);
+        let mut reference = ReferenceWorld::new();
+        let mut cached = CachedSparseWorld::new();
+
+        for operation in [
+            Operation::Spawn(high),
+            Operation::SetPosition(high, Position::new3(10, 20, 30)),
+            Operation::SetVelocity(high, Velocity::new3(1, -2, 3)),
+            Operation::Spawn(low),
+            Operation::SetPosition(low, Position::new3(-4, 5, 6)),
+            Operation::Integrate { ticks: 2 },
+        ] {
+            assert_eq!(cached.apply(operation), reference.apply(operation));
+            assert_eq!(cached.snapshot(), reference.snapshot());
+        }
+
+        let stats = cached.index_stats();
+        assert_eq!(stats.entity_index_entries, 2);
+        assert_eq!(stats.component_index_slots, 3 * 256);
+        assert_eq!(stats.query_index_slots, 256);
+        assert_eq!(stats.query_rows, 1);
+        assert!(stats.component_index_slots < u64::from(u32::MAX));
     }
 
     #[test]
