@@ -1,21 +1,298 @@
 {
   "schemaVersion": 1,
   "suite": "ecs-lab/benchmark-smoke",
-  "description": "Representative ECS integration contract. Storage parity and physics semantics are correctness gates; shared-runner elapsed time remains advisory while deterministic candidate/contact work is the preferred blocking signal as instrumentation expands.",
+  "description": "Representative ECS integration contract. Storage parity and physics semantics are correctness gates; deterministic work plus logical index footprint are first-class evidence while shared-runner elapsed time remains advisory.",
   "scenarios": [
     {
       "id": "motion",
       "kind": "common",
-      "description": "Replay and integrate a deterministic 1,000-entity motion workload through reference and sparse-set storage.",
+      "description": "Replay and integrate a deterministic 1,000-entity motion workload through reference, sparse-set, cached-sparse, and archetype-table storage.",
       "dimensions": {
         "entities": 1000,
         "rounds": 10,
         "repetitions": 2,
-        "implementations": "reference+sparse-set"
+        "implementations": "reference+sparse-set+cached-sparse+archetype-table"
       },
       "correctnessEvidence": [
-        "reference/sparse canonical snapshot equality",
+        "reference/sparse/cached-sparse/archetype canonical snapshot equality",
         "seeded workload",
+        "environment fingerprint",
+        "deterministic storage-work evidence emitted outside timed repetitions",
+        "logical index footprint emitted outside timed repetitions"
+      ],
+      "metrics": [
+        {
+          "name": "integration_rows_scanned",
+          "unit": "rows",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "component_lookups",
+          "unit": "lookups",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "structural_table_transitions",
+          "unit": "transitions",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "snapshot_slots_scanned",
+          "unit": "slots",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "query_cache_updates",
+          "unit": "updates",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "entity_index_entries",
+          "unit": "entries",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "component_index_slots",
+          "unit": "slots",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "query_index_slots",
+          "unit": "slots",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "query_rows",
+          "unit": "rows",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "elapsed_ns",
+          "unit": "ns",
+          "direction": "lower",
+          "signal": "wall-clock",
+          "blocking": false
+        }
+      ]
+    },
+    {
+      "id": "mixed-motion",
+      "kind": "scaling",
+      "description": "Integrate 1,000 positioned entities for 20 rounds while only every fourth entity owns Velocity, exposing sparse component lookup work versus archetype-local motion rows.",
+      "dimensions": {
+        "entities": 1000,
+        "rounds": 20,
+        "velocity_stride": 4,
+        "moving_entities": 250,
+        "repetitions": 3,
+        "implementations": "reference+sparse-set+cached-sparse+archetype-table"
+      },
+      "correctnessEvidence": [
+        "reference/sparse/cached-sparse/archetype canonical snapshot equality",
+        "equal integrated-entity useful work across storage implementations",
+        "archetype integration scans fewer rows than sparse-set",
+        "sparse-set performs component lookups while archetype motion columns do not",
+        "seeded workload",
+        "cached-sparse scans the same participating integration rows as archetype storage",
+        "cached-sparse performs zero per-row component lookups",
+        "logical index footprint emitted outside timed repetitions"
+      ],
+      "metrics": [
+        {
+          "name": "integration_rows_scanned",
+          "unit": "rows",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "component_lookups",
+          "unit": "lookups",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "structural_table_transitions",
+          "unit": "transitions",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "snapshot_slots_scanned",
+          "unit": "slots",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "query_cache_updates",
+          "unit": "updates",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "entity_index_entries",
+          "unit": "entries",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "component_index_slots",
+          "unit": "slots",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "query_index_slots",
+          "unit": "slots",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "query_rows",
+          "unit": "rows",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "elapsed_ns",
+          "unit": "ns",
+          "direction": "lower",
+          "signal": "wall-clock",
+          "blocking": false
+        }
+      ]
+    },
+    {
+      "id": "component-churn",
+      "kind": "stress",
+      "description": "Replay 512 fully populated entities through eight rounds where half the entities remove and re-add Position or Velocity before integration, exposing structural migration costs.",
+      "dimensions": {
+        "entities": 512,
+        "rounds": 8,
+        "repetitions": 3,
+        "implementations": "reference+sparse-set+cached-sparse+archetype-table"
+      },
+      "correctnessEvidence": [
+        "reference/sparse/cached-sparse/archetype canonical snapshot equality",
+        "equal integrated-entity useful work across storage implementations",
+        "non-zero archetype structural table transitions",
+        "seeded workload",
+        "non-zero cached-sparse query maintenance",
+        "logical index footprint emitted outside timed repetitions"
+      ],
+      "metrics": [
+        {
+          "name": "integration_rows_scanned",
+          "unit": "rows",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "component_lookups",
+          "unit": "lookups",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "structural_table_transitions",
+          "unit": "transitions",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "snapshot_slots_scanned",
+          "unit": "slots",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "query_cache_updates",
+          "unit": "updates",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "entity_index_entries",
+          "unit": "entries",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "component_index_slots",
+          "unit": "slots",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "query_index_slots",
+          "unit": "slots",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "query_rows",
+          "unit": "rows",
+          "direction": "lower",
+          "signal": "operation-count",
+          "blocking": false
+        },
+        {
+          "name": "elapsed_ns",
+          "unit": "ns",
+          "direction": "lower",
+          "signal": "wall-clock",
+          "blocking": false
+        }
+      ]
+    },
+    {
+      "id": "falling-boxes",
+      "kind": "journey",
+      "description": "Run a bounded physics-backed falling-box integration through reference, sparse-set, cached-sparse, and archetype-table storage.",
+      "dimensions": {
+        "dynamic_bodies": 96,
+        "bodies": 97,
+        "frames": 12,
+        "repetitions": 2,
+        "implementations": "reference+sparse-set+cached-sparse+archetype-table"
+      },
+      "correctnessEvidence": [
+        "reference/sparse/cached-sparse/archetype canonical snapshot equality",
+        "validated physics operations",
         "environment fingerprint"
       ],
       "metrics": [
@@ -29,18 +306,18 @@
       ]
     },
     {
-      "id": "falling-boxes",
+      "id": "bouncing-room",
       "kind": "journey",
-      "description": "Run a bounded physics-backed falling-box integration through both ECS storage implementations.",
+      "description": "Run the deterministic material-response room through reference, sparse-set, cached-sparse, and archetype-table storage.",
       "dimensions": {
-        "dynamic_bodies": 96,
-        "bodies": 97,
-        "frames": 12,
-        "repetitions": 2
+        "bodies": 4,
+        "frames": 128,
+        "repetitions": 3,
+        "implementations": "reference+sparse-set+cached-sparse+archetype-table"
       },
       "correctnessEvidence": [
-        "reference/sparse canonical snapshot equality",
-        "validated physics operations",
+        "reference/sparse/cached-sparse/archetype canonical snapshot equality",
+        "validated material-physics operations",
         "environment fingerprint"
       ],
       "metrics": [
@@ -74,7 +351,9 @@
           "direction": "lower",
           "signal": "operation-count",
           "blocking": true,
-          "budget": { "max": 0 }
+          "budget": {
+            "max": 0
+          }
         },
         {
           "name": "candidate_pairs",
@@ -82,7 +361,9 @@
           "direction": "lower",
           "signal": "operation-count",
           "blocking": true,
-          "budget": { "relativeRegressionPercent": 10 }
+          "budget": {
+            "relativeRegressionPercent": 10
+          }
         },
         {
           "name": "elapsed_ns",
@@ -114,7 +395,9 @@
           "direction": "lower",
           "signal": "operation-count",
           "blocking": true,
-          "budget": { "relativeRegressionPercent": 10 }
+          "budget": {
+            "relativeRegressionPercent": 10
+          }
         },
         {
           "name": "resolved_contacts",
@@ -122,7 +405,9 @@
           "direction": "lower",
           "signal": "operation-count",
           "blocking": true,
-          "budget": { "relativeRegressionPercent": 10 }
+          "budget": {
+            "relativeRegressionPercent": 10
+          }
         },
         {
           "name": "elapsed_ns",

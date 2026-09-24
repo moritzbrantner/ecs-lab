@@ -3,6 +3,22 @@
 version = 4
 
 [[package]]
+name = "ecs-archetype"
+version = "0.1.0"
+dependencies = [
+ "ecs-reference",
+ "ecs-workload",
+]
+
+[[package]]
+name = "ecs-cached-sparse"
+version = "0.1.0"
+dependencies = [
+ "ecs-reference",
+ "ecs-workload",
+]
+
+[[package]]
 name = "ecs-physics"
 version = "0.1.0"
 dependencies = [
@@ -48,6 +64,8 @@ dependencies = [
 name = "ecs-runner"
 version = "0.1.0"
 dependencies = [
+ "ecs-archetype",
+ "ecs-cached-sparse",
  "ecs-physics",
  "ecs-physics-scenarios",
  "ecs-reference",
