@@ -1,7 +1,7 @@
 use std::{hint::black_box, time::Instant};
 
 use ecs_archetype::ArchetypeWorld;
-use ecs_command_buffer::{construction_scenario, CommandBuffer};
+use ecs_command_buffer::{CommandBuffer, construction_scenario};
 use ecs_workload::{EntityId, Operation, Position, Velocity, WorldSnapshot};
 
 const CASES: &[u32] = &[1, 128, 1_024, 16_384];
@@ -114,8 +114,7 @@ fn main() -> Result<(), String> {
             for (implementation, replay) in [
                 (
                     "immediate",
-                    replay_immediate
-                        as fn(&[(EntityId, Position, Velocity)]) -> WorldSnapshot,
+                    replay_immediate as fn(&[(EntityId, Position, Velocity)]) -> WorldSnapshot,
                 ),
                 ("deferred", replay_deferred),
                 ("bundled", replay_bundled),
