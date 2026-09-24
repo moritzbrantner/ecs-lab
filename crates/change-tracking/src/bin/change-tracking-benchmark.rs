@@ -10,12 +10,17 @@ const CASES: &[(u32, u32, u32)] = &[
     (1_024, 8, 1_024),
 ];
 
+fn parse_args(args: &[String]) -> Result<bool, String> {
+    match args {
+        [] => Ok(false),
+        [mode] if mode == "--bench" => Ok(true),
+        _ => Err("usage: change-tracking-benchmark [--bench]".to_owned()),
+    }
+}
+
 fn main() -> Result<(), String> {
-    let timed = match std::env::args().nth(1).as_deref() {
-        None => false,
-        Some("--bench") => true,
-        Some(_) => return Err("usage: change-tracking-benchmark [--bench]".to_owned()),
-    };
+    let args: Vec<_> = std::env::args().skip(1).collect();
+    let timed = parse_args(&args)?;
 
     for &(entities, rounds, changed) in CASES {
         let experiment = run_fixed_scenario(entities, rounds, changed);
@@ -51,4 +56,17 @@ fn main() -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn benchmark_arguments_reject_trailing_values() {
+        assert_eq!(parse_args(&[]), Ok(false));
+        assert_eq!(parse_args(&["--bench".to_owned()]), Ok(true));
+        assert!(parse_args(&["--bench".to_owned(), "--unexpected".to_owned()]).is_err());
+        assert!(parse_args(&["--unexpected".to_owned()]).is_err());
+    }
 }
