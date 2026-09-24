@@ -63,6 +63,11 @@ impl ChangeTrackingExperiment {
         self.positions.get(&entity).copied()
     }
 
+    /// Recomputes the reference projection and applies the accumulated dirty workset.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the incremental projection diverges from the full recomputation oracle.
     pub fn checkpoint(&mut self) {
         self.full_projection.clear();
         self.stats.full_rows_scanned = self
@@ -110,6 +115,12 @@ impl ChangeTrackingExperiment {
     }
 }
 
+/// Runs the fixed deterministic change-density experiment.
+///
+/// # Panics
+///
+/// Panics when `changed_per_round` exceeds `entity_count`, or if an internal fixture
+/// invariant is violated.
 #[must_use]
 pub fn run_fixed_scenario(
     entity_count: u32,
@@ -141,9 +152,9 @@ pub fn run_fixed_scenario(
         for offset in 0..changed_per_round {
             let raw_id = offset.wrapping_add(round) % entity_count;
             let entity = EntityId(raw_id);
-            let current = experiment
-                .position(entity)
-                .expect("scenario mutates only initialized positions");
+            let Some(current) = experiment.position(entity) else {
+                panic!("scenario mutates only initialized positions");
+            };
             experiment.set_position(
                 entity,
                 Position::new3(
