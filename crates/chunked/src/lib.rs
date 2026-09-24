@@ -3,6 +3,13 @@ use ecs_workload::{
     EntityId, EntitySnapshot, Operation, Position, Velocity, Workload, WorldSnapshot,
 };
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct Row {
+    entity: EntityId,
+    position: Position,
+    velocity: Velocity,
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct FlatMotionWorld {
     entities: Vec<EntityId>,
