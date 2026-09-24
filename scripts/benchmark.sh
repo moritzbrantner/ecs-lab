@@ -5,7 +5,11 @@ mode="${1:-full}"
 case "$mode" in
   smoke) runner_mode=benchmark-smoke ;;
   full) runner_mode=benchmark ;;
-  *) printf 'usage: %s [smoke|full]\n' "$0" >&2; exit 2 ;;
+  storage)
+    cargo run --locked --release -p ecs-runner --bin storage-benchmark -- --bench
+    exit
+    ;;
+  *) printf 'usage: %s [smoke|full|storage]\n' "$0" >&2; exit 2 ;;
 esac
 
 fingerprint="unverified"
