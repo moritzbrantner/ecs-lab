@@ -17,7 +17,6 @@ jobs:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 0
 
       - name: Run fast validation tier
         uses: moritzbrantner/coding-tooling@a630598d369ac94d0f549dce5c859b9dd28b250c
@@ -73,12 +72,13 @@ jobs:
         run: bash scripts/benchmark.sh smoke
 
   build-pages:
+    if: ${{ github.event_name != 'pull_request' }}
     name: Build or reuse validated Pages artifact
     permissions:
       actions: read
       contents: read
       packages: read
-    uses: moritzbrantner/reusable-workflows/.github/workflows/build-artifact.yml@8669e7cad2233c0fb1e0fcc3e00a041d2b6d7b03
+    uses: moritzbrantner/reusable-workflows/.github/workflows/build-artifact.yml@112330e4e04b6b990323705e4e3ee768c0742917
     with:
       source_sha: ${{ github.event.pull_request.head.sha || github.sha }}
       artifact_key: ecs-lab-pages-v1
