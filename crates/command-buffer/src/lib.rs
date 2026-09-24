@@ -1,9 +1,7 @@
 use std::collections::VecDeque;
 
 use ecs_archetype::ArchetypeWorld;
-use ecs_workload::{
-    EntityId, Operation, Position, Velocity, WorkloadError, WorldSnapshot,
-};
+use ecs_workload::{EntityId, Operation, Position, Velocity, WorkloadError, WorldSnapshot};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BufferedCommand {
@@ -86,12 +84,9 @@ impl CommandBuffer {
         while let Some(command) = self.commands.front().copied() {
             let result = match command {
                 BufferedCommand::Operation(operation) => {
-                    stats.structural_table_transitions = stats
-                        .structural_table_transitions
-                        .saturating_add(
-                            world
-                                .operation_work(operation)
-                                .structural_table_transitions,
+                    stats.structural_table_transitions =
+                        stats.structural_table_transitions.saturating_add(
+                            world.operation_work(operation).structural_table_transitions,
                         );
                     world.apply(operation)
                 }
@@ -249,7 +244,9 @@ mod tests {
         buffer.push_operation(Operation::Spawn(EntityId(1)));
 
         let mut world = ArchetypeWorld::new();
-        let failure = buffer.commit(&mut world).expect_err("first command must fail");
+        let failure = buffer
+            .commit(&mut world)
+            .expect_err("first command must fail");
 
         assert_eq!(failure.error, WorkloadError::MissingEntity(missing));
         assert_eq!(failure.committed.commands_committed, 0);
@@ -268,10 +265,7 @@ mod tests {
         buffer.push_spawn_bundle(entity, Some(Position::new(1, 2)), None);
         let failure = buffer.commit(&mut world).expect_err("duplicate must fail");
 
-        assert_eq!(
-            failure.error,
-            WorkloadError::EntityAlreadyExists(entity)
-        );
+        assert_eq!(failure.error, WorkloadError::EntityAlreadyExists(entity));
         assert_eq!(failure.remaining_commands, 1);
         assert_eq!(buffer.len(), 1);
     }
