@@ -240,6 +240,12 @@ pub struct EnableableEvidence {
     pub stats: EnableableStats,
 }
 
+/// Runs both enable/disable representations in lockstep and records deterministic work evidence.
+///
+/// # Panics
+///
+/// Panics when `toggles_per_round` exceeds `entity_count` or if the two representations
+/// diverge in enabled state, mutations, snapshots, or useful integration work.
 #[must_use]
 pub fn run_toggle_scenario(
     entity_count: u32,
@@ -296,6 +302,70 @@ pub fn run_toggle_scenario(
     }
 }
 
+/// Replays only the structural enable/disable representation.
+///
+/// # Panics
+///
+/// Panics when `toggles_per_round` exceeds `entity_count`.
+#[must_use]
+pub fn replay_structural_scenario(
+    entity_count: u32,
+    rounds: u32,
+    enabled_stride: u32,
+    toggles_per_round: u32,
+) -> WorldSnapshot {
+    assert!(
+        toggles_per_round <= entity_count,
+        "toggles_per_round must not exceed entity_count"
+    );
+    let mut world = StructuralEnableWorld::new(entity_count, enabled_stride);
+    if entity_count == 0 {
+        return world.snapshot();
+    }
+
+    for round in 0..rounds {
+        for offset in 0..toggles_per_round {
+            let entity = EntityId(offset.wrapping_add(round) % entity_count);
+            let target = !world.is_enabled(entity);
+            world.set_enabled(entity, target);
+        }
+        world.integrate(1);
+    }
+    world.snapshot()
+}
+
+/// Replays only the stable-row enable-mask representation.
+///
+/// # Panics
+///
+/// Panics when `toggles_per_round` exceeds `entity_count`.
+#[must_use]
+pub fn replay_mask_scenario(
+    entity_count: u32,
+    rounds: u32,
+    enabled_stride: u32,
+    toggles_per_round: u32,
+) -> WorldSnapshot {
+    assert!(
+        toggles_per_round <= entity_count,
+        "toggles_per_round must not exceed entity_count"
+    );
+    let mut world = MaskEnableWorld::new(entity_count, enabled_stride);
+    if entity_count == 0 {
+        return world.snapshot();
+    }
+
+    for round in 0..rounds {
+        for offset in 0..toggles_per_round {
+            let entity = EntityId(offset.wrapping_add(round) % entity_count);
+            let target = !world.is_enabled(entity);
+            world.set_enabled(entity, target);
+        }
+        world.integrate(1);
+    }
+    world.snapshot()
+}
+
 fn initial_row(raw_id: u32) -> Row {
     let value = i64::from(raw_id);
     Row {
@@ -340,6 +410,15 @@ mod tests {
                 u64::from(toggles) * u64::from(rounds)
             );
             assert_eq!(evidence.snapshot.entities().len(), entity_count as usize);
+        }
+    }
+
+    #[test]
+    fn dedicated_replays_match_lockstep_evidence() {
+        for (stride, toggles) in [(1, 0), (4, 0), (0, 0), (4, 32)] {
+            let expected = run_toggle_scenario(128, 4, stride, toggles).snapshot;
+            assert_eq!(replay_structural_scenario(128, 4, stride, toggles), expected);
+            assert_eq!(replay_mask_scenario(128, 4, stride, toggles), expected);
         }
     }
 

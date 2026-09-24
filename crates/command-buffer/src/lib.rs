@@ -71,6 +71,12 @@ impl CommandBuffer {
         self.commands.is_empty()
     }
 
+    /// Commits buffered commands in FIFO order.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first failed command together with stats for commands committed before it.
+    /// The failing command and all later commands remain buffered.
     pub fn commit(&mut self, world: &mut ArchetypeWorld) -> Result<CommitStats, CommitFailure> {
         let mut stats = CommitStats {
             batches: u64::from(!self.commands.is_empty()),
@@ -126,6 +132,12 @@ pub struct ConstructionEvidence {
     pub bundled: CommitStats,
 }
 
+/// Builds the fixed construction experiment and verifies parity across all strategies.
+///
+/// # Panics
+///
+/// Panics if a fixed valid construction command fails or if deferred/bundled snapshots diverge
+/// from immediate construction.
 #[must_use]
 pub fn construction_scenario(entity_count: u32) -> ConstructionEvidence {
     let mut immediate = ArchetypeWorld::new();
@@ -161,15 +173,15 @@ pub fn construction_scenario(entity_count: u32) -> ConstructionEvidence {
     let expected = immediate.snapshot();
 
     let mut deferred_world = ArchetypeWorld::new();
-    let deferred = deferred_commands
-        .commit(&mut deferred_world)
-        .expect("valid deferred construction must commit");
+    let Ok(deferred) = deferred_commands.commit(&mut deferred_world) else {
+        panic!("valid deferred construction must commit");
+    };
     assert_eq!(deferred_world.snapshot(), expected);
 
     let mut bundled_world = ArchetypeWorld::new();
-    let bundled = bundled_commands
-        .commit(&mut bundled_world)
-        .expect("valid bundled construction must commit");
+    let Ok(bundled) = bundled_commands.commit(&mut bundled_world) else {
+        panic!("valid bundled construction must commit");
+    };
     assert_eq!(bundled_world.snapshot(), expected);
 
     ConstructionEvidence {

@@ -194,7 +194,12 @@ fn verify(fixture: &Fixture) -> [Evidence; 4] {
     evidence
 }
 
-fn measure(fixture: &Fixture, implementation: &str, replay: fn(&Workload) -> WorldSnapshot) {
+fn measure(
+    fixture: &Fixture,
+    implementation: &str,
+    replay: fn(&Workload) -> WorldSnapshot,
+    environment_fingerprint: &str,
+) {
     // Workload construction, evidence, and parity are excluded. World construction, replay,
     // final canonical snapshot and teardown are included consistently for every backend.
     drop(black_box(replay(black_box(&fixture.workload))));
@@ -206,18 +211,25 @@ fn measure(fixture: &Fixture, implementation: &str, replay: fn(&Workload) -> Wor
     }
     samples.sort_unstable();
     println!(
-        "storage_timing scenario={} implementation={implementation} samples=7 median_ns={} min_ns={} max_ns={} advisory=true",
+        "storage_timing scenario={} implementation={implementation} samples=7 median_ns={} min_ns={} max_ns={} advisory=true environment_fingerprint={environment_fingerprint}",
         fixture.name, samples[3], samples[0], samples[6],
     );
 }
 
+fn parse_args(args: &[String]) -> Result<(bool, &str), String> {
+    match args {
+        [] => Ok((false, "unverified")),
+        [mode] if mode == "--bench" => Ok((true, "unverified")),
+        [mode, environment_fingerprint] if mode == "--bench" => {
+            Ok((true, environment_fingerprint.as_str()))
+        }
+        _ => Err("usage: storage-benchmark [--bench [environment-fingerprint]]".to_owned()),
+    }
+}
+
 fn main() -> Result<(), String> {
     let args: Vec<_> = std::env::args().skip(1).collect();
-    let timed = match args.as_slice() {
-        [] => false,
-        [mode] if mode == "--bench" => true,
-        _ => return Err("usage: storage-benchmark [--bench]".to_owned()),
-    };
+    let (timed, environment_fingerprint) = parse_args(&args)?;
     for fixture in fixtures() {
         let evidence = verify(&fixture);
         for (implementation, result) in [
@@ -241,7 +253,7 @@ fn main() -> Result<(), String> {
                 ("cached-sparse", cached_replay),
                 ("archetype-table", archetype_replay),
             ] {
-                measure(&fixture, implementation, replay);
+                measure(&fixture, implementation, replay, environment_fingerprint);
             }
         }
     }
@@ -251,6 +263,20 @@ fn main() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn benchmark_arguments_preserve_environment_identity_and_reject_trailing_values() {
+        assert_eq!(parse_args(&[]), Ok((false, "unverified")));
+        assert_eq!(
+            parse_args(&["--bench".to_owned()]),
+            Ok((true, "unverified"))
+        );
+        assert_eq!(
+            parse_args(&["--bench".to_owned(), "env-v1:sha256:test".to_owned()]),
+            Ok((true, "env-v1:sha256:test"))
+        );
+        assert!(parse_args(&["--bench".to_owned(), "env".to_owned(), "extra".to_owned()]).is_err());
+    }
 
     #[test]
     fn fixture_matrix_is_deterministic_and_proves_parity() {
