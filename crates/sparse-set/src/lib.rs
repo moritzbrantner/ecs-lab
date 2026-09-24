@@ -205,8 +205,7 @@ impl SparseWorld {
                 .count(),
         )
         .unwrap_or(u64::MAX);
-        let integration_rows_scanned =
-            u64::try_from(driving_entities.len()).unwrap_or(u64::MAX);
+        let integration_rows_scanned = u64::try_from(driving_entities.len()).unwrap_or(u64::MAX);
 
         StorageWorkStats {
             integration_rows_scanned,
@@ -232,7 +231,11 @@ impl SparseWorld {
                 let Some(velocity) = self.velocities.get(entity).copied() else {
                     continue;
                 };
-                integrate_position(&mut self.positions.dense_values[position_index], velocity, ticks);
+                integrate_position(
+                    &mut self.positions.dense_values[position_index],
+                    velocity,
+                    ticks,
+                );
             }
         } else {
             for velocity_index in 0..self.velocities.dense_entities.len() {
@@ -328,13 +331,19 @@ mod tests {
             let entity = EntityId(raw_id);
             assert_eq!(world.apply(Operation::Spawn(entity)), Ok(()));
             assert_eq!(
-                world.apply(Operation::SetPosition(entity, Position::new(i64::from(raw_id), 0))),
+                world.apply(Operation::SetPosition(
+                    entity,
+                    Position::new(i64::from(raw_id), 0)
+                )),
                 Ok(())
             );
         }
         for raw_id in [1, 17, 63] {
             assert_eq!(
-                world.apply(Operation::SetVelocity(EntityId(raw_id), Velocity::new(1, 0))),
+                world.apply(Operation::SetVelocity(
+                    EntityId(raw_id),
+                    Velocity::new(1, 0)
+                )),
                 Ok(())
             );
         }
