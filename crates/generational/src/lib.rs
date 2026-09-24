@@ -61,6 +61,12 @@ impl GenerationalArena {
         }
     }
 
+    /// Allocates a deterministic physical slot for a logical entity.
+    ///
+    /// # Errors
+    ///
+    /// Returns `DuplicateLogicalEntity` when the logical identity is already live, or
+    /// `SlotCapacityExhausted` when no new slot can be represented.
     pub fn spawn(&mut self, logical: EntityId) -> Result<EntityHandle, HandleError> {
         if self.logical_to_handle.contains_key(&logical) {
             return Err(HandleError::DuplicateLogicalEntity(logical));
@@ -103,6 +109,11 @@ impl GenerationalArena {
         Ok(handle)
     }
 
+    /// Removes the entity addressed by a live generation-qualified handle.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Stale` when the handle does not name the current generation of a live slot.
     pub fn despawn(&mut self, handle: EntityHandle) -> Result<EntityId, HandleError> {
         let slot = self.valid_slot(handle)?;
         let logical = slot
@@ -123,6 +134,11 @@ impl GenerationalArena {
         Ok(logical)
     }
 
+    /// Resolves a live generation-qualified handle to its logical entity identity.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Stale` when the slot is absent, retired, generation-mismatched, or not live.
     pub fn resolve(&mut self, handle: EntityHandle) -> Result<EntityId, HandleError> {
         match self.valid_slot(handle).and_then(|slot| {
             slot.logical
