@@ -327,6 +327,12 @@ pub struct HybridEvidence {
     pub stats: HybridStats,
 }
 
+/// Runs archetype, hybrid, and all-sparse status storage in lockstep.
+///
+/// # Panics
+///
+/// Panics when `toggles_per_round` exceeds `entity_count`, or if the representations
+/// diverge in status membership, mutation behavior, or canonical snapshots.
 #[must_use]
 pub fn run_status_churn_scenario(
     entity_count: u32,
@@ -338,7 +344,11 @@ pub fn run_status_churn_scenario(
     let mut archetype = ArchetypeStatusWorld::new(entity_count, status_stride);
     let mut hybrid = HybridWorld::new(entity_count, status_stride);
     let mut sparse = AllSparseWorld::new(entity_count, status_stride);
-    let mut stats = HybridStats::default();
+    let mut stats = HybridStats {
+        hybrid_status_peak_slots: hybrid.status.allocated_slots(),
+        sparse_status_peak_slots: sparse.status.allocated_slots(),
+        ..HybridStats::default()
+    };
 
     let initial = archetype.snapshot();
     assert_eq!(hybrid.snapshot(), initial);
@@ -395,6 +405,90 @@ pub fn run_status_churn_scenario(
     }
 }
 
+/// Replays only the archetype status representation.
+///
+/// # Panics
+///
+/// Panics when `toggles_per_round` exceeds `entity_count`.
+#[must_use]
+pub fn replay_archetype_status_scenario(
+    entity_count: u32,
+    rounds: u32,
+    status_stride: u32,
+    toggles_per_round: u32,
+) -> HybridSnapshot {
+    assert!(toggles_per_round <= entity_count);
+    let mut world = ArchetypeStatusWorld::new(entity_count, status_stride);
+    if entity_count == 0 {
+        return world.snapshot();
+    }
+    for round in 0..rounds {
+        for offset in 0..toggles_per_round {
+            let entity = EntityId(offset.wrapping_add(round) % entity_count);
+            let target = !world.has_status(entity);
+            world.set_status(entity, target);
+        }
+        world.integrate(1);
+    }
+    world.snapshot()
+}
+
+/// Replays only the hybrid table-plus-sparse-status representation.
+///
+/// # Panics
+///
+/// Panics when `toggles_per_round` exceeds `entity_count`.
+#[must_use]
+pub fn replay_hybrid_status_scenario(
+    entity_count: u32,
+    rounds: u32,
+    status_stride: u32,
+    toggles_per_round: u32,
+) -> HybridSnapshot {
+    assert!(toggles_per_round <= entity_count);
+    let mut world = HybridWorld::new(entity_count, status_stride);
+    if entity_count == 0 {
+        return world.snapshot();
+    }
+    for round in 0..rounds {
+        for offset in 0..toggles_per_round {
+            let entity = EntityId(offset.wrapping_add(round) % entity_count);
+            let target = !world.has_status(entity);
+            world.set_status(entity, target);
+        }
+        world.integrate(1);
+    }
+    world.snapshot()
+}
+
+/// Replays only the all-sparse motion/status representation.
+///
+/// # Panics
+///
+/// Panics when `toggles_per_round` exceeds `entity_count`.
+#[must_use]
+pub fn replay_sparse_status_scenario(
+    entity_count: u32,
+    rounds: u32,
+    status_stride: u32,
+    toggles_per_round: u32,
+) -> HybridSnapshot {
+    assert!(toggles_per_round <= entity_count);
+    let mut world = AllSparseWorld::new(entity_count, status_stride);
+    if entity_count == 0 {
+        return world.snapshot();
+    }
+    for round in 0..rounds {
+        for offset in 0..toggles_per_round {
+            let entity = EntityId(offset.wrapping_add(round) % entity_count);
+            let target = !world.has_status(entity);
+            world.set_status(entity, target);
+        }
+        world.integrate(1);
+    }
+    world.snapshot()
+}
+
 fn initial_row(raw_id: u32) -> MotionRow {
     let value = i64::from(raw_id);
     MotionRow {
@@ -435,6 +529,27 @@ mod tests {
         assert_eq!(evidence.stats.archetype_motion_row_moves, 0);
         assert_eq!(evidence.stats.hybrid_motion_row_moves, 0);
         assert_eq!(evidence.stats.sparse_motion_row_moves, 0);
+        assert_eq!(evidence.stats.hybrid_status_peak_slots, 1_024);
+        assert_eq!(evidence.stats.sparse_status_peak_slots, 1_024);
+    }
+
+    #[test]
+    fn dedicated_storage_replays_match_lockstep_evidence() {
+        for (stride, toggles) in [(4, 0), (4, 32), (16, 64)] {
+            let expected = run_status_churn_scenario(128, 4, stride, toggles).snapshot;
+            assert_eq!(
+                replay_archetype_status_scenario(128, 4, stride, toggles),
+                expected
+            );
+            assert_eq!(
+                replay_hybrid_status_scenario(128, 4, stride, toggles),
+                expected
+            );
+            assert_eq!(
+                replay_sparse_status_scenario(128, 4, stride, toggles),
+                expected
+            );
+        }
     }
 
     #[test]
