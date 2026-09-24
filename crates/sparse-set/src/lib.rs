@@ -35,9 +35,13 @@ impl<T> SparseSet<T> {
         self.dense_values.push(value);
     }
 
+    fn index(&self, entity: EntityId) -> Option<usize> {
+        self.sparse.get(entity.0)
+    }
+
     fn get(&self, entity: EntityId) -> Option<&T> {
-        let index = self.sparse.get(entity.0)?;
-        self.dense_values.get(index)
+        self.index(entity)
+            .and_then(|index| self.dense_values.get(index))
     }
 
     fn remove(&mut self, entity: EntityId) -> Option<T> {
@@ -181,16 +185,28 @@ impl SparseWorld {
             return StorageWorkStats::default();
         }
 
-        let integration_rows_scanned =
-            u64::try_from(self.positions.dense_entities.len()).unwrap_or(u64::MAX);
+        let scan_positions =
+            self.positions.dense_entities.len() <= self.velocities.dense_entities.len();
+        let driving_entities = if scan_positions {
+            &self.positions.dense_entities
+        } else {
+            &self.velocities.dense_entities
+        };
         let integrated_entities = u64::try_from(
-            self.positions
-                .dense_entities
+            driving_entities
                 .iter()
-                .filter(|&&entity| self.velocities.get(entity).is_some())
+                .filter(|&&entity| {
+                    if scan_positions {
+                        self.velocities.index(entity).is_some()
+                    } else {
+                        self.positions.index(entity).is_some()
+                    }
+                })
                 .count(),
         )
         .unwrap_or(u64::MAX);
+        let integration_rows_scanned =
+            u64::try_from(driving_entities.len()).unwrap_or(u64::MAX);
 
         StorageWorkStats {
             integration_rows_scanned,
@@ -210,23 +226,37 @@ impl SparseWorld {
 
     fn integrate(&mut self, ticks: i32) {
         let ticks = i64::from(ticks);
-        for index in 0..self.positions.dense_entities.len() {
-            let entity = self.positions.dense_entities[index];
-            let Some(velocity) = self.velocities.get(entity).copied() else {
-                continue;
-            };
-            let position = &mut self.positions.dense_values[index];
-            position.x = position
-                .x
-                .saturating_add(i64::from(velocity.x).saturating_mul(ticks));
-            position.y = position
-                .y
-                .saturating_add(i64::from(velocity.y).saturating_mul(ticks));
-            position.z = position
-                .z
-                .saturating_add(i64::from(velocity.z).saturating_mul(ticks));
+        if self.positions.dense_entities.len() <= self.velocities.dense_entities.len() {
+            for position_index in 0..self.positions.dense_entities.len() {
+                let entity = self.positions.dense_entities[position_index];
+                let Some(velocity) = self.velocities.get(entity).copied() else {
+                    continue;
+                };
+                integrate_position(&mut self.positions.dense_values[position_index], velocity, ticks);
+            }
+        } else {
+            for velocity_index in 0..self.velocities.dense_entities.len() {
+                let entity = self.velocities.dense_entities[velocity_index];
+                let Some(position_index) = self.positions.index(entity) else {
+                    continue;
+                };
+                let velocity = self.velocities.dense_values[velocity_index];
+                integrate_position(&mut self.positions.dense_values[position_index], velocity, ticks);
+            }
         }
     }
+}
+
+fn integrate_position(position: &mut Position, velocity: Velocity, ticks: i64) {
+    position.x = position
+        .x
+        .saturating_add(i64::from(velocity.x).saturating_mul(ticks));
+    position.y = position
+        .y
+        .saturating_add(i64::from(velocity.y).saturating_mul(ticks));
+    position.z = position
+        .z
+        .saturating_add(i64::from(velocity.z).saturating_mul(ticks));
 }
 
 #[cfg(test)]
@@ -281,14 +311,52 @@ mod tests {
         }
 
         let work = world.operation_work(Operation::Integrate { ticks: 1 });
-        assert_eq!(work.integration_rows_scanned, 2);
+        assert_eq!(work.integration_rows_scanned, 1);
         assert_eq!(work.integrated_entities, 1);
-        assert_eq!(work.component_lookups, 2);
+        assert_eq!(work.component_lookups, 1);
         assert_eq!(work.structural_table_transitions, 0);
 
         let (_, snapshot_work) = world.snapshot_with_stats();
         assert_eq!(snapshot_work.slots_scanned, 2);
         assert_eq!(snapshot_work.entities_materialized, 2);
+    }
+
+    #[test]
+    fn selectivity_aware_query_scans_the_smaller_component_pool() {
+        let mut world = SparseWorld::new();
+        for raw_id in 0..64 {
+            let entity = EntityId(raw_id);
+            assert_eq!(world.apply(Operation::Spawn(entity)), Ok(()));
+            assert_eq!(
+                world.apply(Operation::SetPosition(entity, Position::new(i64::from(raw_id), 0))),
+                Ok(())
+            );
+        }
+        for raw_id in [1, 17, 63] {
+            assert_eq!(
+                world.apply(Operation::SetVelocity(EntityId(raw_id), Velocity::new(1, 0))),
+                Ok(())
+            );
+        }
+
+        let work = world.operation_work(Operation::Integrate { ticks: 1 });
+        assert_eq!(work.integration_rows_scanned, 3);
+        assert_eq!(work.component_lookups, 3);
+        assert_eq!(work.integrated_entities, 3);
+
+        assert_eq!(world.apply(Operation::Integrate { ticks: 1 }), Ok(()));
+        for raw_id in [1, 17, 63] {
+            let entity = world
+                .snapshot()
+                .entities()
+                .iter()
+                .find(|entity| entity.id == EntityId(raw_id))
+                .copied();
+            assert_eq!(
+                entity.and_then(|entity| entity.position),
+                Some(Position::new(i64::from(raw_id) + 1, 0))
+            );
+        }
     }
 
     #[test]
