@@ -11,6 +11,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ecs-change-tracking"
+version = "0.1.0"
+dependencies = [
+ "ecs-workload",
+]
+
+[[package]]
 name = "ecs-cached-sparse"
 version = "0.1.0"
 dependencies = [
