@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 
+use ecs_sparse_index::PagedSparseIndex;
 use ecs_workload::{
     EntityId, EntitySnapshot, Operation, Position, SnapshotWorkStats, StorageIndexStats,
     StorageWorkStats, Velocity, Workload, WorkloadError, WorldSnapshot,
@@ -7,7 +8,7 @@ use ecs_workload::{
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct SparseSet<T> {
-    sparse: Vec<Option<usize>>,
+    sparse: PagedSparseIndex,
     dense_entities: Vec<EntityId>,
     dense_values: Vec<T>,
 }
@@ -15,7 +16,7 @@ struct SparseSet<T> {
 impl<T> Default for SparseSet<T> {
     fn default() -> Self {
         Self {
-            sparse: Vec::new(),
+            sparse: PagedSparseIndex::new(),
             dense_entities: Vec::new(),
             dense_values: Vec::new(),
         }
@@ -24,34 +25,28 @@ impl<T> Default for SparseSet<T> {
 
 impl<T> SparseSet<T> {
     fn insert(&mut self, entity: EntityId, value: T) {
-        let slot = entity.0 as usize;
-        if self.sparse.len() <= slot {
-            self.sparse.resize(slot + 1, None);
-        }
-        if let Some(index) = self.sparse[slot] {
+        if let Some(index) = self.sparse.get(entity.0) {
             self.dense_values[index] = value;
             return;
         }
         let index = self.dense_values.len();
-        self.sparse[slot] = Some(index);
+        self.sparse.set(entity.0, index);
         self.dense_entities.push(entity);
         self.dense_values.push(value);
     }
 
     fn get(&self, entity: EntityId) -> Option<&T> {
-        let index = self.sparse.get(entity.0 as usize).copied().flatten()?;
+        let index = self.sparse.get(entity.0)?;
         self.dense_values.get(index)
     }
 
     fn remove(&mut self, entity: EntityId) -> Option<T> {
-        let slot = entity.0 as usize;
-        let index = self.sparse.get(slot).copied().flatten()?;
-        self.sparse[slot] = None;
+        let index = self.sparse.remove(entity.0)?;
         self.dense_entities.swap_remove(index);
         let removed = self.dense_values.swap_remove(index);
         if index < self.dense_entities.len() {
             let moved = self.dense_entities[index];
-            self.sparse[moved.0 as usize] = Some(index);
+            self.sparse.set(moved.0, index);
         }
         Some(removed)
     }
@@ -70,12 +65,12 @@ impl SparseWorld {
         Self {
             alive: BTreeSet::new(),
             positions: SparseSet {
-                sparse: Vec::new(),
+                sparse: PagedSparseIndex::new(),
                 dense_entities: Vec::new(),
                 dense_values: Vec::new(),
             },
             velocities: SparseSet {
-                sparse: Vec::new(),
+                sparse: PagedSparseIndex::new(),
                 dense_entities: Vec::new(),
                 dense_values: Vec::new(),
             },
@@ -171,13 +166,11 @@ impl SparseWorld {
     pub fn index_stats(&self) -> StorageIndexStats {
         StorageIndexStats {
             entity_index_entries: u64::try_from(self.alive.len()).unwrap_or(u64::MAX),
-            component_index_slots: u64::try_from(
-                self.positions
-                    .sparse
-                    .len()
-                    .saturating_add(self.velocities.sparse.len()),
-            )
-            .unwrap_or(u64::MAX),
+            component_index_slots: self
+                .positions
+                .sparse
+                .allocated_slots()
+                .saturating_add(self.velocities.sparse.allocated_slots()),
             ..StorageIndexStats::default()
         }
     }
@@ -325,6 +318,31 @@ mod tests {
             assert_eq!(sparse.replay(&workload), Ok(()));
             assert_eq!(sparse.snapshot(), reference.snapshot(), "seed {seed}");
         }
+    }
+
+    #[test]
+    fn distant_entity_ids_do_not_allocate_the_high_water_range() {
+        let high = EntityId(u32::MAX);
+        let low = EntityId(2);
+        let mut reference = ReferenceWorld::new();
+        let mut sparse = SparseWorld::new();
+
+        for operation in [
+            Operation::Spawn(high),
+            Operation::SetPosition(high, Position::new3(10, 20, 30)),
+            Operation::SetVelocity(high, Velocity::new3(1, -2, 3)),
+            Operation::Spawn(low),
+            Operation::SetPosition(low, Position::new3(-4, 5, 6)),
+            Operation::Integrate { ticks: 2 },
+        ] {
+            assert_eq!(sparse.apply(operation), reference.apply(operation));
+            assert_eq!(sparse.snapshot(), reference.snapshot());
+        }
+
+        let stats = sparse.index_stats();
+        assert_eq!(stats.entity_index_entries, 2);
+        assert_eq!(stats.component_index_slots, 3 * 256);
+        assert!(stats.component_index_slots < u64::from(u32::MAX));
     }
 
     #[test]

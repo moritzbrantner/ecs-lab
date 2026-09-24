@@ -15,6 +15,7 @@ name = "ecs-cached-sparse"
 version = "0.1.0"
 dependencies = [
  "ecs-reference",
+ "ecs-sparse-index",
  "ecs-workload",
 ]
 
@@ -74,10 +75,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ecs-sparse-index"
+version = "0.1.0"
+
+[[package]]
 name = "ecs-sparse-set"
 version = "0.1.0"
 dependencies = [
  "ecs-reference",
+ "ecs-sparse-index",
  "ecs-workload",
 ]
 
