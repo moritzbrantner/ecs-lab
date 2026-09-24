@@ -35,6 +35,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ecs-enableable"
+version = "0.1.0"
+dependencies = [
+ "ecs-workload",
+]
+
+[[package]]
 name = "ecs-physics"
 version = "0.1.0"
 dependencies = [
