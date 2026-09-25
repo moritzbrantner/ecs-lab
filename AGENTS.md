@@ -13,6 +13,13 @@
 - Shared workloads and observable snapshots are the primary comparison seam. Do not force implementations through a common trait when doing so would distort the implementation being measured.
 - A candidate optimization must prove parity with the reference model before benchmark results are treated as meaningful.
 
+## Visualization boundary
+
+- The current repository remains a headless ECS experiment lab; do not add UI dependencies merely to satisfy interface conventions.
+- If a browser visualization or interactive experiment surface is introduced, explicitly adopt the current shared `ui` conventions from `moritzbrantner/coding-agent-conventions`, especially `PRINCIPLE-009`, `UI-008`, `UI-012`, and `UI-013`.
+- Such a surface should manipulate and inspect the existing authoritative workload/snapshot model rather than create a second ECS state model in presentation code.
+- Keep exact experiment parameters available, give each browser gesture one owner, and protect browser-specific interaction geometry when it becomes part of the experiment.
+
 ## Validation
 
 Run the narrowest affected checks first, then the repository gate:
