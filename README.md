@@ -16,6 +16,8 @@ The storage horizon covers a reference model, a sparse-set world, a cached-query
 
 The 3D crate owns `BouncingRoom3dScenario`: 48 dynamic bodies with varied box footprints, masses, materials, and three-axis velocities move inside six fixed AABB slabs (floor, ceiling, ±X and ±Z walls). The scenario can be replayed through both storage implementations and produces exact Rust final-frame 3D AABB pair evidence. The committed rotating playground and trebuchet tower use the standalone engine for authoritative world stepping while retaining ECS Lab's scenario and export contracts.
 
+[Current rotating-engine adoption evidence](docs/experiments/rotating-engine-adoption.md) records native and WASM acceptance, including numerical changes behind the integer export API. Persistent adapter lifetime remains tracked in #133.
+
 ## Interactive Pages demo and WebGPU
 
 The main Pages workbench remains useful for small editable ECS/material experiments. JavaScript owns only interaction state and visualization: the browser synchronizes experiment inputs into WebAssembly and Rust produces the canonical frame.
