@@ -209,11 +209,11 @@ impl PersistentPhysicsWorld3d {
         let id = self.entities.get(&entity).copied()?;
         let metadata = self.metadata[&id];
         let output = from_engine_box(
-            self.world.box_by_id(id).expect("mapped body"),
+            self.world.box_by_id(id)?,
             metadata.body,
             metadata.fixed_velocity,
         );
-        self.world.remove_box(id).expect("mapped body");
+        self.world.remove_box(id)?;
         self.entities.remove(&entity);
         self.metadata.remove(&id);
         self.work.removals += 1;
@@ -236,13 +236,13 @@ impl PersistentPhysicsWorld3d {
         if self.entities.contains_key(&replacement) {
             return Err(Error::DuplicateEntity(replacement));
         }
-        self.entities.remove(&entity);
-        self.entities.insert(replacement, id);
         self.metadata
             .get_mut(&id)
-            .expect("mapped metadata")
+            .ok_or(Error::MissingSourceBody(id))?
             .body
             .entity = replacement;
+        self.entities.remove(&entity);
+        self.entities.insert(replacement, id);
         self.work.remaps += 1;
         self.output_needs_sort = true;
         Ok(true)
@@ -262,7 +262,7 @@ impl PersistentPhysicsWorld3d {
         let authority = self
             .world
             .box_by_id(id)
-            .expect("mapped body")
+            .ok_or(Error::MissingSourceBody(id))?
             .motion_authority();
         self.work.input_conversions += 1;
         let converted = to_engine_box_with_id(replacement, id)?.with_motion_authority(authority);
@@ -292,7 +292,10 @@ impl PersistentPhysicsWorld3d {
         let id = self.id(entity)?;
         Self::validate_identity(entity, replacement)?;
         validate_material(replacement)?;
-        let current = self.world.box_by_id(id).expect("mapped body");
+        let current = self
+            .world
+            .box_by_id(id)
+            .ok_or(Error::MissingSourceBody(id))?;
         let translational = Self::body_descriptor(
             id,
             replacement,
@@ -325,7 +328,10 @@ impl PersistentPhysicsWorld3d {
         orientation: Orientation3d,
     ) -> Result<bool, Error> {
         let id = self.id(entity)?;
-        let current = self.world.box_by_id(id).expect("mapped body");
+        let current = self
+            .world
+            .box_by_id(id)
+            .ok_or(Error::MissingSourceBody(id))?;
         let metadata = self.metadata[&id];
         let translational = Self::body_descriptor(
             id,
@@ -363,7 +369,7 @@ impl PersistentPhysicsWorld3d {
         let converted = self
             .world
             .box_by_id(id)
-            .expect("mapped body")
+            .ok_or(Error::MissingSourceBody(id))?
             .clone()
             .with_motion_authority(authority);
         self.apply_descriptor(id, converted, self.metadata[&id])
