@@ -22,7 +22,7 @@ Measure how different ECS storage strategies behave under identical deterministi
 
 **Collision-kernel boundary** — Reusable collision decisions live in pinned `rust-kernels` crates. ECS Lab owns ECS-facing scheduling/integration/response experiments and does not depend on the Collision Lab application.
 
-**Rotating-engine boundary** — Playground and tower frames use the pinned `physics-engine` legacy rotating-box API. Integer ECS exports do not imply exact engine arithmetic. The current adapter reconstructs the world per frame; persistent lifetime is tracked in #133.
+**Rotating-engine boundary** — Playground and tower frames use the pinned `physics-engine` legacy rotating-box API. Integer ECS exports do not imply exact engine arithmetic. `PersistentPhysicsWorld3d` owns retained physics across frames. ECS metadata and converted rewind views do not replay pose/velocity into physics. Explicit lifecycle and mutation commands are documented in `docs/experiments/persistent-physics.md`.
 
 **Compute evidence** — Optional accelerated work whose output is compared with canonical CPU evidence before timing or performance claims are accepted.
 

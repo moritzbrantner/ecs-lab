@@ -8,6 +8,9 @@ mod impact;
 mod interactions;
 mod liquid;
 mod oriented_box;
+mod persistent_physics;
+#[cfg(test)]
+mod persistent_physics_tests;
 mod physics_engine_adapter;
 mod rigid_box;
 mod scenario;
@@ -48,9 +51,14 @@ pub use liquid::{LiquidError3d, LiquidVolume3d, liquid_operations};
 pub use oriented_box::{
     ObbAxisFeature3d, ObbContactSeed3d, OrientedBox3d, OrientedBoxError3d, obb_contact_seed,
 };
+pub use persistent_physics::{
+    PersistentPhysicsWorld3d, PhysicsEngineAdapterRetained3d, PhysicsEngineAdapterWork3d,
+    PhysicsEngineMotionAuthority3d,
+};
+#[cfg(any(test, feature = "rebuild-reference"))]
+pub use physics_engine_adapter::step_rigid_box_world_with_physics_engine;
 pub use physics_engine_adapter::{
     PhysicsEngineAdapterError3d, PhysicsEngineAdapterStep3d, physics_engine_boxes_penetrate,
-    step_rigid_box_world_with_physics_engine,
 };
 pub use rigid_box::{
     RigidBox3d, RigidBoxState3d, RigidBoxWorldConfig3d, RotatingContactSearchConfig3d,

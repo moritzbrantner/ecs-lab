@@ -2,9 +2,9 @@ use std::sync::{Mutex, OnceLock};
 
 use ecs_physics::PhysicsMaterial;
 use ecs_physics_3d::{
-    AngularState3d, AngularSubstepPolicy3d, AngularVelocity3d, Orientation3d, PhysicsBody3d,
-    RigidBox3d, RigidBoxState3d, RigidBoxWorldConfig3d, RotatingContactSearchConfig3d,
-    oriented_box_vertices, step_rigid_box_world_with_physics_engine,
+    AngularState3d, AngularSubstepPolicy3d, AngularVelocity3d, Orientation3d,
+    PersistentPhysicsWorld3d, PhysicsBody3d, RigidBox3d, RigidBoxState3d, RigidBoxWorldConfig3d,
+    RotatingContactSearchConfig3d, oriented_box_vertices,
 };
 use ecs_workload::{EntityId, Position, Velocity};
 
@@ -37,28 +37,37 @@ struct TowerFrameStats {
 
 #[derive(Clone, Debug)]
 struct TowerFrame {
+    #[cfg(test)]
     boxes: Vec<RigidBox3d>,
     vertices: Vec<[Position; 8]>,
     stats: TowerFrameStats,
 }
 
 struct TowerDemoState {
-    config: RigidBoxWorldConfig3d,
+    physics: PersistentPhysicsWorld3d,
     frames: Vec<TowerFrame>,
 }
 
 impl TowerDemoState {
     fn new() -> Option<Self> {
         let boxes = initial_boxes()?;
+        let config = RigidBoxWorldConfig3d {
+            gravity: Velocity::new3(0, -10 * TOWER_EXTENT_SCALE, 0),
+            timestep_numerator: 1,
+            timestep_denominator: i32::try_from(TOWER_DEMO_FPS).ok()?,
+            angular_damping_milli: 996,
+            solver_passes: 10,
+        };
+        let physics = PersistentPhysicsWorld3d::new(
+            &boxes,
+            config,
+            TOWER_CONTACT_SEARCH,
+            AngularSubstepPolicy3d::default(),
+        )
+        .ok()?;
         let initial = capture_frame(boxes, TowerFrameStats::default())?;
         Some(Self {
-            config: RigidBoxWorldConfig3d {
-                gravity: Velocity::new3(0, -10 * TOWER_EXTENT_SCALE, 0),
-                timestep_numerator: 1,
-                timestep_denominator: i32::try_from(TOWER_DEMO_FPS).ok()?,
-                angular_damping_milli: 996,
-                solver_passes: 10,
-            },
+            physics,
             frames: vec![initial],
         })
     }
@@ -69,20 +78,16 @@ impl TowerDemoState {
         }
         let target = usize::try_from(steps).ok()?;
         while self.frames.len() <= target {
-            let previous = self.frames.last()?.boxes.clone();
-            let next = step_rigid_box_world_with_physics_engine(
-                &previous,
-                self.config,
-                TOWER_CONTACT_SEARCH,
-                AngularSubstepPolicy3d::default(),
-            )
-            .inspect_err(|error| {
-                eprintln!(
-                    "tower physics failed while constructing frame {}: {error:?}",
-                    self.frames.len()
-                );
-            })
-            .ok()?;
+            let next = self
+                .physics
+                .advance()
+                .inspect_err(|error| {
+                    eprintln!(
+                        "tower physics failed while constructing frame {}: {error:?}",
+                        self.frames.len()
+                    );
+                })
+                .ok()?;
             let stats = TowerFrameStats {
                 spinning_bodies: next
                     .boxes
@@ -180,6 +185,7 @@ fn capture_frame(boxes: Vec<RigidBox3d>, stats: TowerFrameStats) -> Option<Tower
         })
         .collect::<Option<Vec<_>>>()?;
     Some(TowerFrame {
+        #[cfg(test)]
         boxes,
         vertices,
         stats,
@@ -212,6 +218,28 @@ fn vertex(body_index: u32, vertex_index: u32, steps: u32) -> Option<Position> {
 
 fn display_coordinate(value: i64) -> f32 {
     value as f32 / TOWER_SCALE as f32
+}
+
+/// Recreates the engine and its observable rewind cache from the scenario's initial state.
+#[unsafe(no_mangle)]
+pub extern "C" fn physics_tower_demo_reset() -> u32 {
+    let Some(replacement) = TowerDemoState::new() else {
+        return 0;
+    };
+    let Ok(mut state) = tower_demo_state().lock() else {
+        return 0;
+    };
+    *state = Some(replacement);
+    1
+}
+
+/// Drops the engine and cached views. The next frame read creates a fresh scenario.
+#[unsafe(no_mangle)]
+pub extern "C" fn physics_tower_demo_dispose() -> u32 {
+    let Ok(mut state) = tower_demo_state().lock() else {
+        return 0;
+    };
+    u32::from(state.take().is_some())
 }
 
 #[unsafe(no_mangle)]
@@ -366,11 +394,36 @@ mod tests {
                 Some(frame.stats.sampled_events),
                 Some(frame.stats.tail_contacts),
             );
+            crate::physics_trace::record_vertices(step, &frame.vertices);
             assert_no_floor_penetration(frame, step);
         }
 
         assert!(projectile_passed_front_face);
         assert!(maximum_spinning_blocks >= 4);
+        let work = state.physics.work();
+        assert_eq!(work.world_constructions, 1);
+        assert_eq!(work.insertions, 32);
+        assert_eq!(work.input_conversions, 32);
+        assert_eq!(work.angular_scan_visits, 32 * 480);
+        assert_eq!(work.output_conversions, 32 * 480);
+        assert_eq!(work.descriptor_commands, 0);
+        assert_eq!(work.motion_commands, 0);
+        let before_rewind = work;
+        state.ensure_frame(1).expect("cached rewind view");
+        assert_eq!(state.physics.work(), before_rewind);
+        let cache_payload = state.frames.capacity() * std::mem::size_of::<super::TowerFrame>()
+            + state
+                .frames
+                .iter()
+                .map(|frame| {
+                    frame.boxes.capacity() * std::mem::size_of::<ecs_physics_3d::RigidBox3d>()
+                        + frame.vertices.capacity()
+                            * std::mem::size_of::<[ecs_workload::Position; 8]>()
+                })
+                .sum::<usize>();
+        println!("PERSISTENT_WORK tower {work:?}");
+        println!("PERSISTENT_RETAINED tower {:?}", state.physics.retained());
+        println!("CACHE_PAYLOAD_BYTES tower {cache_payload}");
     }
 
     #[test]

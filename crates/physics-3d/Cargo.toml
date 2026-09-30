@@ -7,12 +7,19 @@ rust-version.workspace = true
 publish = false
 description = "Deterministic three-dimensional AABB physics and scenarios for ECS Lab"
 
+[features]
+rebuild-reference = []
+
+[[example]]
+name = "persistent-benchmark"
+required-features = ["rebuild-reference"]
+
 [dependencies]
 ecs-physics = { path = "../physics" }
 ecs-reference = { path = "../reference" }
 ecs-workload = { path = "../workload" }
 geometry-kernels = { git = "https://github.com/moritzbrantner/rust-kernels", rev = "986bff4dc8d13a64b90fab3a9f7f02bb8d1aa35e" }
-physics-engine = { git = "https://github.com/moritzbrantner/physics-engine", rev = "221bf2e08cca0955b3c34b780b89ec12f191f070" }
+physics-engine = { git = "https://github.com/moritzbrantner/physics-engine", rev = "46d4eed291762815becde11f79c97019857533d9" }
 spatial-kernels = { git = "https://github.com/moritzbrantner/rust-kernels", rev = "986bff4dc8d13a64b90fab3a9f7f02bb8d1aa35e" }
 
 [dev-dependencies]
