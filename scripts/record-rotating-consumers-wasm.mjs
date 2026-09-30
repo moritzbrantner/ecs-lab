@@ -56,5 +56,21 @@ for (let step = 0; step <= 480; step++) {
     tail_contacts: physics.physics_tower_demo_tail_contacts(step),
   });
 }
+// Lifetime commands drop both physics and rewind views. Each scene remains independent.
+const roomInitial = rows.find((row) => row.scene === "playground" && row.step === 2).boxes[0].p;
+const towerInitial = rows.find((row) => row.scene === "tower" && row.step === 2).vertices[1][0];
+assert.equal(physics.physics_demo_reset(), 1);
+assert.deepEqual(["x", "y", "z"].map((axis) => physics[`physics_demo_position_${axis}`](0, 2)), roomInitial);
+assert.deepEqual(["x", "y", "z"].map((axis) => physics[`physics_tower_demo_vertex_${axis}`](1, 0, 2)), towerInitial);
+assert.equal(physics.physics_demo_dispose(), 1);
+assert.equal(physics.physics_demo_dispose(), 0);
+assert.equal(physics.physics_demo_body_count(2), 54);
+assert.deepEqual(["x", "y", "z"].map((axis) => physics[`physics_demo_position_${axis}`](0, 2)), roomInitial);
+assert.equal(physics.physics_tower_demo_reset(), 1);
+assert.deepEqual(["x", "y", "z"].map((axis) => physics[`physics_tower_demo_vertex_${axis}`](1, 0, 2)), towerInitial);
+assert.equal(physics.physics_tower_demo_dispose(), 1);
+assert.equal(physics.physics_tower_demo_dispose(), 0);
+assert.deepEqual(["x", "y", "z"].map((axis) => physics[`physics_tower_demo_vertex_${axis}`](1, 0, 2)), towerInitial);
+assert.deepEqual(["x", "y", "z"].map((axis) => physics[`physics_demo_position_${axis}`](0, 2)), roomInitial);
 await writeFile(outputPath, JSON.stringify(rows) + "\n");
 console.log(`Actual WASM consumer projection: ${rows.length} valid frames; playground fixed walls and tower floor sentinel retained.`);

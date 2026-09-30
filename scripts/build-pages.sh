@@ -3,6 +3,10 @@ set -euo pipefail
 
 rustup target add wasm32-unknown-unknown
 cargo test --locked -p ecs-web-demo
+cargo build --locked --release -p ecs-web-demo --target wasm32-unknown-unknown \
+  --example persistent-contract --features physics-reference
+node scripts/check-persistent-contract-wasm.mjs \
+  target/wasm32-unknown-unknown/release/examples/persistent_contract.wasm
 cargo build --locked --release -p ecs-web-demo --target wasm32-unknown-unknown
 node scripts/record-rotating-consumers-wasm.mjs \
   target/wasm32-unknown-unknown/release/ecs_web_demo.wasm \
