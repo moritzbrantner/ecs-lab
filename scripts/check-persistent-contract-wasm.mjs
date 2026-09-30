@@ -5,6 +5,6 @@ assert(modulePath, "usage: node scripts/check-persistent-contract-wasm.mjs <pers
 const module = await WebAssembly.compile(await readFile(modulePath));
 for (let replay = 0; replay < 3; replay++) {
   const instance = await WebAssembly.instantiate(module, {});
-  assert.equal(instance.exports.run_persistent_contract(), 11);
+  assert.equal(instance.exports.run_persistent_contract(), 12);
 }
-console.log("Persistent adapter WASM contract: 11 shared fixtures passed across 3 independent replays.");
+console.log("Persistent adapter WASM contract: 12 shared fixtures passed across 3 independent replays.");

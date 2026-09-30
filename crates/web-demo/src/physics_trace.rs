@@ -51,3 +51,12 @@ pub(crate) fn record(
         "PHYSICAL_TRACE {{\"scene\":\"{scene}\",\"step\":{step},\"sampled_events\":{sampled_events},\"tail_contacts\":{tail_contacts},\"boxes\":{rows:?}}}"
     );
 }
+
+/// Integer vertex views from the actual native tower cache, before the f32 display projection.
+pub(crate) fn record_vertices(step: u32, vertices: &[[ecs_workload::Position; 8]]) {
+    let rows = vertices
+        .iter()
+        .map(|corners| corners.map(|p| [p.x, p.y, p.z]))
+        .collect::<Vec<_>>();
+    println!("VERTEX_TRACE {{\"scene\":\"tower\",\"step\":{step},\"vertices\":{rows:?}}}");
+}

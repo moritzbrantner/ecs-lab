@@ -22,7 +22,7 @@ The old rebuild function is available only to native unit tests or the explicit 
 
 ## Acceptance and measurement
 
-Eleven shared native/WASM fixtures cover stationary/sparse parity, actual contacts, near misses, support removal, angular substeps, authoritative damping, output-view isolation, stable identity, reset, independent worlds, authored mutations, invalid edits and late-frame restoration. The actual playground runs frames 0–600; tower runs 0–480 with the original impact, spin and floor assertions. WASM verifies these same endpoints, fixed geometry, and reset/dispose independence.
+Twelve shared native/WASM fixtures cover stationary/sparse parity, actual contacts, near misses, support removal, angular substeps, authoritative damping, output-view isolation, stable identity, reset, independent worlds, authored mutations, invalid edits and late-frame restoration. The actual playground runs frames 0–600; tower runs 0–480 with the original impact, spin and floor assertions. WASM verifies these same endpoints, fixed geometry, and reset/dispose independence.
 
 The development benchmark times complete adapter calls, including scans, physics, conversion and output allocation/writeback. Each route runs in its own native process. Parity precedes timing; only stationary and sparse nonrotating workloads are compared for speed. Counts distinguish one construction/insertion from warm maintenance and unavoidable O(N) output. Engine contact-work counters are a diagnostic subset, not a count of all geometry work.
 

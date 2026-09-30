@@ -21,5 +21,6 @@ pub extern "C" fn run_persistent_contract() -> u32 {
     contract::support_removal_wakes_the_dependent_without_connecting_fixed_floor_islands();
     contract::contact_frames_match_rebuild_before_sleep_history_diverges();
     contract::invalid_edits_preserve_physics_metadata_and_parked_state();
-    11
+    contract::retained_quaternions_are_not_renormalized_from_output_views();
+    12
 }

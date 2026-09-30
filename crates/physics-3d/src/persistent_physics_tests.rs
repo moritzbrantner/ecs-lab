@@ -430,4 +430,67 @@ pub fn invalid_edits_preserve_physics_metadata_and_parked_state() {
     let after = world.snapshot();
     assert_eq!(after[0].body.half_extents[0], 12);
     assert_eq!(after[0].state, before[0].state);
+    let mut replacement = after[0];
+    replacement.state.center.x = 100;
+    replacement.state.linear_velocity.x = 600;
+    replacement.state.angular.angular_velocity.z = 100_000;
+    assert!(world.replace(EntityId(1), replacement).unwrap());
+    assert_eq!(world.snapshot(), vec![replacement]);
+    let mut fixed = replacement.body;
+    fixed.kind = BodyKind::Fixed;
+    assert!(world.update_metadata(EntityId(1), fixed).is_err());
+    fixed.entity = EntityId(2);
+    assert!(matches!(
+        world.update_metadata(EntityId(1), fixed),
+        Err(PhysicsEngineAdapterError3d::MetadataIdentityChange { .. })
+    ));
+    assert_eq!(world.snapshot(), vec![replacement]);
+    let mut floor = body(9, 1000, 0, 77);
+    floor.body.kind = BodyKind::Fixed;
+    world.insert(floor).unwrap();
+    assert!(
+        world
+            .set_motion(
+                EntityId(9),
+                Velocity::new3(1, 0, 0),
+                AngularVelocity3d::default()
+            )
+            .is_err()
+    );
+    assert_eq!(world.remove(EntityId(9)), Some(floor));
+    assert_eq!(world.work().input_conversions, 3);
+}
+
+#[cfg_attr(test, test)]
+pub fn retained_quaternions_are_not_renormalized_from_output_views() {
+    let mut rotating = body(1, 0, 0, 0);
+    rotating.state.angular.angular_velocity = AngularVelocity3d::new(700_000, 350_000, -700_000);
+    let mut cfg = config();
+    cfg.angular_damping_milli = 998;
+    let policy = AngularSubstepPolicy3d::default();
+    let mut persistent = PersistentPhysicsWorld3d::new(&[rotating], cfg, search(), policy).unwrap();
+    let mut normalization_difference = false;
+    for _ in 0..128 {
+        let view = persistent.advance().unwrap().boxes;
+        let mut rebuilt = PersistentPhysicsWorld3d::new(&view, cfg, search(), policy).unwrap();
+        let rebuilt_view = rebuilt.snapshot();
+        assert_eq!(rebuilt_view[0].body, view[0].body);
+        assert_eq!(rebuilt_view[0].state.center, view[0].state.center);
+        assert_eq!(
+            rebuilt_view[0].state.linear_velocity,
+            view[0].state.linear_velocity
+        );
+        assert_eq!(
+            rebuilt_view[0].state.angular.angular_velocity,
+            view[0].state.angular.angular_velocity
+        );
+        normalization_difference |=
+            rebuilt_view[0].state.angular.orientation != view[0].state.angular.orientation;
+    }
+    assert!(
+        normalization_difference,
+        "reconstructing integer quaternions changes retained state"
+    );
+    assert_eq!(persistent.work().world_constructions, 1);
+    assert_eq!(persistent.work().input_conversions, 1);
 }

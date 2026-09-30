@@ -394,6 +394,7 @@ mod tests {
                 Some(frame.stats.sampled_events),
                 Some(frame.stats.tail_contacts),
             );
+            crate::physics_trace::record_vertices(step, &frame.vertices);
             assert_no_floor_penetration(frame, step);
         }
 

@@ -264,6 +264,7 @@ impl PersistentPhysicsWorld3d {
             .box_by_id(id)
             .expect("mapped body")
             .motion_authority();
+        self.work.input_conversions += 1;
         let converted = to_engine_box_with_id(replacement, id)?.with_motion_authority(authority);
         let metadata = Metadata {
             body: replacement.body,

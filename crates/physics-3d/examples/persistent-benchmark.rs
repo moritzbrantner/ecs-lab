@@ -11,6 +11,62 @@ use ecs_workload::{EntityId, Position, Velocity};
 const WARM_FRAMES: usize = 40;
 const MEASURED_FRAMES: usize = 120;
 
+fn measure_mutations(
+    boxes: &[RigidBox3d],
+    population: u32,
+    config: RigidBoxWorldConfig3d,
+    search: RotatingContactSearchConfig3d,
+    policy: AngularSubstepPolicy3d,
+) {
+    let mut world = PersistentPhysicsWorld3d::new(boxes, config, search, policy).unwrap();
+    for _ in 0..WARM_FRAMES {
+        world.advance().unwrap();
+    }
+    println!("WORK_BEFORE {:?}", world.work());
+    let start = Instant::now();
+    for id in 0..population.min(64) {
+        let mut metadata = boxes[usize::try_from(id).unwrap()].body;
+        metadata.material.friction_milli = 500;
+        assert!(world.update_metadata(EntityId(id), metadata).unwrap());
+        assert!(
+            world
+                .teleport(
+                    EntityId(id),
+                    Position::new3(i64::from(id) * 4000, 100, 0),
+                    Orientation3d::IDENTITY
+                )
+                .unwrap()
+        );
+        assert!(
+            world
+                .set_motion(
+                    EntityId(id),
+                    Velocity::new3(0, 600, 0),
+                    AngularVelocity3d::default()
+                )
+                .unwrap()
+        );
+        assert!(
+            world
+                .remap(EntityId(id), EntityId(population + id))
+                .unwrap()
+        );
+    }
+    let mut added = boxes[0];
+    added.body.entity = EntityId(population * 2);
+    added.state.center = Position::new3(-4000, 0, 0);
+    world.insert(added).unwrap();
+    assert!(world.remove(added.body.entity).is_some());
+    let elapsed_ns = start.elapsed().as_nanos();
+    println!("MUTATIONS {population} {elapsed_ns}");
+    println!("WORK_AFTER {:?}", world.work());
+    println!("RETAINED {:?}", world.retained());
+    assert_eq!(
+        world.retained().bodies,
+        usize::try_from(population).unwrap()
+    );
+}
+
 fn main() {
     let args = std::env::args().collect::<Vec<_>>();
     let mode = args.get(1).expect("route: compare, persistent or rebuild");
@@ -43,6 +99,10 @@ fn main() {
     let rebuild = |boxes: &[RigidBox3d]| {
         step_rigid_box_world_with_physics_engine(boxes, config, search, policy).unwrap()
     };
+    if mode == "mutations" {
+        measure_mutations(&boxes, population, config, search, policy);
+        return;
+    }
     if mode == "compare" {
         let mut world = PersistentPhysicsWorld3d::new(&boxes, config, search, policy).unwrap();
         for _ in 0..WARM_FRAMES + MEASURED_FRAMES {
