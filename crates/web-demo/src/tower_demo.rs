@@ -347,7 +347,7 @@ mod tests {
         let mut maximum_spinning_blocks = 0_usize;
         let mut projectile_passed_front_face = false;
 
-        for step in 0..=240 {
+        for step in 0..=TOWER_DEMO_MAX_STEPS {
             let frame = state.ensure_frame(step).expect("valid tower frame");
             if step <= 180 {
                 let spinning_blocks = frame.boxes[FIRST_BLOCK_INDEX..]
@@ -358,6 +358,14 @@ mod tests {
                 projectile_passed_front_face |=
                     frame.boxes[PROJECTILE_INDEX].state.center.x > TOWER_SCALE;
             }
+            assert_eq!(frame.boxes.len(), TOWER_BODY_COUNT);
+            crate::physics_trace::record(
+                "tower",
+                step,
+                &frame.boxes,
+                Some(frame.stats.sampled_events),
+                Some(frame.stats.tail_contacts),
+            );
             assert_no_floor_penetration(frame, step);
         }
 

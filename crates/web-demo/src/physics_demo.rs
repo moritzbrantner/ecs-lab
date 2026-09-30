@@ -639,6 +639,19 @@ mod tests {
     };
 
     #[test]
+    #[ignore = "full physical consumer trace for engine-pin and persistent-lifetime comparisons"]
+    fn playground_physical_trace_acceptance() {
+        let mut state = PhysicsDemoState::new().expect("valid playground");
+        for step in 0..=600 {
+            let frame = state
+                .ensure_frame(step)
+                .expect("complete playground interval");
+            crate::physics_trace::record("playground", step, &frame.boxes, None, None);
+            assert_eq!(frame.boxes.len(), 54);
+        }
+    }
+
+    #[test]
     fn repeated_rotating_browser_scenario_constructs_every_authoritative_frame() {
         let mut state = PhysicsDemoState::new().expect("valid committed browser scenario");
 

@@ -4,6 +4,9 @@ set -euo pipefail
 rustup target add wasm32-unknown-unknown
 cargo test --locked -p ecs-web-demo
 cargo build --locked --release -p ecs-web-demo --target wasm32-unknown-unknown
+node scripts/record-rotating-consumers-wasm.mjs \
+  target/wasm32-unknown-unknown/release/ecs_web_demo.wasm \
+  target/rotating-consumer-wasm-trace.json
 
 if ! command -v wasm-bindgen >/dev/null 2>&1 || ! wasm-bindgen --version | grep -q '0.2.127'; then
   cargo install wasm-bindgen-cli --version 0.2.127 --locked

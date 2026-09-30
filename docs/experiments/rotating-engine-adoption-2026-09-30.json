@@ -1,0 +1,158 @@
+{
+  "schema_version": 1,
+  "date": "2026-09-30",
+  "boundary": "Engine pin adoption; existing fresh-world adapter and integer export API retained",
+  "convention_source_revision": "e6acb5310afaf15c0cba24f87108f5f4ad1bedc3",
+  "old_engine_pin": "9635eb79cd72c3308f26a5d9840e88fc34fb7535",
+  "new_engine_pin": "221bf2e08cca0955b3c34b780b89ec12f191f070",
+  "producers": {
+    "old_native_and_wasm": "490583f716c2ac1f90608a2eeb7a5fee5a6e92f0",
+    "matched_new_native_and_wasm": "3b8799d02ea4fa6d750cf85cdd9ee3ee0a9a35a7",
+    "full_tower_native_and_wasm_driver": "1010b0d9b822755ac35d2f9a957885948232dafe",
+    "final_room_native_source": "1010b0d9b822755ac35d2f9a957885948232dafe"
+  },
+  "environment": {
+    "rustc": "1.98.0 (88d9e12ae 2026-08-18)",
+    "native_target": "x86_64-unknown-linux-gnu",
+    "wasm_target": "wasm32-unknown-unknown",
+    "platform": "Linux-7.0.0-34-generic-x86_64-with-glibc2.43",
+    "node": "v24.16.0",
+    "environment_verify": "passed",
+    "wasm_bindgen": "0.2.127 isolated install",
+    "browser": "Chromium 1200 / Playwright 1.57; Canvas fallback; no WebGPU adapter"
+  },
+  "native_pin_comparison": {
+    "playground": {
+      "frames": 601,
+      "bodies_per_frame": 54,
+      "metadata_differences": 0,
+      "changed_frames": 574,
+      "differing_body_rows": {
+        "position": 27499,
+        "linear_velocity": 25949,
+        "orientation": 27549,
+        "angular_velocity": 25179
+      },
+      "first_difference": {
+        "frame": 27,
+        "entity": 0,
+        "field": "position",
+        "old": [
+          -60481,
+          8804,
+          -29519
+        ],
+        "new": [
+          -60480,
+          8803,
+          -29520
+        ]
+      },
+      "different_event_counter_frames": null
+    },
+    "tower": {
+      "frames": 241,
+      "bodies_per_frame": 32,
+      "metadata_differences": 0,
+      "changed_frames": 203,
+      "differing_body_rows": {
+        "position": 6293,
+        "linear_velocity": 6293,
+        "orientation": 6293,
+        "angular_velocity": 6293
+      },
+      "first_difference": {
+        "frame": 38,
+        "entity": 1,
+        "field": "position",
+        "old": [
+          -10196,
+          21528,
+          6
+        ],
+        "new": [
+          -10198,
+          21526,
+          9
+        ]
+      },
+      "different_event_counter_frames": 203
+    }
+  },
+  "native_wasm_playground_comparison": {
+    "per_pin_body_projections": 32454,
+    "old_differences": 0,
+    "new_differences": 0,
+    "fields": [
+      "identity",
+      "kind",
+      "extents",
+      "mass",
+      "material",
+      "position",
+      "orientation",
+      "angular_velocity"
+    ],
+    "conversion": "Exact public f32 casts/division; spatial scale 3600, quaternion scale 1073741824",
+    "linear_velocity": "not exported",
+    "bounds": "finite-checked in WASM, not compared"
+  },
+  "full_new_pin_acceptance": {
+    "native_playground_frames": 601,
+    "native_tower_frames": 481,
+    "wasm_frames": 1082,
+    "tower_original_quality_assertions": "passed through 480",
+    "browser_playground_endpoint": 600,
+    "browser_tower_endpoint": 480,
+    "browser_page_errors": [],
+    "workspace_tests_passed": 172,
+    "workspace_tests_ignored": 2,
+    "clippy": "passed",
+    "fmt": "passed",
+    "pages": "passed"
+  },
+  "limitations": [
+    "No old tower comparison beyond frame 240",
+    "Playground sampled/tail counters are unobserved; early raw traces have zero placeholders",
+    "Validation elapsed times are not isolated benchmarks; no speedup claim",
+    "Lifetime adaptation and floating-state consumer migration remain separate work"
+  ],
+  "artifact_hashes": {
+    "old-pin.wasm": {
+      "sha256": "f91c140f2ba68cfc2e96fa8c37924cdfcc353781e8e9f1b1aa91b364ef2b1ac4"
+    },
+    "new-pin.wasm": {
+      "sha256": "62444a60dfa2987156b27ea58111a1d4247406c4fa06def33bc5e5e42923ad5f"
+    },
+    "old-pin-playground-trace.json": {
+      "sha256": "61139dc669c2d03f8b07fbf3fa5e60aed28587c417f9f4c5c665798df56961ec"
+    },
+    "old-pin-tower-trace.json": {
+      "sha256": "9f8b6692db6bd2a9282c5372a2704f4cd24e9488c53817454e589cf223c34fd9"
+    },
+    "new-pin-playground-trace.json": {
+      "sha256": "39d1c0506515ed102c47c36932bf5224abcd10110eb2c5f60f93684332cb38a5"
+    },
+    "new-pin-tower-trace.json": {
+      "sha256": "3f9feeaab9b553bc6ec94ced81dc3ffb61eb8368d7bfd6b40f71160695e168e3"
+    },
+    "old-pin-wasm-trace.json": {
+      "sha256": "9d2858586ddcdf9734266381a5ea457c4c7853e934d6684b151e043f0031e74c"
+    },
+    "new-pin-wasm-trace.json": {
+      "sha256": "7126dcf4c67c3b266c3caeaf9fec728d812e2d6f0c6799f0bf5979b1c7adf362"
+    },
+    "new-pin-wasm-full-trace.json": {
+      "sha256": "c98855d60fe3a3b2ce8e561f2f49e27d5ddacd556dae56e12787204c44b968f3"
+    },
+    "new-pin-tower-full-trace.log": {
+      "sha256": "e3b267638f6632812619197a4b76010224d7020c000349bf0c0352941d101624"
+    },
+    "new-pin-playground-final-trace.log": {
+      "sha256": "a4c8bcf04c728a227f23851f78bd5494b0f8fac8517b7d6dbbe3035c396f40e9"
+    },
+    "browser-tower.png": {
+      "sha256": "c0385214c3b9e4dfccabcd97c9d0038413363d09ef167eb704e51a774d77f080"
+    }
+  }
+}
