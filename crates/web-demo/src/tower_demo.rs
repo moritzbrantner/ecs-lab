@@ -358,6 +358,14 @@ mod tests {
                 projectile_passed_front_face |=
                     frame.boxes[PROJECTILE_INDEX].state.center.x > TOWER_SCALE;
             }
+            assert_eq!(frame.boxes.len(), TOWER_BODY_COUNT);
+            crate::physics_trace::record(
+                "tower",
+                step,
+                &frame.boxes,
+                frame.stats.sampled_events,
+                frame.stats.tail_contacts,
+            );
             assert_no_floor_penetration(frame, step);
         }
 
