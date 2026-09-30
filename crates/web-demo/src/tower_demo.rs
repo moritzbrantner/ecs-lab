@@ -363,8 +363,8 @@ mod tests {
                 "tower",
                 step,
                 &frame.boxes,
-                frame.stats.sampled_events,
-                frame.stats.tail_contacts,
+                Some(frame.stats.sampled_events),
+                Some(frame.stats.tail_contacts),
             );
             assert_no_floor_penetration(frame, step);
         }

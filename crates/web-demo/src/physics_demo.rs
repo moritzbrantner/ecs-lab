@@ -646,7 +646,7 @@ mod tests {
             let frame = state
                 .ensure_frame(step)
                 .expect("complete playground interval");
-            crate::physics_trace::record("playground", step, &frame.boxes, 0, 0);
+            crate::physics_trace::record("playground", step, &frame.boxes, None, None);
             assert_eq!(frame.boxes.len(), 54);
         }
     }

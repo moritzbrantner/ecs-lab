@@ -8,8 +8,8 @@ pub(crate) fn record(
     scene: &str,
     step: u32,
     boxes: &[RigidBox3d],
-    sampled_events: usize,
-    tail_contacts: usize,
+    sampled_events: Option<usize>,
+    tail_contacts: Option<usize>,
 ) {
     let rows = boxes
         .iter()
@@ -43,6 +43,10 @@ pub(crate) fn record(
             ]
         })
         .collect::<Vec<_>>();
+    // Playground frames do not retain step reports; unobserved work is distinct from zero.
+    let sampled_events =
+        sampled_events.map_or_else(|| "null".to_owned(), |count| count.to_string());
+    let tail_contacts = tail_contacts.map_or_else(|| "null".to_owned(), |count| count.to_string());
     println!(
         "PHYSICAL_TRACE {{\"scene\":\"{scene}\",\"step\":{step},\"sampled_events\":{sampled_events},\"tail_contacts\":{tail_contacts},\"boxes\":{rows:?}}}"
     );
