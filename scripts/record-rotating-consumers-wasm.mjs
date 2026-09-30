@@ -3,16 +3,16 @@ import {readFile, writeFile} from 'node:fs/promises';
 const [modulePath, outputPath] = process.argv.slice(2);
 assert(modulePath && outputPath, "usage: node scripts/record-rotating-consumers-wasm.mjs <ecs-web-demo.wasm> <output.json>");
 const {instance} = await WebAssembly.instantiate(await readFile(modulePath), {});
-const e = instance.exports;
+const physics = instance.exports;
 const rows=[];
-assert.equal(e.physics_demo_max_steps(), 600);
+assert.equal(physics.physics_demo_max_steps(), 600);
 let fixed;
 for(let step=0; step<=600; step++) {
-  const count=e.physics_demo_body_count(step);
+  const count=physics.physics_demo_body_count(step);
   assert.equal(count,54,`playground frame ${step}`);
   const boxes=[];
   for(let body=0; body<count; body++) {
-    const get = name => e[`physics_demo_${name}`](body,step);
+    const get = name => physics[`physics_demo_${name}`](body,step);
     const p=['x','y','z'].map(axis=>get(`position_${axis}`));
     const q=['x','y','z','w'].map(axis=>get(`orientation_${axis}`));
     const omega=['x','y','z'].map(axis=>get(`angular_velocity_${axis}`));
@@ -25,17 +25,17 @@ for(let step=0; step<=600; step++) {
   const fixedNow=boxes.filter(b=>b.fixed);
   if(step===0) fixed=fixedNow;
   else assert.deepEqual(fixedNow,fixed,`fixed playground walls at ${step}`);
-  rows.push({scene:'playground',step,boxes,overlaps:e.physics_demo_overlap_count(step)});
+  rows.push({scene:'playground',step,boxes,overlaps:physics.physics_demo_overlap_count(step)});
 }
-assert.equal(e.physics_tower_demo_max_steps(),480);
-assert.equal(e.physics_tower_demo_body_count(),32);
+assert.equal(physics.physics_tower_demo_max_steps(),480);
+assert.equal(physics.physics_tower_demo_body_count(),32);
 let floor;
-for(let step=0; step<=240; step++) {
+for(let step=0; step<=480; step++) {
   const vertices=[];
   for(let body=0;body<32;body++) {
     const corners=[];
     for(let vertex=0;vertex<8;vertex++) {
-      const xyz=['x','y','z'].map(axis=>e[`physics_tower_demo_vertex_${axis}`](body,vertex,step));
+      const xyz=['x','y','z'].map(axis=>physics[`physics_tower_demo_vertex_${axis}`](body,vertex,step));
       assert(xyz.every(Number.isFinite));
       corners.push(xyz);
     }
@@ -45,7 +45,7 @@ for(let step=0; step<=240; step++) {
     floor=vertices[0];
     assert(floor.flat().some(v=>v!==0));
   } else assert.deepEqual(vertices[0],floor,`tower floor/default-failure sentinel at ${step}`);
-  rows.push({scene:'tower',step,vertices,spinning:e.physics_tower_demo_spinning_bodies(step),sampled_events:e.physics_tower_demo_sampled_events(step),tail_contacts:e.physics_tower_demo_tail_contacts(step)});
+  rows.push({scene:'tower',step,vertices,spinning:physics.physics_tower_demo_spinning_bodies(step),sampled_events:physics.physics_tower_demo_sampled_events(step),tail_contacts:physics.physics_tower_demo_tail_contacts(step)});
 }
 await writeFile(outputPath,JSON.stringify(rows)+'\n');
 console.log(`Actual WASM consumer projection: ${rows.length} valid frames; playground fixed walls and tower floor sentinel retained.`);

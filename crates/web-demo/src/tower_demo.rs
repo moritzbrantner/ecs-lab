@@ -347,7 +347,7 @@ mod tests {
         let mut maximum_spinning_blocks = 0_usize;
         let mut projectile_passed_front_face = false;
 
-        for step in 0..=240 {
+        for step in 0..=TOWER_DEMO_MAX_STEPS {
             let frame = state.ensure_frame(step).expect("valid tower frame");
             if step <= 180 {
                 let spinning_blocks = frame.boxes[FIRST_BLOCK_INDEX..]
