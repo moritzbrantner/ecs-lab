@@ -219,7 +219,7 @@ pub fn run_reuse_scenario(cycles: u32, batch_size: u32) -> ReuseEvidence {
         }
 
         if cycle + 1 < cycles {
-            previous_handles = live_handles.clone();
+            previous_handles.clone_from(&live_handles);
             for &handle in &live_handles {
                 assert!(arena.despawn(handle).is_ok());
             }
