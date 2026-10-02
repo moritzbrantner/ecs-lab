@@ -1,8 +1,8 @@
 use std::{hint::black_box, time::Instant};
 
 use ecs_hybrid_storage::{
-    replay_archetype_status_scenario, replay_hybrid_status_scenario,
-    replay_sparse_status_scenario, run_status_churn_scenario, HybridSnapshot,
+    HybridSnapshot, replay_archetype_status_scenario, replay_hybrid_status_scenario,
+    replay_sparse_status_scenario, run_status_churn_scenario,
 };
 
 const CASES: &[(u32, u32)] = &[(4, 0), (4, 64), (4, 256), (16, 512)];
@@ -70,8 +70,7 @@ fn main() -> Result<(), String> {
             for (implementation, replay) in [
                 (
                     "archetype",
-                    replay_archetype_status_scenario
-                        as fn(u32, u32, u32, u32) -> HybridSnapshot,
+                    replay_archetype_status_scenario as fn(u32, u32, u32, u32) -> HybridSnapshot,
                 ),
                 ("hybrid", replay_hybrid_status_scenario),
                 ("sparse", replay_sparse_status_scenario),
