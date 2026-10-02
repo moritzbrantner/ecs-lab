@@ -6,6 +6,7 @@
     "technologies": ["rust"],
     "args": [
       "clippy",
+      "--frozen",
       "--all-features",
       "--",
       "-D",
