@@ -164,6 +164,37 @@ impl ArchetypeWorld {
         Ok(())
     }
 
+    /// Spawns an entity directly into its final component-shape table.
+    ///
+    /// This is intended for commit boundaries where the intermediate empty/partial entity states are
+    /// not observable. It avoids structural table migrations during bulk construction.
+    ///
+    /// # Errors
+    ///
+    /// Returns `WorkloadError::EntityAlreadyExists` if the logical entity already exists.
+    pub fn spawn_bundle(
+        &mut self,
+        entity: EntityId,
+        position: Option<Position>,
+        velocity: Option<Velocity>,
+    ) -> Result<(), WorkloadError> {
+        if self.locations.contains_key(&entity) {
+            return Err(WorkloadError::EntityAlreadyExists(entity));
+        }
+
+        let (table, index) = match (position, velocity) {
+            (None, None) => (TableKind::Empty, self.empty.push(entity)),
+            (Some(position), None) => (TableKind::Position, self.positions.push(entity, position)),
+            (None, Some(velocity)) => (TableKind::Velocity, self.velocities.push(entity, velocity)),
+            (Some(position), Some(velocity)) => (
+                TableKind::Motion,
+                self.motion.push(entity, position, velocity),
+            ),
+        };
+        self.set_location(entity, table, index);
+        Ok(())
+    }
+
     /// Projects the observable world in canonical entity-id order.
     ///
     /// The ordered location map is keyed by entity id, so snapshotting reuses that live index instead
@@ -260,19 +291,7 @@ impl ArchetypeWorld {
     }
 
     fn spawn(&mut self, entity: EntityId) -> Result<(), WorkloadError> {
-        if self.locations.contains_key(&entity) {
-            return Err(WorkloadError::EntityAlreadyExists(entity));
-        }
-
-        let index = self.empty.push(entity);
-        self.locations.insert(
-            entity,
-            Location {
-                table: TableKind::Empty,
-                index,
-            },
-        );
-        Ok(())
+        self.spawn_bundle(entity, None, None)
     }
 
     fn despawn(&mut self, entity: EntityId) -> Result<(), WorkloadError> {

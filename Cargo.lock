@@ -64,6 +64,52 @@ dependencies = [
 ]
 
 [[package]]
+name = "ecs-change-tracking"
+version = "0.1.0"
+dependencies = [
+ "ecs-workload",
+]
+
+[[package]]
+name = "ecs-chunked"
+version = "0.1.0"
+dependencies = [
+ "ecs-reference",
+ "ecs-workload",
+]
+
+[[package]]
+name = "ecs-command-buffer"
+version = "0.1.0"
+dependencies = [
+ "ecs-archetype",
+ "ecs-workload",
+]
+
+[[package]]
+name = "ecs-enableable"
+version = "0.1.0"
+dependencies = [
+ "ecs-workload",
+]
+
+[[package]]
+name = "ecs-generational"
+version = "0.1.0"
+dependencies = [
+ "ecs-workload",
+]
+
+[[package]]
+name = "ecs-hybrid-storage"
+version = "0.1.0"
+dependencies = [
+ "ecs-sparse-index",
+ "ecs-sparse-set",
+ "ecs-workload",
+]
+
+[[package]]
 name = "ecs-physics"
 version = "0.1.0"
 dependencies = [
@@ -115,6 +161,13 @@ dependencies = [
  "ecs-physics-scenarios",
  "ecs-reference",
  "ecs-sparse-set",
+ "ecs-workload",
+]
+
+[[package]]
+name = "ecs-scheduler"
+version = "0.1.0"
+dependencies = [
  "ecs-workload",
 ]
 

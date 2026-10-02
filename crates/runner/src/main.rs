@@ -270,9 +270,9 @@ fn verify_mixed_motion_evidence(workload: &Workload) {
         cached_work.component_lookups, 0,
         "mixed-motion cached query should avoid per-row component lookups"
     );
-    assert!(
-        archetype_work.integration_rows_scanned < sparse_work.integration_rows_scanned,
-        "mixed-motion fixture must expose archetype row-locality work reduction"
+    assert_eq!(
+        sparse_work.integration_rows_scanned, archetype_work.integration_rows_scanned,
+        "mixed-motion sparse query must scan exactly the participating rows after selectivity-aware driving"
     );
     assert!(
         sparse_work.component_lookups > 0 && archetype_work.component_lookups == 0,
