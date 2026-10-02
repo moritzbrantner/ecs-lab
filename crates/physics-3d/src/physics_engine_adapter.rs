@@ -1,22 +1,33 @@
-use std::{collections::BTreeMap, fmt};
+use std::fmt;
+
+#[cfg(any(test, feature = "rebuild-reference"))]
+use std::collections::BTreeMap;
 
 use ecs_physics::{BodyKind, MATERIAL_SCALE};
 use ecs_workload::{EntityId, Position, Velocity};
 use physics_engine::{
     AngularState3d as EngineAngularState3d, AngularVelocity3d as EngineAngularVelocity3d,
-    BodyId as EngineBodyId, MAX_REPEATED_ROTATING_EVENTS as ENGINE_MAX_REPEATED_ROTATING_EVENTS,
-    Material as EngineMaterial, Orientation3d as EngineOrientation3d,
+    BodyId as EngineBodyId, Material as EngineMaterial, Orientation3d as EngineOrientation3d,
     OrientedBoxError3d as EngineOrientedBoxError3d, RigidBody as EngineRigidBody,
     RigidBox3d as EngineRigidBox3d, RigidBoxError3d as EngineRigidBoxError3d,
-    RotatingWorld3d as EngineRotatingWorld3d, RotatingWorldConfig3d as EngineRotatingWorldConfig3d,
     RotatingWorldError3d as EngineRotatingWorldError3d, Vec3i as EngineVec3i,
     obb_contact_seed as engine_obb_contact_seed,
 };
 
 use crate::{
-    AngularState3d, AngularSubstepError3d, AngularSubstepPolicy3d, AngularVelocity3d,
-    Orientation3d, RigidBox3d, RigidBoxState3d, RigidBoxWorldConfig3d,
-    RotatingContactSearchConfig3d, required_angular_substeps,
+    AngularState3d, AngularSubstepError3d, AngularVelocity3d, Orientation3d, PhysicsBody3d,
+    RigidBox3d, RigidBoxState3d,
+};
+
+#[cfg(any(test, feature = "rebuild-reference"))]
+use crate::{
+    AngularSubstepPolicy3d, RigidBoxWorldConfig3d, RotatingContactSearchConfig3d,
+    required_angular_substeps,
+};
+#[cfg(any(test, feature = "rebuild-reference"))]
+use physics_engine::{
+    MAX_REPEATED_ROTATING_EVENTS as ENGINE_MAX_REPEATED_ROTATING_EVENTS,
+    RotatingWorld3d as EngineRotatingWorld3d, RotatingWorldConfig3d as EngineRotatingWorldConfig3d,
 };
 
 /// Result of one ECS-facing frame advanced by the standalone `physics-engine` rotating world.
@@ -35,6 +46,12 @@ pub struct PhysicsEngineAdapterStep3d {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PhysicsEngineAdapterError3d {
     DuplicateEntity(EntityId),
+    MissingEntity(EntityId),
+    MetadataIdentityChange {
+        expected: EntityId,
+        actual: EntityId,
+    },
+    BodyIdExhausted,
     CoordinateOutOfRange(EntityId),
     RestitutionOutOfRange(EntityId, u16),
     FrictionOutOfRange(EntityId, u16),
@@ -45,11 +62,24 @@ pub enum PhysicsEngineAdapterError3d {
     EngineBody(EngineRigidBoxError3d),
     EngineGeometry(EngineOrientedBoxError3d),
     EngineWorld(EngineRotatingWorldError3d),
+    EngineInterval(physics_engine::RotatingIntervalError3d),
 }
 
 impl fmt::Display for PhysicsEngineAdapterError3d {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::MissingEntity(entity) => {
+                write!(formatter, "no physics mapping for entity {}", entity.0)
+            }
+            Self::MetadataIdentityChange { expected, actual } => write!(
+                formatter,
+                "entity {} metadata cannot change identity to {}; use remap",
+                expected.0, actual.0
+            ),
+            Self::BodyIdExhausted => formatter.write_str("physics body identity space exhausted"),
+            Self::EngineInterval(error) => {
+                write!(formatter, "physics-engine interval failed: {error}")
+            }
             Self::DuplicateEntity(entity) => {
                 write!(
                     formatter,
@@ -178,6 +208,7 @@ pub fn physics_engine_boxes_penetrate(
 /// Returns [`PhysicsEngineAdapterError3d`] when ECS state cannot be represented by the standalone engine,
 /// material/damping bounds are invalid, the angular substep policy rejects the frame, or the engine fails
 /// closed while advancing the world.
+#[cfg(any(test, feature = "rebuild-reference"))]
 pub fn step_rigid_box_world_with_physics_engine(
     boxes: &[RigidBox3d],
     config: RigidBoxWorldConfig3d,
@@ -206,7 +237,7 @@ pub fn step_rigid_box_world_with_physics_engine(
     });
 
     for rigid_box in boxes {
-        validate_material(rigid_box)?;
+        validate_material(rigid_box.body)?;
         if source_bodies
             .insert(rigid_box.body.entity.0, *rigid_box)
             .is_some()
@@ -240,11 +271,14 @@ pub fn step_rigid_box_world_with_physics_engine(
             )
             .copied()
             .ok_or(PhysicsEngineAdapterError3d::MissingSourceBody(id))?;
-        converted.push(from_engine_box(
-            engine_box,
-            source,
-            config.angular_damping_milli,
-        )?);
+        let mut projected = from_engine_box(engine_box, source.body, source.state.linear_velocity);
+        if source.body.kind == BodyKind::Dynamic {
+            projected.state.angular.angular_velocity = damp_angular_velocity(
+                projected.state.angular.angular_velocity,
+                config.angular_damping_milli,
+            )?;
+        }
+        converted.push(projected);
     }
 
     Ok(PhysicsEngineAdapterStep3d {
@@ -255,17 +289,17 @@ pub fn step_rigid_box_world_with_physics_engine(
     })
 }
 
-fn validate_material(rigid_box: &RigidBox3d) -> Result<(), PhysicsEngineAdapterError3d> {
-    let material = rigid_box.body.material;
+pub(crate) fn validate_material(body: PhysicsBody3d) -> Result<(), PhysicsEngineAdapterError3d> {
+    let material = body.material;
     if material.restitution_milli > MATERIAL_SCALE {
         return Err(PhysicsEngineAdapterError3d::RestitutionOutOfRange(
-            rigid_box.body.entity,
+            body.entity,
             material.restitution_milli,
         ));
     }
     if material.friction_milli > MATERIAL_SCALE {
         return Err(PhysicsEngineAdapterError3d::FrictionOutOfRange(
-            rigid_box.body.entity,
+            body.entity,
             material.friction_milli,
         ));
     }
@@ -273,13 +307,14 @@ fn validate_material(rigid_box: &RigidBox3d) -> Result<(), PhysicsEngineAdapterE
 }
 
 fn to_engine_box(rigid_box: RigidBox3d) -> Result<EngineRigidBox3d, PhysicsEngineAdapterError3d> {
-    let entity = rigid_box.body.entity;
-    let id = EngineBodyId(u64::from(entity.0));
-    let position = EngineVec3i::new(
-        coordinate_to_i32(entity, rigid_box.state.center.x)?,
-        coordinate_to_i32(entity, rigid_box.state.center.y)?,
-        coordinate_to_i32(entity, rigid_box.state.center.z)?,
-    );
+    to_engine_box_with_id(rigid_box, EngineBodyId(u64::from(rigid_box.body.entity.0)))
+}
+
+pub(crate) fn to_engine_box_with_id(
+    rigid_box: RigidBox3d,
+    id: EngineBodyId,
+) -> Result<EngineRigidBox3d, PhysicsEngineAdapterError3d> {
+    let position = engine_position(rigid_box.body.entity, rigid_box.state.center)?;
     let velocity = engine_velocity(rigid_box.state.linear_velocity);
     let half_extents = EngineVec3i::new(
         rigid_box.body.half_extents[0],
@@ -312,15 +347,15 @@ fn to_engine_box(rigid_box: RigidBox3d) -> Result<EngineRigidBox3d, PhysicsEngin
     EngineRigidBox3d::new(body, angular).map_err(Into::into)
 }
 
-fn from_engine_box(
+pub(crate) fn from_engine_box(
     engine_box: &EngineRigidBox3d,
-    source: RigidBox3d,
-    damping_milli: u16,
-) -> Result<RigidBox3d, PhysicsEngineAdapterError3d> {
+    source: PhysicsBody3d,
+    fixed_velocity: Velocity,
+) -> RigidBox3d {
     let body = engine_box.body();
     let angular = engine_box.angular();
-    let linear_velocity = if source.body.kind == BodyKind::Fixed {
-        source.state.linear_velocity
+    let linear_velocity = if source.kind == BodyKind::Fixed {
+        fixed_velocity
     } else {
         Velocity::new3(body.velocity().x, body.velocity().y, body.velocity().z)
     };
@@ -329,13 +364,8 @@ fn from_engine_box(
         angular.angular_velocity.y,
         angular.angular_velocity.z,
     );
-    let angular_velocity = if source.body.kind == BodyKind::Dynamic {
-        damp_angular_velocity(angular_velocity, damping_milli)?
-    } else {
-        angular_velocity
-    };
-    Ok(RigidBox3d::new(
-        source.body,
+    RigidBox3d::new(
+        source,
         RigidBoxState3d::new(
             Position::new3(
                 i64::from(body.position().x),
@@ -353,6 +383,17 @@ fn from_engine_box(
                 angular_velocity,
             ),
         ),
+    )
+}
+
+pub(crate) fn engine_position(
+    entity: EntityId,
+    position: Position,
+) -> Result<EngineVec3i, PhysicsEngineAdapterError3d> {
+    Ok(EngineVec3i::new(
+        coordinate_to_i32(entity, position.x)?,
+        coordinate_to_i32(entity, position.y)?,
+        coordinate_to_i32(entity, position.z)?,
     ))
 }
 
@@ -360,10 +401,11 @@ fn coordinate_to_i32(entity: EntityId, value: i64) -> Result<i32, PhysicsEngineA
     i32::try_from(value).map_err(|_| PhysicsEngineAdapterError3d::CoordinateOutOfRange(entity))
 }
 
-fn engine_velocity(velocity: Velocity) -> EngineVec3i {
+pub(crate) fn engine_velocity(velocity: Velocity) -> EngineVec3i {
     EngineVec3i::new(velocity.x, velocity.y, velocity.z)
 }
 
+#[cfg(any(test, feature = "rebuild-reference"))]
 fn damp_angular_velocity(
     velocity: AngularVelocity3d,
     damping_milli: u16,
@@ -375,6 +417,7 @@ fn damp_angular_velocity(
     ))
 }
 
+#[cfg(any(test, feature = "rebuild-reference"))]
 fn damp_axis(value: i32, damping_milli: u16) -> Result<i32, PhysicsEngineAdapterError3d> {
     let numerator = i128::from(value)
         .checked_mul(i128::from(damping_milli))
@@ -383,6 +426,7 @@ fn damp_axis(value: i32, damping_milli: u16) -> Result<i32, PhysicsEngineAdapter
     i32::try_from(damped).map_err(|_| PhysicsEngineAdapterError3d::ArithmeticOverflow)
 }
 
+#[cfg(any(test, feature = "rebuild-reference"))]
 fn div_round_nearest(
     numerator: i128,
     denominator: i128,

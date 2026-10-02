@@ -4,10 +4,6 @@
 
 - Place a test at the lowest source-tree directory containing all production code it covers.
 
-## TEST-002 — Validate tests bottom-up
-
-- Validate from the narrowest affected scope outward; re-run lower layers after production-code fixes.
-
 ## TEST-003 — Keep test scope separate from test kind
 
 - Use location for coverage scope and independent names or metadata for execution kind.
@@ -20,12 +16,15 @@
 ## TEST-005 — Behavior changes require executable evidence
 
 - Add or update the smallest automated test that would fail without a behavior change or bug fix.
+- For a bug fix, first add the test that reproduces the bug and fails, then fix it.
 
 ## TEST-006 — Prefer stable public behavior seams
 
 - Test through the highest practical stable interface that exercises the real behavior.
 - Callers and tests should normally cross the same seam; avoid coupling tests to private structure when a public seam can prove the behavior.
-- Add a lower-level test when an important owned rule cannot be exercised reliably through the higher interface, or when narrower evidence materially improves deterministic isolation or fault localization; do not add it merely to mirror implementation structure.
+- Maintain an executable verification path through important public behavior and into application-owned decision logic where narrower evidence materially improves determinism, coverage of owned rules, or fault localization.
+- Add a lower-level test when an important owned rule cannot be exercised reliably through the higher interface, or when narrower evidence materially improves deterministic isolation or diagnosis; do not add it merely to mirror implementation structure.
+- Stop at trusted library or framework behavior unless the repository owns an adapter contract at that boundary; do not mirror every function or call-graph edge merely to manufacture coverage.
 
 ## TEST-007 — Infer testing strategy from the repository before inventing one
 
@@ -91,12 +90,6 @@
 - Transaction rollback is preferred when it faithfully represents behavior and provides cheap isolation.
 - Tests involving commits, transaction boundaries, concurrency, migrations, connection behavior, or persistence across sessions use isolated schemas/databases/containers instead of a wrapping transaction that would change the behavior being tested.
 
-## TEST-018 — Maintain a verification path through owned behavior
-
-- Important public behavior should have executable evidence at a stable boundary and enough lower-level evidence to isolate important owned rules, branches, or failure modes beneath it.
-- Continue the verification path through application-owned decision logic where narrower tests materially improve determinism or diagnosis; stop at trusted library or framework behavior unless an adapter contract is owned by the repository.
-- Do not translate this into testing every function, mirroring every call graph edge, or mocking implementation details merely to manufacture coverage.
-
 ## TEST-019 — Verify browser-specific risk at the browser boundary
 
 - Use real-browser verification when the changed behavior materially depends on browser semantics such as layout, scrolling, pointer geometry, media, browser APIs, or navigation that a lower layer cannot prove reliably.
@@ -113,3 +106,11 @@
 - A browser failure that crosses a mocked or stubbed network boundary is not sufficient evidence of a product defect until the double preserves the production protocol semantics that materially affect the behavior.
 - Match relevant request methods, statuses, headers, bodies, and stateful or streaming behavior such as redirects, cookies or authentication, CORS or cache handling, byte ranges and partial-content responses, downloads, SSE, or WebSockets.
 - Prefer a deterministic real local service when it is cheap; otherwise use the smallest protocol-faithful double. Do not change product code merely to compensate for an unrealistic browser fixture.
+
+## TEST-022 — Differentially verify alternative execution mechanics
+
+- Apply `PRINCIPLE-010` for the semantic-equivalence and state-transition requirements when production mechanics differ from a simple reference.
+- Use one deterministic differential/property/sequence harness to exercise both paths through comparable stable seams; compare observable results rather than private implementation structure.
+- Keep the oracle independent enough that it does not reuse the optimization machinery whose correctness it is intended to check.
+- Keep cheap differential/oracle cases in the ordinary deterministic test gate; place larger generated, stress, or exhaustive cases in an explicitly broader tier rather than omitting the evidence.
+- Do not create a duplicate implementation merely for test symmetry when the semantics are trivial, the repository does not own them, or a trusted external/reference contract already provides a suitable oracle.

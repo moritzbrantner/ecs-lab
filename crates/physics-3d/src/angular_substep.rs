@@ -2,7 +2,7 @@ use std::fmt;
 
 use ecs_physics::BodyKind;
 
-use crate::{RigidBox3d, RigidBoxWorldConfig3d};
+use crate::{AngularVelocity3d, RigidBox3d, RigidBoxWorldConfig3d};
 
 /// Maximum bounded angular substeps accepted by the ECS-to-engine adapter policy.
 pub const MAX_ANGULAR_SUBSTEPS: u8 = 16;
@@ -82,6 +82,21 @@ pub fn required_angular_substeps(
     config: RigidBoxWorldConfig3d,
     policy: AngularSubstepPolicy3d,
 ) -> Result<u8, AngularSubstepError3d> {
+    required_substeps_for_velocities(
+        boxes
+            .iter()
+            .filter(|body| body.body.kind == BodyKind::Dynamic)
+            .map(|body| body.state.angular.angular_velocity),
+        config,
+        policy,
+    )
+}
+
+pub(crate) fn required_substeps_for_velocities(
+    mut velocities: impl Iterator<Item = AngularVelocity3d>,
+    config: RigidBoxWorldConfig3d,
+    policy: AngularSubstepPolicy3d,
+) -> Result<u8, AngularSubstepError3d> {
     validate_policy(policy)?;
     if config.timestep_numerator < 0 {
         return Err(AngularSubstepError3d::NegativeTimestepNumerator(
@@ -94,14 +109,11 @@ pub fn required_angular_substeps(
         ));
     }
 
-    let maximum_speed = boxes
-        .iter()
-        .filter(|rigid_box| rigid_box.body.kind == BodyKind::Dynamic)
-        .try_fold(0_u128, |maximum, rigid_box| {
-            angular_l1_units(rigid_box)
-                .map(|speed| maximum.max(speed))
-                .ok_or(AngularSubstepError3d::ArithmeticOverflow)
-        })?;
+    let maximum_speed = velocities.try_fold(0_u128, |maximum, velocity| {
+        angular_l1_units(velocity)
+            .map(|speed| maximum.max(speed))
+            .ok_or(AngularSubstepError3d::ArithmeticOverflow)
+    })?;
     if maximum_speed == 0 || config.timestep_numerator == 0 {
         return Ok(1);
     }
@@ -139,8 +151,7 @@ fn validate_policy(policy: AngularSubstepPolicy3d) -> Result<(), AngularSubstepE
     Ok(())
 }
 
-fn angular_l1_units(rigid_box: &RigidBox3d) -> Option<u128> {
-    let velocity = rigid_box.state.angular.angular_velocity;
+fn angular_l1_units(velocity: AngularVelocity3d) -> Option<u128> {
     u128::from(velocity.x.unsigned_abs())
         .checked_add(u128::from(velocity.y.unsigned_abs()))?
         .checked_add(u128::from(velocity.z.unsigned_abs()))
