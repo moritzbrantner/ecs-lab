@@ -393,10 +393,7 @@ mod tests {
         let rounds = 8_u32;
         for (stride, toggles) in [(1, 0), (4, 0), (16, 0), (0, 0), (4, 256), (16, 512)] {
             let evidence = run_toggle_scenario(entity_count, rounds, stride, toggles);
-            assert_eq!(
-                evidence.stats.mask_words_scanned,
-                16 * u64::from(rounds)
-            );
+            assert_eq!(evidence.stats.mask_words_scanned, 16 * u64::from(rounds));
             assert_eq!(
                 evidence.stats.structural_migrations,
                 evidence.stats.toggle_changes
@@ -417,7 +414,10 @@ mod tests {
     fn dedicated_replays_match_lockstep_evidence() {
         for (stride, toggles) in [(1, 0), (4, 0), (0, 0), (4, 32)] {
             let expected = run_toggle_scenario(128, 4, stride, toggles).snapshot;
-            assert_eq!(replay_structural_scenario(128, 4, stride, toggles), expected);
+            assert_eq!(
+                replay_structural_scenario(128, 4, stride, toggles),
+                expected
+            );
             assert_eq!(replay_mask_scenario(128, 4, stride, toggles), expected);
         }
     }
@@ -428,8 +428,14 @@ mod tests {
         let before = world.snapshot();
         assert!(world.set_enabled(EntityId(2), false));
         let after_disable = world.snapshot();
-        assert_eq!(before.entities()[2].velocity, after_disable.entities()[2].velocity);
-        assert_eq!(before.entities()[2].position, after_disable.entities()[2].position);
+        assert_eq!(
+            before.entities()[2].velocity,
+            after_disable.entities()[2].velocity
+        );
+        assert_eq!(
+            before.entities()[2].position,
+            after_disable.entities()[2].position
+        );
 
         let (_, processed) = world.integrate(3);
         assert_eq!(processed, 3);

@@ -1,8 +1,6 @@
 use std::{hint::black_box, time::Instant};
 
-use ecs_enableable::{
-    replay_mask_scenario, replay_structural_scenario, run_toggle_scenario,
-};
+use ecs_enableable::{replay_mask_scenario, replay_structural_scenario, run_toggle_scenario};
 use ecs_workload::WorldSnapshot;
 
 const CASES: &[(u32, u32)] = &[(1, 0), (4, 0), (16, 0), (0, 0), (4, 256), (16, 512)];
