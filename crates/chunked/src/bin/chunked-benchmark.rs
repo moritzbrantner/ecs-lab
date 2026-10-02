@@ -53,7 +53,10 @@ fn main() -> Result<(), String> {
 
             if timed {
                 let flat = replay_flat_scenario(entities, 32);
-                assert_eq!(flat, evidence.snapshot, "flat timing replay must preserve parity");
+                assert_eq!(
+                    flat, evidence.snapshot,
+                    "flat timing replay must preserve parity"
+                );
                 let chunked = replay_chunked_scenario(entities, 32, chunk_size);
                 assert_eq!(
                     chunked, evidence.snapshot,
