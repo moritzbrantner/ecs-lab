@@ -224,11 +224,7 @@ pub fn run_parallel_systems(entity_count: u32, rounds: u32) -> SchedulerEvidence
 ///
 /// Panics when `worker_count` is zero.
 #[must_use]
-pub fn run_partitioned(
-    entity_count: u32,
-    rounds: u32,
-    worker_count: usize,
-) -> SchedulerEvidence {
+pub fn run_partitioned(entity_count: u32, rounds: u32, worker_count: usize) -> SchedulerEvidence {
     assert!(worker_count > 0, "worker_count must be non-zero");
     let schedule = build_schedule(system_specs().to_vec());
     let mut world = SimulationWorld::new(entity_count);
@@ -295,20 +291,13 @@ fn run_accelerate(positions: &[Position], velocities: &mut [Velocity]) {
     }
 }
 
-fn run_integrate_partitioned(
-    positions: &mut [Position],
-    velocities: &[Velocity],
-    workers: usize,
-) {
+fn run_integrate_partitioned(positions: &mut [Position], velocities: &[Velocity], workers: usize) {
     let chunk = partition_size(positions.len(), workers);
     if chunk == 0 {
         return;
     }
     thread::scope(|scope| {
-        for (positions, velocities) in positions
-            .chunks_mut(chunk)
-            .zip(velocities.chunks(chunk))
-        {
+        for (positions, velocities) in positions.chunks_mut(chunk).zip(velocities.chunks(chunk)) {
             scope.spawn(move || run_integrate(positions, velocities));
         }
     });
@@ -326,31 +315,20 @@ fn run_regenerate_partitioned(energy: &mut [i64], workers: usize) {
     });
 }
 
-fn run_accelerate_partitioned(
-    positions: &[Position],
-    velocities: &mut [Velocity],
-    workers: usize,
-) {
+fn run_accelerate_partitioned(positions: &[Position], velocities: &mut [Velocity], workers: usize) {
     let chunk = partition_size(velocities.len(), workers);
     if chunk == 0 {
         return;
     }
     thread::scope(|scope| {
-        for (positions, velocities) in positions
-            .chunks(chunk)
-            .zip(velocities.chunks_mut(chunk))
-        {
+        for (positions, velocities) in positions.chunks(chunk).zip(velocities.chunks_mut(chunk)) {
             scope.spawn(move || run_accelerate(positions, velocities));
         }
     });
 }
 
 const fn partition_size(len: usize, workers: usize) -> usize {
-    if len == 0 {
-        0
-    } else {
-        len.div_ceil(workers)
-    }
+    if len == 0 { 0 } else { len.div_ceil(workers) }
 }
 
 fn integrate_one(position: &mut Position, velocity: Velocity) {
