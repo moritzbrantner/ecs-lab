@@ -178,7 +178,7 @@ pub fn run_serial(entity_count: u32, rounds: u32) -> SchedulerEvidence {
     }
     SchedulerEvidence {
         snapshot: world.snapshot(),
-        stats: schedule_stats(&schedule, entity_count, rounds, 1),
+        stats: schedule_stats(&schedule, entity_count, rounds, 1_u32),
     }
 }
 
@@ -214,7 +214,7 @@ pub fn run_parallel_systems(entity_count: u32, rounds: u32) -> SchedulerEvidence
 
     SchedulerEvidence {
         snapshot: world.snapshot(),
-        stats: schedule_stats(&schedule, entity_count, rounds, 2),
+        stats: schedule_stats(&schedule, entity_count, rounds, 2_u32),
     }
 }
 
