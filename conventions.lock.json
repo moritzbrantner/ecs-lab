@@ -1,5 +1,6 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 1,
+  "sourceRevision": "367054974c8f1e04bdc09c3d7cfc69559bd8068b",
   "requestedModules": [
     "rust",
     "environment",
