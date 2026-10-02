@@ -25,6 +25,8 @@ Reusable low-level AABB and spatial decisions remain in pinned `rust-kernels` cr
 
 Reusable rotating rigid-body semantics belong to the separately pinned `physics-engine`. That engine owns rotating-cuboid integration, sampled collision/re-contact discovery, OBB contact response, restitution, friction, and persistent-contact tail handling. ECS Lab owns scenario composition, ECS-shaped body/state conversion, bounded frame policy, deterministic evidence projection, and browser adaptation around that engine.
 
+The current engine pin is `46d4eed291762815becde11f79c97019857533d9`. It uses floating-point CPU math by default behind the existing integer rotating-box compatibility API. [Engine adoption evidence](rotating-engine-adoption.md) records the native/WASM trajectory changes separately from the persistent adapter work in #133. The production adapter now retains its engine world across frames; [persistent adapter evidence](persistent-physics.md) documents ownership and mutation commands. Adopting the engine's floating-state API remains separate work.
+
 Application and teaching repositories such as `collision-lab` remain independent consumers and are not implementation dependencies.
 
 ## Legacy 2D solver
@@ -57,7 +59,7 @@ This solver is retained as inspectable translational AABB evidence. It is not th
 
 ## Standalone rotating rigid-box authority
 
-The browser playground and trebuchet tower convert ECS Lab `RigidBox3d` state through `step_rigid_box_world_with_physics_engine`. The adapter deliberately stays thin:
+The browser playground and trebuchet tower create one `PersistentPhysicsWorld3d` from ECS Lab `RigidBox3d` state, then advance its authoritative engine across frames. The adapter deliberately stays thin:
 
 - ECS entity identity maps to stable engine-local body identity;
 - ECS Lab retains scenario/body metadata and integer export contracts;
