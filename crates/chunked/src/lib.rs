@@ -98,12 +98,12 @@ impl Chunk {
     fn integrate(&mut self, ticks: i32) -> u64 {
         let ticks = i64::from(ticks);
         for index in 0..self.entities.len() {
-            self.x[index] = self.x[index]
-                .saturating_add(i64::from(self.vx[index]).saturating_mul(ticks));
-            self.y[index] = self.y[index]
-                .saturating_add(i64::from(self.vy[index]).saturating_mul(ticks));
-            self.z[index] = self.z[index]
-                .saturating_add(i64::from(self.vz[index]).saturating_mul(ticks));
+            self.x[index] =
+                self.x[index].saturating_add(i64::from(self.vx[index]).saturating_mul(ticks));
+            self.y[index] =
+                self.y[index].saturating_add(i64::from(self.vy[index]).saturating_mul(ticks));
+            self.z[index] =
+                self.z[index].saturating_add(i64::from(self.vz[index]).saturating_mul(ticks));
         }
         as_u64(self.entities.len())
     }
@@ -161,11 +161,7 @@ impl ChunkedMotionWorld {
     }
 
     fn snapshot(&self) -> WorldSnapshot {
-        let entity_count = self
-            .chunks
-            .iter()
-            .map(|chunk| chunk.entities.len())
-            .sum();
+        let entity_count = self.chunks.iter().map(|chunk| chunk.entities.len()).sum();
         let mut entities = Vec::with_capacity(entity_count);
         for chunk in &self.chunks {
             chunk.append_snapshot(&mut entities);
@@ -174,15 +170,13 @@ impl ChunkedMotionWorld {
     }
 
     fn partial_chunk_rows(&self) -> usize {
-        self.chunks
-            .last()
-            .map_or(0, |chunk| {
-                if chunk.entities.len() == self.chunk_size {
-                    0
-                } else {
-                    chunk.entities.len()
-                }
-            })
+        self.chunks.last().map_or(0, |chunk| {
+            if chunk.entities.len() == self.chunk_size {
+                0
+            } else {
+                chunk.entities.len()
+            }
+        })
     }
 }
 
@@ -210,11 +204,7 @@ pub struct ChunkedEvidence {
 /// Panics when `chunk_size` is zero or when either candidate diverges from the shared-workload
 /// reference snapshot.
 #[must_use]
-pub fn run_chunked_scenario(
-    entity_count: u32,
-    rounds: u32,
-    chunk_size: usize,
-) -> ChunkedEvidence {
+pub fn run_chunked_scenario(entity_count: u32, rounds: u32, chunk_size: usize) -> ChunkedEvidence {
     assert!(chunk_size > 0, "chunk_size must be non-zero");
 
     let rows = fixture_rows(entity_count);
@@ -242,9 +232,7 @@ pub fn run_chunked_scenario(
     };
 
     for _ in 0..rounds {
-        stats.flat_rows_processed = stats
-            .flat_rows_processed
-            .saturating_add(flat.integrate(1));
+        stats.flat_rows_processed = stats.flat_rows_processed.saturating_add(flat.integrate(1));
         let (blocks, rows) = chunked.integrate(1);
         stats.chunk_blocks_visited = stats.chunk_blocks_visited.saturating_add(blocks);
         stats.chunk_rows_processed = stats.chunk_rows_processed.saturating_add(rows);
@@ -288,11 +276,7 @@ pub fn replay_flat_scenario(entity_count: u32, rounds: u32) -> WorldSnapshot {
 ///
 /// Panics when `chunk_size` is zero.
 #[must_use]
-pub fn replay_chunked_scenario(
-    entity_count: u32,
-    rounds: u32,
-    chunk_size: usize,
-) -> WorldSnapshot {
+pub fn replay_chunked_scenario(entity_count: u32, rounds: u32, chunk_size: usize) -> WorldSnapshot {
     assert!(chunk_size > 0, "chunk_size must be non-zero");
     let rows = fixture_rows(entity_count);
     let mut chunked = ChunkedMotionWorld::new(chunk_size);
@@ -369,11 +353,7 @@ mod tests {
                 assert_eq!(evidence.stats.rows_copied_during_growth, 0);
 
                 let remainder = entity_count as usize % chunk_size;
-                let expected_partial = if remainder == 0 {
-                    0
-                } else {
-                    remainder as u64
-                };
+                let expected_partial = if remainder == 0 { 0 } else { remainder as u64 };
                 assert_eq!(evidence.stats.partial_chunk_rows, expected_partial);
                 assert_eq!(evidence.snapshot.entities().len(), entity_count as usize);
             }
