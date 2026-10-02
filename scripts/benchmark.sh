@@ -13,4 +13,4 @@ if command -v coding-tooling >/dev/null 2>&1; then
   fingerprint="$(coding-tooling environment fingerprint --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["data"]["fingerprint"])')"
 fi
 
-cargo run --locked --release -p ecs-runner -- "$runner_mode" "$fingerprint"
+cargo run --locked --release -p ecs-runner --bin ecs-runner -- "$runner_mode" "$fingerprint"

@@ -49,24 +49,25 @@ jobs:
       - name: Install runtime-profiler
         run: cargo install --git https://github.com/moritzbrantner/runtime-profiler --rev "$RUNTIME_PROFILER_REV" --locked
 
-      - name: Give the base the identical profiler scenario
+      - name: Give the base the identical profiler canary
         run: |
-          mkdir -p reference/profiles/runtime-profiler
+          mkdir -p reference/profiles/runtime-profiler reference/crates/runner/src/bin
           cp candidate/profiles/runtime-profiler/benchmark-smoke.json reference/profiles/runtime-profiler/benchmark-smoke.json
-          git -C reference add profiles/runtime-profiler/benchmark-smoke.json
+          cp candidate/crates/runner/src/bin/runtime_canary.rs reference/crates/runner/src/bin/runtime_canary.rs
+          git -C reference add profiles/runtime-profiler/benchmark-smoke.json crates/runner/src/bin/runtime_canary.rs
           if git -C reference diff --cached --quiet; then
-            echo 'Base already has the identical profiler scenario.'
+            echo 'Base already has the identical profiler canary.'
           else
             git -C reference \
               -c user.name='runtime-profiler' \
               -c user.email='runtime-profiler@invalid' \
-              commit -m 'chore: attach comparable ECS profiler scenario'
+              commit -m 'chore: attach comparable ECS profiler canary'
           fi
 
       - name: Prime deterministic workload
         run: |
-          (cd reference && cargo build --locked --release -p ecs-runner)
-          (cd candidate && cargo build --locked --release -p ecs-runner)
+          (cd reference && cargo build --locked --release -p ecs-runner --bin runtime_canary)
+          (cd candidate && cargo build --locked --release -p ecs-runner --bin runtime_canary)
           test -z "$(git -C reference status --porcelain)"
           test -z "$(git -C candidate status --porcelain)"
 

@@ -18,6 +18,13 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
+      # RUST-002 enforcement runs clippy with --frozen per component, so every
+      # Cargo workspace must have its locked dependencies available offline.
+      - name: Fetch locked Cargo dependencies
+        run: |
+          cargo fetch --locked
+          cargo fetch --locked --manifest-path experiments/tower-wgpu-renderer/Cargo.toml
+
       - name: Run fast validation tier
         uses: moritzbrantner/coding-tooling@a630598d369ac94d0f549dce5c859b9dd28b250c
         with:

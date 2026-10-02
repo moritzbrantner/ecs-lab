@@ -6,6 +6,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+ecs-sparse-index = { path = "../sparse-index" }
 ecs-workload = { path = "../workload" }
 
 [dev-dependencies]

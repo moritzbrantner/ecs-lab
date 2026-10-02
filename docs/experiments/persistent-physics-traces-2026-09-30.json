@@ -1,0 +1,250 @@
+{
+  "persistentProducer": "5daec5c8195af097f48e79e297d6a85f10ba7bd4",
+  "rebuildProducer": "5f85291a3caaf24df224e555e3d64c309641901b",
+  "conventionsSourceRevision": "e6acb5310afaf15c0cba24f87108f5f4ad1bedc3",
+  "enginePin": "46d4eed291762815becde11f79c97019857533d9",
+  "comparisons": {
+    "playground": {
+      "frames": 601,
+      "bodyRows": 32454,
+      "metadataAndFixedState": "identical",
+      "debugAndReleasePhysicalTraces": "identical",
+      "differenceCounts": {
+        "changedFrames": 510,
+        "positionRows": 21845,
+        "velocityRows": 19588,
+        "orientationRows": 22190,
+        "angularVelocityRows": 19701
+      },
+      "firstDifferences": {
+        "orientationRows": {
+          "frame": 91,
+          "entity": 24,
+          "rebuild": [
+            -570316316,
+            306714765,
+            -126010680,
+            847176586
+          ],
+          "persistent": [
+            -570316315,
+            306714765,
+            -126010681,
+            847176586
+          ]
+        },
+        "velocityRows": {
+          "frame": 139,
+          "entity": 3,
+          "rebuild": [
+            22,
+            0,
+            -2
+          ],
+          "persistent": [
+            0,
+            0,
+            0
+          ]
+        },
+        "angularVelocityRows": {
+          "frame": 139,
+          "entity": 3,
+          "rebuild": [
+            -556,
+            2005,
+            -6122
+          ],
+          "persistent": [
+            0,
+            0,
+            0
+          ]
+        },
+        "positionRows": {
+          "frame": 140,
+          "entity": 3,
+          "rebuild": [
+            68154,
+            3602,
+            -53965
+          ],
+          "persistent": [
+            68154,
+            3600,
+            -53965
+          ]
+        }
+      },
+      "wasmComparison": {
+        "exactBodyProjections": 32454,
+        "unobserved": [
+          "linearVelocity",
+          "stepEvents",
+          "stepTailContacts"
+        ],
+        "bounds": "finite and fixed-wall invariant checks in actual WASM driver; native bounds not separately compared"
+      },
+      "work": {
+        "world_constructions": 1,
+        "insertions": 54,
+        "removals": 0,
+        "remaps": 0,
+        "descriptor_commands": 0,
+        "changed_descriptors": 0,
+        "metadata_changes": 0,
+        "motion_commands": 0,
+        "changed_motion": 0,
+        "initial_policy_scan_visits": 54,
+        "angular_scan_visits": 32400,
+        "input_conversions": 54,
+        "geometry_validations": 54,
+        "fixed_insert_queries": 6,
+        "output_conversions": 32400,
+        "output_sorts": 0,
+        "attempted_frames": 600,
+        "completed_frames": 600,
+        "completed_substeps": 600,
+        "motion_before_images": 28137,
+        "sleep_before_images": 28137,
+        "parked_before_images": 10,
+        "damping_visits": 28129,
+        "engine_contact_work": [
+          17815,
+          920,
+          28072,
+          102665
+        ]
+      },
+      "retainedLogicalEntries": {
+        "bodies": 54,
+        "entity_mappings": 54,
+        "body_metadata_entries": 54,
+        "sleeping_bodies": 6,
+        "report_capacity": 4
+      },
+      "nativeTraceCachePayloadBytes": 4220628
+    },
+    "tower": {
+      "frames": 481,
+      "bodyRows": 15392,
+      "metadataAndFixedState": "identical",
+      "debugAndReleasePhysicalTraces": "identical",
+      "differenceCounts": {
+        "changedFrames": 420,
+        "positionRows": 11719,
+        "velocityRows": 11696,
+        "orientationRows": 11896,
+        "angularVelocityRows": 11594,
+        "eventOrTailFrames": 378
+      },
+      "firstDifferences": {
+        "orientationRows": {
+          "frame": 61,
+          "entity": 11,
+          "rebuild": [
+            190187,
+            812902834,
+            -59686321,
+            698962084
+          ],
+          "persistent": [
+            190187,
+            812902835,
+            -59686321,
+            698962084
+          ]
+        },
+        "angularVelocityRows": {
+          "frame": 96,
+          "entity": 26,
+          "rebuild": [
+            -1147630,
+            6384476,
+            -8066877
+          ],
+          "persistent": [
+            -1147630,
+            6384476,
+            -8066878
+          ]
+        },
+        "velocityRows": {
+          "frame": 99,
+          "entity": 22,
+          "rebuild": [
+            8549,
+            -6255,
+            3438
+          ],
+          "persistent": [
+            8550,
+            -6254,
+            3437
+          ]
+        },
+        "positionRows": {
+          "frame": 101,
+          "entity": 22,
+          "rebuild": [
+            19737,
+            3617,
+            13573
+          ],
+          "persistent": [
+            19737,
+            3617,
+            13574
+          ]
+        }
+      },
+      "wasmComparison": {
+        "exactVertexProjections": 123136,
+        "exactEventTailAndSpinFrames": 481,
+        "unobserved": [
+          "fullPhysicalStateThroughWasmExports"
+        ]
+      },
+      "work": {
+        "world_constructions": 1,
+        "insertions": 32,
+        "removals": 0,
+        "remaps": 0,
+        "descriptor_commands": 0,
+        "changed_descriptors": 0,
+        "metadata_changes": 0,
+        "motion_commands": 0,
+        "changed_motion": 0,
+        "initial_policy_scan_visits": 32,
+        "angular_scan_visits": 15360,
+        "input_conversions": 32,
+        "geometry_validations": 32,
+        "fixed_insert_queries": 1,
+        "output_conversions": 15360,
+        "output_sorts": 0,
+        "attempted_frames": 480,
+        "completed_frames": 480,
+        "completed_substeps": 639,
+        "motion_before_images": 12535,
+        "sleep_before_images": 13315,
+        "parked_before_images": 10,
+        "damping_visits": 13305,
+        "engine_contact_work": [
+          66514,
+          1260,
+          116759,
+          300995
+        ]
+      },
+      "retainedLogicalEntries": {
+        "bodies": 32,
+        "entity_mappings": 32,
+        "body_metadata_entries": 32,
+        "sleeping_bodies": 10,
+        "report_capacity": 4
+      },
+      "nativeTraceCachePayloadBytes": 4469760
+    }
+  },
+  "wasmSha256": "e40a3980092fb475dea9ba9decfecc5fa601759eb006847897514ccf486b2d91"
+}

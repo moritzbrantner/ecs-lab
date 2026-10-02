@@ -100,6 +100,85 @@ impl Workload {
     }
 
     #[must_use]
+    pub fn mixed_motion_scenario(
+        seed: u32,
+        entity_count: u32,
+        rounds: u32,
+        velocity_stride: u32,
+    ) -> Self {
+        let mut generator = Generator::new(seed);
+        let mut operations = Vec::new();
+
+        for raw_id in 0..entity_count {
+            let entity = EntityId(raw_id);
+            operations.push(Operation::Spawn(entity));
+            operations.push(Operation::SetPosition(
+                entity,
+                Position::new(generator.position(), generator.position()),
+            ));
+            if velocity_stride != 0 && raw_id % velocity_stride == 0 {
+                operations.push(Operation::SetVelocity(
+                    entity,
+                    Velocity::new(generator.velocity(), generator.velocity()),
+                ));
+            }
+        }
+
+        for _ in 0..rounds {
+            let ticks = i32::from(generator.next_u32().to_le_bytes()[0] % 5 + 1);
+            operations.push(Operation::Integrate { ticks });
+        }
+
+        Self::new(operations)
+    }
+
+    #[must_use]
+    pub fn component_churn_scenario(seed: u32, entity_count: u32, rounds: u32) -> Self {
+        let mut generator = Generator::new(seed);
+        let mut operations = Vec::new();
+
+        for raw_id in 0..entity_count {
+            let entity = EntityId(raw_id);
+            operations.push(Operation::Spawn(entity));
+            operations.push(Operation::SetPosition(
+                entity,
+                Position::new(generator.position(), generator.position()),
+            ));
+            operations.push(Operation::SetVelocity(
+                entity,
+                Velocity::new(generator.velocity(), generator.velocity()),
+            ));
+        }
+
+        for round in 0..rounds {
+            for raw_id in 0..entity_count {
+                let entity = EntityId(raw_id);
+                match raw_id.wrapping_add(round) % 4 {
+                    0 => {
+                        operations.push(Operation::RemoveVelocity(entity));
+                        operations.push(Operation::SetVelocity(
+                            entity,
+                            Velocity::new(generator.velocity(), generator.velocity()),
+                        ));
+                    }
+                    1 => {
+                        operations.push(Operation::RemovePosition(entity));
+                        operations.push(Operation::SetPosition(
+                            entity,
+                            Position::new(generator.position(), generator.position()),
+                        ));
+                    }
+                    _ => {}
+                }
+            }
+            let ticks = i32::from(generator.next_u32().to_le_bytes()[0] % 5 + 1);
+            operations.push(Operation::Integrate { ticks });
+        }
+
+        Self::new(operations)
+    }
+
+    #[must_use]
     pub fn operations(&self) -> &[Operation] {
         &self.operations
     }
@@ -146,6 +225,54 @@ impl WorldSnapshot {
             .ok()
             .map(|index| &self.entities[index])
     }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct StorageWorkStats {
+    pub integration_rows_scanned: u64,
+    pub integrated_entities: u64,
+    pub component_lookups: u64,
+    pub structural_table_transitions: u64,
+    pub query_cache_updates: u64,
+}
+
+impl StorageWorkStats {
+    pub fn accumulate(&mut self, other: Self) {
+        self.integration_rows_scanned = self
+            .integration_rows_scanned
+            .saturating_add(other.integration_rows_scanned);
+        self.integrated_entities = self
+            .integrated_entities
+            .saturating_add(other.integrated_entities);
+        self.component_lookups = self
+            .component_lookups
+            .saturating_add(other.component_lookups);
+        self.structural_table_transitions = self
+            .structural_table_transitions
+            .saturating_add(other.structural_table_transitions);
+        self.query_cache_updates = self
+            .query_cache_updates
+            .saturating_add(other.query_cache_updates);
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct SnapshotWorkStats {
+    pub slots_scanned: u64,
+    pub entities_materialized: u64,
+}
+
+/// Deterministic logical footprint of storage indexes.
+///
+/// These counters describe retained logical entries/slots, not allocator-specific bytes or capacity.
+/// They are collected outside timed repetitions so storage candidates can expose memory/index trade-offs
+/// without perturbing their hot paths.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct StorageIndexStats {
+    pub entity_index_entries: u64,
+    pub component_index_slots: u64,
+    pub query_index_slots: u64,
+    pub query_rows: u64,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -244,6 +371,49 @@ mod tests {
             Workload::motion_scenario(17, 32, 5),
             Workload::motion_scenario(18, 32, 5)
         );
+    }
+
+    #[test]
+    fn mixed_motion_scenario_keeps_component_mix_deterministic() {
+        let workload = Workload::mixed_motion_scenario(17, 10, 3, 4);
+        let velocity_sets = workload
+            .operations()
+            .iter()
+            .filter(|operation| matches!(operation, Operation::SetVelocity(_, _)))
+            .count();
+        let integrations = workload
+            .operations()
+            .iter()
+            .filter(|operation| matches!(operation, Operation::Integrate { .. }))
+            .count();
+
+        assert_eq!(velocity_sets, 3);
+        assert_eq!(integrations, 3);
+        assert_eq!(workload, Workload::mixed_motion_scenario(17, 10, 3, 4));
+    }
+
+    #[test]
+    fn component_churn_scenario_is_deterministic_and_restores_components() {
+        let workload = Workload::component_churn_scenario(17, 8, 2);
+        let removals = workload
+            .operations()
+            .iter()
+            .filter(|operation| {
+                matches!(
+                    operation,
+                    Operation::RemovePosition(_) | Operation::RemoveVelocity(_)
+                )
+            })
+            .count();
+        let integrations = workload
+            .operations()
+            .iter()
+            .filter(|operation| matches!(operation, Operation::Integrate { .. }))
+            .count();
+
+        assert_eq!(removals, 8);
+        assert_eq!(integrations, 2);
+        assert_eq!(workload, Workload::component_churn_scenario(17, 8, 2));
     }
 
     #[test]

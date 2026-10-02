@@ -535,3 +535,5 @@ mod tests {
 
 mod dice_demo;
 mod physics_demo;
+#[cfg(test)]
+mod physics_trace;

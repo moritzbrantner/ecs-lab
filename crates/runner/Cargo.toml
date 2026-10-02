@@ -6,6 +6,8 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+ecs-archetype = { path = "../archetype" }
+ecs-cached-sparse = { path = "../cached-sparse" }
 ecs-physics = { path = "../physics" }
 ecs-physics-scenarios = { path = "../physics-scenarios" }
 ecs-reference = { path = "../reference" }
