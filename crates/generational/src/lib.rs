@@ -76,8 +76,8 @@ impl GenerationalArena {
             self.free.remove(&slot);
             (slot, true)
         } else {
-            let slot = u32::try_from(self.slots.len())
-                .map_err(|_| HandleError::SlotCapacityExhausted)?;
+            let slot =
+                u32::try_from(self.slots.len()).map_err(|_| HandleError::SlotCapacityExhausted)?;
             self.slots.push(Slot {
                 generation: 0,
                 logical: None,
@@ -116,9 +116,7 @@ impl GenerationalArena {
     /// Returns `Stale` when the handle does not name the current generation of a live slot.
     pub fn despawn(&mut self, handle: EntityHandle) -> Result<EntityId, HandleError> {
         let slot = self.valid_slot(handle)?;
-        let logical = slot
-            .logical
-            .ok_or(HandleError::Stale(handle))?;
+        let logical = slot.logical.ok_or(HandleError::Stale(handle))?;
         self.logical_to_handle.remove(&logical);
 
         let slot = &mut self.slots[handle.slot as usize];
@@ -140,15 +138,14 @@ impl GenerationalArena {
     ///
     /// Returns `Stale` when the slot is absent, retired, generation-mismatched, or not live.
     pub fn resolve(&mut self, handle: EntityHandle) -> Result<EntityId, HandleError> {
-        match self.valid_slot(handle).and_then(|slot| {
-            slot.logical
-                .ok_or(HandleError::Stale(handle))
-        }) {
+        match self
+            .valid_slot(handle)
+            .and_then(|slot| slot.logical.ok_or(HandleError::Stale(handle)))
+        {
             Ok(logical) => Ok(logical),
             Err(error) => {
                 if matches!(error, HandleError::Stale(_)) {
-                    self.stats.stale_rejections =
-                        self.stats.stale_rejections.saturating_add(1);
+                    self.stats.stale_rejections = self.stats.stale_rejections.saturating_add(1);
                 }
                 Err(error)
             }
@@ -276,8 +273,7 @@ mod tests {
         for (cycles, batch) in [(1_u32, 64_u32), (2, 64), (16, 64), (64, 4)] {
             let evidence = run_reuse_scenario(cycles, batch);
             let expected_spawns = u64::from(cycles) * u64::from(batch);
-            let expected_despawns =
-                u64::from(cycles.saturating_sub(1)) * u64::from(batch);
+            let expected_despawns = u64::from(cycles.saturating_sub(1)) * u64::from(batch);
             assert_eq!(evidence.stats.spawns, expected_spawns);
             assert_eq!(evidence.stats.despawns, expected_despawns);
             assert_eq!(evidence.stats.new_slots, u64::from(batch));
@@ -286,10 +282,7 @@ mod tests {
                 expected_spawns.saturating_sub(u64::from(batch))
             );
             assert_eq!(evidence.stats.peak_slots, u64::from(batch));
-            assert_eq!(
-                evidence.stats.stale_rejections,
-                expected_despawns
-            );
+            assert_eq!(evidence.stats.stale_rejections, expected_despawns);
             assert_eq!(evidence.live_entities.len(), batch as usize);
             assert_eq!(evidence.live_handles.len(), batch as usize);
         }
