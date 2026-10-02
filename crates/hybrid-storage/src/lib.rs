@@ -192,8 +192,7 @@ impl ArchetypeStatusWorld {
         let mut entities = Vec::with_capacity(self.locations.len());
         entities.extend(self.plain.iter().copied().map(MotionRow::snapshot));
         entities.extend(self.with_status.iter().copied().map(MotionRow::snapshot));
-        let mut status_entities: Vec<_> =
-            self.with_status.iter().map(|row| row.entity).collect();
+        let mut status_entities: Vec<_> = self.with_status.iter().map(|row| row.entity).collect();
         status_entities.sort_unstable();
         HybridSnapshot {
             world: WorldSnapshot::new(entities),
@@ -373,8 +372,7 @@ pub fn run_status_churn_scenario(
             let s = sparse.set_status(entity, target);
             assert_eq!((a, h, s), (true, true, true));
             stats.status_changes = stats.status_changes.saturating_add(1);
-            stats.archetype_motion_row_moves =
-                stats.archetype_motion_row_moves.saturating_add(1);
+            stats.archetype_motion_row_moves = stats.archetype_motion_row_moves.saturating_add(1);
             stats.hybrid_status_peak_slots = stats
                 .hybrid_status_peak_slots
                 .max(hybrid.status.allocated_slots());
@@ -391,8 +389,7 @@ pub fn run_status_churn_scenario(
             .saturating_add(hybrid.integrate(1));
         let (rows, lookups) = sparse.integrate(1);
         stats.sparse_rows_scanned = stats.sparse_rows_scanned.saturating_add(rows);
-        stats.sparse_component_lookups =
-            stats.sparse_component_lookups.saturating_add(lookups);
+        stats.sparse_component_lookups = stats.sparse_component_lookups.saturating_add(lookups);
 
         let expected = archetype.snapshot();
         assert_eq!(hybrid.snapshot(), expected);
