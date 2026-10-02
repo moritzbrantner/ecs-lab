@@ -3,9 +3,9 @@ use std::sync::{Mutex, OnceLock};
 use ecs_physics::{BodyKind, PhysicsMaterial};
 use ecs_physics_3d::{
     ANGULAR_VELOCITY_SCALE, AngularState3d, AngularSubstepPolicy3d, AngularVelocity3d,
-    BouncingRoom3dScenario, ORIENTATION_SCALE, Orientation3d, PhysicsBody3d, PhysicsConfig3d,
-    RigidBox3d, RigidBoxState3d, RigidBoxWorldConfig3d, RotatingContactSearchConfig3d,
-    oriented_box_vertices, step_3d, step_rigid_box_world_with_physics_engine,
+    BouncingRoom3dScenario, ORIENTATION_SCALE, Orientation3d, PersistentPhysicsWorld3d,
+    PhysicsBody3d, PhysicsConfig3d, RigidBox3d, RigidBoxState3d, RigidBoxWorldConfig3d,
+    RotatingContactSearchConfig3d, oriented_box_vertices, step_3d,
 };
 use ecs_reference::ReferenceWorld;
 use ecs_workload::{EntityId, Operation, Position, Velocity, Workload};
@@ -46,7 +46,7 @@ struct PhysicsDemoFrame {
 struct PhysicsDemoState {
     frames: Vec<PhysicsDemoFrame>,
     spatial_scale: i64,
-    config: RigidBoxWorldConfig3d,
+    physics: PersistentPhysicsWorld3d,
 }
 
 impl PhysicsDemoState {
@@ -98,11 +98,18 @@ impl PhysicsDemoState {
             angular_damping_milli: PHYSICS_DEMO_ANGULAR_DAMPING_MILLI,
             solver_passes: PHYSICS_DEMO_SOLVER_PASSES,
         };
+        let physics = PersistentPhysicsWorld3d::new(
+            &boxes,
+            config,
+            PHYSICS_DEMO_CONTACT_SEARCH,
+            AngularSubstepPolicy3d::default(),
+        )
+        .ok()?;
         let initial_frame = build_demo_frame(boxes, spatial_scale)?;
         Some(Self {
             frames: vec![initial_frame],
             spatial_scale,
-            config,
+            physics,
         })
     }
 
@@ -112,14 +119,7 @@ impl PhysicsDemoState {
         }
         let target = usize::try_from(steps).ok()?;
         while self.frames.len() <= target {
-            let previous = &self.frames.last()?.boxes;
-            let next = step_rigid_box_world_with_physics_engine(
-                previous,
-                self.config,
-                PHYSICS_DEMO_CONTACT_SEARCH,
-                AngularSubstepPolicy3d::default(),
-            )
-            .ok()?;
+            let next = self.physics.advance().ok()?;
             self.frames
                 .push(build_demo_frame(next.boxes, self.spatial_scale)?);
         }
@@ -363,6 +363,28 @@ fn display_extent(value: i32, spatial_scale: i64) -> f32 {
 
 fn display_orientation(value: i32) -> f32 {
     value as f32 / ORIENTATION_SCALE as f32
+}
+
+/// Recreates the engine and its observable rewind cache from the scenario's initial state.
+#[unsafe(no_mangle)]
+pub extern "C" fn physics_demo_reset() -> u32 {
+    let Some(replacement) = PhysicsDemoState::new() else {
+        return 0;
+    };
+    let Ok(mut state) = demo_state().lock() else {
+        return 0;
+    };
+    *state = Some(replacement);
+    1
+}
+
+/// Drops the engine and cached views. The next frame read creates a fresh scenario.
+#[unsafe(no_mangle)]
+pub extern "C" fn physics_demo_dispose() -> u32 {
+    let Ok(mut state) = demo_state().lock() else {
+        return 0;
+    };
+    u32::from(state.take().is_some())
 }
 
 #[unsafe(no_mangle)]
@@ -637,6 +659,48 @@ mod tests {
         physics_material_demo_count, physics_material_demo_position_y,
         physics_material_demo_restitution_milli,
     };
+
+    #[test]
+    #[ignore = "full physical consumer trace for engine-pin and persistent-lifetime comparisons"]
+    fn playground_physical_trace_acceptance() {
+        let mut state = PhysicsDemoState::new().expect("valid playground");
+        for step in 0..=600 {
+            let frame = state
+                .ensure_frame(step)
+                .expect("complete playground interval");
+            crate::physics_trace::record("playground", step, &frame.boxes, None, None);
+            assert_eq!(frame.boxes.len(), 54);
+        }
+        let work = state.physics.work();
+        assert_eq!(work.world_constructions, 1);
+        assert_eq!(work.insertions, 54);
+        assert_eq!(work.input_conversions, 54);
+        assert_eq!(work.angular_scan_visits, 54 * 600);
+        assert_eq!(work.output_conversions, 54 * 600);
+        assert_eq!(work.descriptor_commands, 0);
+        assert_eq!(work.motion_commands, 0);
+        let before_rewind = work;
+        state.ensure_frame(1).expect("cached rewind view");
+        assert_eq!(state.physics.work(), before_rewind);
+        let cache_payload = state.frames.capacity()
+            * std::mem::size_of::<super::PhysicsDemoFrame>()
+            + state
+                .frames
+                .iter()
+                .map(|frame| {
+                    frame.boxes.capacity() * std::mem::size_of::<ecs_physics_3d::RigidBox3d>()
+                        + frame.broad_bounds.capacity()
+                            * std::mem::size_of::<super::DisplayBounds3d>()
+                        + frame.pair_words.capacity() * std::mem::size_of::<u32>()
+                })
+                .sum::<usize>();
+        println!("PERSISTENT_WORK playground {work:?}");
+        println!(
+            "PERSISTENT_RETAINED playground {:?}",
+            state.physics.retained()
+        );
+        println!("CACHE_PAYLOAD_BYTES playground {cache_payload}");
+    }
 
     #[test]
     fn repeated_rotating_browser_scenario_constructs_every_authoritative_frame() {

@@ -5,6 +5,7 @@
     "rust",
     "environment",
     "git",
-    "benchmarking"
+    "benchmarking",
+    "ui"
   ]
 }
