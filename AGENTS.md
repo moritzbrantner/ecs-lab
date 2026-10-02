@@ -15,10 +15,11 @@
 
 ## Visualization boundary
 
-- The current repository remains a headless ECS experiment lab; do not add UI dependencies merely to satisfy interface conventions.
-- If a browser visualization or interactive experiment surface is introduced, explicitly adopt the current shared `ui` conventions from `moritzbrantner/coding-agent-conventions`, especially `PRINCIPLE-009`, `UI-008`, `UI-012`, and `UI-013`.
-- Such a surface should manipulate and inspect the existing authoritative workload/snapshot model rather than create a second ECS state model in presentation code.
-- Keep exact experiment parameters available, give each browser gesture one owner, and protect browser-specific interaction geometry when it becomes part of the experiment.
+- The browser surfaces are the Pages workbench (`site/index.html`, `site/app.js`, `site/webgpu.js`), the physics playground (`site/physics/`), and the `ecs-web-demo` WebAssembly crate (`crates/web-demo`) that drives them. They are inspection/teaching surfaces over the lab, not a product UI or a general rendering layer.
+- These surfaces follow the installed shared `ui` conventions (`conventions.json`, `.conventions/modules/ui/`), especially `PRINCIPLE-009`, `UI-008`, `UI-012`, and `UI-013`.
+- Browser code manipulates and inspects the authoritative workload/snapshot model exposed through `ecs-web-demo`; do not create a second ECS or physics state model in presentation code.
+- Keep exact experiment parameters available, give each browser gesture one owner, and protect browser-specific interaction geometry that is part of an experiment.
+- Do not add UI framework dependencies merely to satisfy interface conventions; extend the existing surfaces before introducing new ones.
 
 ## Validation
 
