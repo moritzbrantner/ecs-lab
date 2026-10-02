@@ -10,6 +10,14 @@ description = "WebAssembly adapter for ECS Lab reference and physics evidence"
 [lib]
 crate-type = ["cdylib"]
 
+[features]
+physics-reference = ["ecs-physics-3d/rebuild-reference"]
+
+[[example]]
+name = "persistent-contract"
+crate-type = ["cdylib"]
+required-features = ["physics-reference"]
+
 [dependencies]
 ecs-physics = { path = "../physics" }
 ecs-physics-3d = { path = "../physics-3d" }
