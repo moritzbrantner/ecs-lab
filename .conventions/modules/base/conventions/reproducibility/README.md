@@ -38,13 +38,10 @@
 - Exact comparison is appropriate when exactness is part of the contract or a value is merely carried through unchanged.
 - Computed floating-point results use an explicit domain-appropriate tolerance; do not hide different accuracy requirements behind one global epsilon.
 
-## REP-008 — Pin toolchains exactly and keep canonical baselines current
+## REP-008 — Keep toolchains current
 
-- Repositories pin exact versions of the toolchains that participate in build and verification using the ecosystem's normal native mechanism.
-- A landscape-wide canonical toolchain baseline should track the newest stable release after that release passes the applicable compatibility and full verification gates.
-- Repository pins must match the accepted canonical baseline unless the repository documents an explicit compatibility exception; such exceptions should be temporary and visible rather than silently drifting.
-- Toolchain upgrades are explicit, reviewable mutations that update exact native pins and any affected lockfiles or generated metadata before verification runs.
-- Do not use floating toolchain channels such as `latest`, resolve a different tool version during build or verification, or silently upgrade a toolchain merely to make a task pass.
+- Repositories may use current stable toolchain channels or native version declarations. Do not require an exact fleet-wide version, canonical baseline, or repeated CI check of the resolved toolchain identity.
+- When a toolchain update exposes an incompatibility, fix the affected repository. Pin a version narrowly when a specific compatibility or release contract requires it.
 
 ## REP-009 — Unused implementation code is not part of a green baseline
 
@@ -114,3 +111,20 @@
 
 - Use an explicit Unicode normalization policy for identifiers, generated filenames, canonical serialized forms, hashes, search/deduplication keys, or cross-system equality when canonically equivalent text must compare the same.
 - Do not silently normalize ordinary human-facing text when the distinction could be meaningful to the domain.
+
+## REP-021 — Reconcile deterministic mutations instead of repeating work
+
+- A deterministic mutating operation inspects current state, derives the desired state, compares them, applies only the required delta, and verifies the resulting state.
+- Reapplying the same operation to an already-satisfied state must be a verified no-op: no unnecessary file rewrites, installs, fetches, rebuilds, or other side effects merely to rediscover the same result.
+- Machine-readable mutation results should distinguish at least `changed`, `unchanged`, and `conflict`, and expose created, changed, removed, skipped/no-op, or verified subjects when that detail is useful to callers.
+- Tests for deterministic mutators should apply the same operation twice and assert that the second application performs zero writes or equivalent reconciliation work while preserving the verified final state.
+- Unrelated input changes must not invalidate derived work. Relevant input changes should trigger only the smallest safe affected reconciliation.
+- Use input fingerprints or incremental state only for expensive derived work where the identity includes every relevant input and tool version. Do not add memoization to cheap pure algorithms merely because they are deterministic.
+
+## REP-022 — Deterministic systems replay from declared inputs
+
+- When deterministic replay is part of a system's contract, the replay identity includes the authoritative initial state, ordered external inputs or events, seed or random stream, relevant configuration, and implementation/content identity needed to interpret them.
+- Replaying the same declared inputs must reproduce the same authoritative observable state or canonical fingerprint.
+- Wall-clock time, thread scheduling, unordered iteration, ambient machine state, rendering cadence, and non-authoritative simulations must not silently alter authoritative replay results.
+- When nondeterminism is intentional, isolate and record it at an explicit boundary rather than allowing it to leak into otherwise deterministic state transitions.
+- A replay verifier should identify the first divergent authoritative step or fingerprint when practical instead of reporting only a final mismatch.
