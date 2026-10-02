@@ -270,7 +270,7 @@ pub fn replay_flat_scenario(entity_count: u32, rounds: u32) -> WorldSnapshot {
     flat.snapshot()
 }
 
-/// Replays only the chunked SoA layout.
+/// Replays only the chunked `SoA` layout.
 ///
 /// # Panics
 ///
