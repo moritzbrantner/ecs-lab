@@ -47,25 +47,24 @@ impl ReferenceWorld {
         operation: Operation,
     ) -> Result<StorageWorkStats, WorkloadError> {
         match operation {
-            Operation::Spawn(entity) => self.spawn(entity).map(|()| StorageWorkStats::default()),
-            Operation::Despawn(entity) => {
-                self.despawn(entity).map(|()| StorageWorkStats::default())
-            }
+            // Spawn reads and writes one map entry; every other structural operation touches one.
+            Operation::Spawn(entity) => self.spawn(entity).map(|()| entity_entries(2)),
+            Operation::Despawn(entity) => self.despawn(entity).map(|()| entity_entries(1)),
             Operation::SetPosition(entity, position) => {
                 self.entity_mut(entity)?.position = Some(position);
-                Ok(StorageWorkStats::default())
+                Ok(entity_entries(1))
             }
             Operation::RemovePosition(entity) => {
                 self.entity_mut(entity)?.position = None;
-                Ok(StorageWorkStats::default())
+                Ok(entity_entries(1))
             }
             Operation::SetVelocity(entity, velocity) => {
                 self.entity_mut(entity)?.velocity = Some(velocity);
-                Ok(StorageWorkStats::default())
+                Ok(entity_entries(1))
             }
             Operation::RemoveVelocity(entity) => {
                 self.entity_mut(entity)?.velocity = None;
-                Ok(StorageWorkStats::default())
+                Ok(entity_entries(1))
             }
             Operation::Integrate { ticks } => Ok(self.integrate(ticks)),
         }
@@ -177,6 +176,20 @@ impl ReferenceWorld {
                 .saturating_add(i64::from(velocity.z).saturating_mul(ticks));
         }
         work
+    }
+}
+
+const fn entity_entries(entity_locations_inspected: u64) -> StorageWorkStats {
+    StorageWorkStats {
+        integration_rows_scanned: 0,
+        integrated_entities: 0,
+        component_lookups: 0,
+        structural_table_transitions: 0,
+        query_cache_updates: 0,
+        query_rows_inspected: 0,
+        entity_locations_inspected,
+        component_slots_touched: 0,
+        table_rows_touched: 0,
     }
 }
 

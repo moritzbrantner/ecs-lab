@@ -31,10 +31,11 @@ impl EntityTable {
         index
     }
 
-    fn swap_remove(&mut self, index: usize) -> (EntityId, Option<EntityId>) {
+    /// Returns the removed entity, the swap-moved entity, and the rows touched.
+    fn swap_remove(&mut self, index: usize) -> (EntityId, Option<EntityId>, u64) {
         let removed = self.entities.swap_remove(index);
         let moved = self.entities.get(index).copied();
-        (removed, moved)
+        (removed, moved, 1 + u64::from(moved.is_some()))
     }
 }
 
@@ -61,11 +62,17 @@ impl<T> ComponentTable<T> {
         index
     }
 
-    fn swap_remove(&mut self, index: usize) -> (EntityId, T, Option<EntityId>) {
+    /// Returns the removed row, the swap-moved entity, and the rows touched.
+    fn swap_remove(&mut self, index: usize) -> (EntityId, T, Option<EntityId>, u64) {
         let removed_entity = self.entities.swap_remove(index);
         let removed_value = self.values.swap_remove(index);
         let moved = self.entities.get(index).copied();
-        (removed_entity, removed_value, moved)
+        (
+            removed_entity,
+            removed_value,
+            moved,
+            1 + u64::from(moved.is_some()),
+        )
     }
 }
 
@@ -85,12 +92,22 @@ impl MotionTable {
         index
     }
 
-    fn swap_remove(&mut self, index: usize) -> (EntityId, Position, Velocity, Option<EntityId>) {
+    /// Returns the removed row, the swap-moved entity, and the rows touched.
+    fn swap_remove(
+        &mut self,
+        index: usize,
+    ) -> (EntityId, Position, Velocity, Option<EntityId>, u64) {
         let removed_entity = self.entities.swap_remove(index);
         let removed_position = self.positions.swap_remove(index);
         let removed_velocity = self.velocities.swap_remove(index);
         let moved = self.entities.get(index).copied();
-        (removed_entity, removed_position, removed_velocity, moved)
+        (
+            removed_entity,
+            removed_position,
+            removed_velocity,
+            moved,
+            1 + u64::from(moved.is_some()),
+        )
     }
 }
 
@@ -156,13 +173,7 @@ impl ArchetypeWorld {
         operation: Operation,
     ) -> Result<StorageWorkStats, WorkloadError> {
         match operation {
-            Operation::Spawn(entity) => {
-                self.spawn_bundle_measured(entity, None, None)
-                    .map(|entity_locations_inspected| StorageWorkStats {
-                        entity_locations_inspected,
-                        ..StorageWorkStats::default()
-                    })
-            }
+            Operation::Spawn(entity) => self.spawn_bundle_measured(entity, None, None),
             Operation::Despawn(entity) => self.despawn(entity),
             Operation::SetPosition(entity, position) => self.set_position(entity, position),
             Operation::RemovePosition(entity) => self.remove_position(entity),
@@ -202,13 +213,13 @@ impl ArchetypeWorld {
             .map(|_| ())
     }
 
-    /// Returns the number of entity-location entries read or written.
+    /// Returns the entity-location entries and table rows read or written.
     fn spawn_bundle_measured(
         &mut self,
         entity: EntityId,
         position: Option<Position>,
         velocity: Option<Velocity>,
-    ) -> Result<u64, WorkloadError> {
+    ) -> Result<StorageWorkStats, WorkloadError> {
         if self.locations.contains_key(&entity) {
             return Err(WorkloadError::EntityAlreadyExists(entity));
         }
@@ -222,7 +233,11 @@ impl ArchetypeWorld {
                 self.motion.push(entity, position, velocity),
             ),
         };
-        Ok(1 + self.set_location(entity, table, index))
+        Ok(StorageWorkStats {
+            entity_locations_inspected: 1 + self.set_location(entity, table, index),
+            table_rows_touched: 1,
+            ..StorageWorkStats::default()
+        })
     }
 
     /// Projects the observable world in canonical entity-id order.
@@ -320,27 +335,34 @@ impl ArchetypeWorld {
     fn despawn(&mut self, entity: EntityId) -> Result<StorageWorkStats, WorkloadError> {
         let location = self.location(entity)?;
         let mut locations_inspected = 1;
+        let mut rows = 0;
         match location.table {
             TableKind::Empty => {
-                let (removed, moved) = self.empty.swap_remove(location.index);
+                let (removed, moved, touched) = self.empty.swap_remove(location.index);
+                rows += touched;
                 debug_assert_eq!(removed, entity);
                 locations_inspected += self.repair_moved(moved, TableKind::Empty, location.index);
             }
             TableKind::Position => {
-                let (removed, _position, moved) = self.positions.swap_remove(location.index);
+                let (removed, _position, moved, touched) =
+                    self.positions.swap_remove(location.index);
+                rows += touched;
                 debug_assert_eq!(removed, entity);
                 locations_inspected +=
                     self.repair_moved(moved, TableKind::Position, location.index);
             }
             TableKind::Velocity => {
-                let (removed, _velocity, moved) = self.velocities.swap_remove(location.index);
+                let (removed, _velocity, moved, touched) =
+                    self.velocities.swap_remove(location.index);
+                rows += touched;
                 debug_assert_eq!(removed, entity);
                 locations_inspected +=
                     self.repair_moved(moved, TableKind::Velocity, location.index);
             }
             TableKind::Motion => {
-                let (removed, _position, _velocity, moved) =
+                let (removed, _position, _velocity, moved, touched) =
                     self.motion.swap_remove(location.index);
+                rows += touched;
                 debug_assert_eq!(removed, entity);
                 locations_inspected += self.repair_moved(moved, TableKind::Motion, location.index);
             }
@@ -350,6 +372,7 @@ impl ArchetypeWorld {
         locations_inspected += 1;
         Ok(StorageWorkStats {
             entity_locations_inspected: locations_inspected,
+            table_rows_touched: rows,
             ..StorageWorkStats::default()
         })
     }
@@ -362,36 +385,45 @@ impl ArchetypeWorld {
     ) -> Result<StorageWorkStats, WorkloadError> {
         let location = self.location(entity)?;
         let mut locations_inspected = 1;
+        let mut rows = 0;
         let transitions = match location.table {
             TableKind::Empty => {
-                let (removed, moved) = self.empty.swap_remove(location.index);
+                let (removed, moved, touched) = self.empty.swap_remove(location.index);
+                rows += touched;
                 debug_assert_eq!(removed, entity);
                 locations_inspected += self.repair_moved(moved, TableKind::Empty, location.index);
+                rows += 1;
                 let index = self.positions.push(entity, position);
                 locations_inspected += self.set_location(entity, TableKind::Position, index);
                 1
             }
             TableKind::Position => {
                 self.positions.values[location.index] = position;
+                rows += 1;
                 0
             }
             TableKind::Velocity => {
-                let (removed, velocity, moved) = self.velocities.swap_remove(location.index);
+                let (removed, velocity, moved, touched) =
+                    self.velocities.swap_remove(location.index);
+                rows += touched;
                 debug_assert_eq!(removed, entity);
                 locations_inspected +=
                     self.repair_moved(moved, TableKind::Velocity, location.index);
+                rows += 1;
                 let index = self.motion.push(entity, position, velocity);
                 locations_inspected += self.set_location(entity, TableKind::Motion, index);
                 1
             }
             TableKind::Motion => {
                 self.motion.positions[location.index] = position;
+                rows += 1;
                 0
             }
         };
         Ok(StorageWorkStats {
             structural_table_transitions: transitions,
             entity_locations_inspected: locations_inspected,
+            table_rows_touched: rows,
             ..StorageWorkStats::default()
         })
     }
@@ -400,21 +432,28 @@ impl ArchetypeWorld {
     fn remove_position(&mut self, entity: EntityId) -> Result<StorageWorkStats, WorkloadError> {
         let location = self.location(entity)?;
         let mut locations_inspected = 1;
+        let mut rows = 0;
         let transitions = match location.table {
             TableKind::Empty | TableKind::Velocity => 0,
             TableKind::Position => {
-                let (removed, _position, moved) = self.positions.swap_remove(location.index);
+                let (removed, _position, moved, touched) =
+                    self.positions.swap_remove(location.index);
+                rows += touched;
                 debug_assert_eq!(removed, entity);
                 locations_inspected +=
                     self.repair_moved(moved, TableKind::Position, location.index);
+                rows += 1;
                 let index = self.empty.push(entity);
                 locations_inspected += self.set_location(entity, TableKind::Empty, index);
                 1
             }
             TableKind::Motion => {
-                let (removed, _position, velocity, moved) = self.motion.swap_remove(location.index);
+                let (removed, _position, velocity, moved, touched) =
+                    self.motion.swap_remove(location.index);
+                rows += touched;
                 debug_assert_eq!(removed, entity);
                 locations_inspected += self.repair_moved(moved, TableKind::Motion, location.index);
+                rows += 1;
                 let index = self.velocities.push(entity, velocity);
                 locations_inspected += self.set_location(entity, TableKind::Velocity, index);
                 1
@@ -423,6 +462,7 @@ impl ArchetypeWorld {
         Ok(StorageWorkStats {
             structural_table_transitions: transitions,
             entity_locations_inspected: locations_inspected,
+            table_rows_touched: rows,
             ..StorageWorkStats::default()
         })
     }
@@ -435,36 +475,45 @@ impl ArchetypeWorld {
     ) -> Result<StorageWorkStats, WorkloadError> {
         let location = self.location(entity)?;
         let mut locations_inspected = 1;
+        let mut rows = 0;
         let transitions = match location.table {
             TableKind::Empty => {
-                let (removed, moved) = self.empty.swap_remove(location.index);
+                let (removed, moved, touched) = self.empty.swap_remove(location.index);
+                rows += touched;
                 debug_assert_eq!(removed, entity);
                 locations_inspected += self.repair_moved(moved, TableKind::Empty, location.index);
+                rows += 1;
                 let index = self.velocities.push(entity, velocity);
                 locations_inspected += self.set_location(entity, TableKind::Velocity, index);
                 1
             }
             TableKind::Position => {
-                let (removed, position, moved) = self.positions.swap_remove(location.index);
+                let (removed, position, moved, touched) =
+                    self.positions.swap_remove(location.index);
+                rows += touched;
                 debug_assert_eq!(removed, entity);
                 locations_inspected +=
                     self.repair_moved(moved, TableKind::Position, location.index);
+                rows += 1;
                 let index = self.motion.push(entity, position, velocity);
                 locations_inspected += self.set_location(entity, TableKind::Motion, index);
                 1
             }
             TableKind::Velocity => {
                 self.velocities.values[location.index] = velocity;
+                rows += 1;
                 0
             }
             TableKind::Motion => {
                 self.motion.velocities[location.index] = velocity;
+                rows += 1;
                 0
             }
         };
         Ok(StorageWorkStats {
             structural_table_transitions: transitions,
             entity_locations_inspected: locations_inspected,
+            table_rows_touched: rows,
             ..StorageWorkStats::default()
         })
     }
@@ -473,21 +522,28 @@ impl ArchetypeWorld {
     fn remove_velocity(&mut self, entity: EntityId) -> Result<StorageWorkStats, WorkloadError> {
         let location = self.location(entity)?;
         let mut locations_inspected = 1;
+        let mut rows = 0;
         let transitions = match location.table {
             TableKind::Empty | TableKind::Position => 0,
             TableKind::Velocity => {
-                let (removed, _velocity, moved) = self.velocities.swap_remove(location.index);
+                let (removed, _velocity, moved, touched) =
+                    self.velocities.swap_remove(location.index);
+                rows += touched;
                 debug_assert_eq!(removed, entity);
                 locations_inspected +=
                     self.repair_moved(moved, TableKind::Velocity, location.index);
+                rows += 1;
                 let index = self.empty.push(entity);
                 locations_inspected += self.set_location(entity, TableKind::Empty, index);
                 1
             }
             TableKind::Motion => {
-                let (removed, position, _velocity, moved) = self.motion.swap_remove(location.index);
+                let (removed, position, _velocity, moved, touched) =
+                    self.motion.swap_remove(location.index);
+                rows += touched;
                 debug_assert_eq!(removed, entity);
                 locations_inspected += self.repair_moved(moved, TableKind::Motion, location.index);
+                rows += 1;
                 let index = self.positions.push(entity, position);
                 locations_inspected += self.set_location(entity, TableKind::Position, index);
                 1
@@ -496,6 +552,7 @@ impl ArchetypeWorld {
         Ok(StorageWorkStats {
             structural_table_transitions: transitions,
             entity_locations_inspected: locations_inspected,
+            table_rows_touched: rows,
             ..StorageWorkStats::default()
         })
     }

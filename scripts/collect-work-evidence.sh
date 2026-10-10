@@ -24,6 +24,7 @@ cargo test --locked --quiet -p ecs-runner --test work_complexity -- --exact \
   integrate_sparse_subset_scales_with_moving_entities \
   repeated_cached_query_scales_with_returned_rows \
   single_entity_component_churn_does_not_scale_with_population \
+  single_entity_respawn_does_not_scale_with_population \
   full_snapshot_is_declared_linear_in_entities >&2
 
 # Contract order; a missing fragment means a test did not run or failed.
@@ -31,6 +32,7 @@ operations=(
   integrate-sparse-subset
   repeat-cached-query
   add-remove-component
+  respawn-entity
   full-snapshot
 )
 fragments=()

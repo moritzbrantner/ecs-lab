@@ -735,12 +735,57 @@
             }
           ],
           "notes": "Entity-location entries read or written by structural work; repeated reads touch none."
+        },
+        {
+          "name": "cached_sparse_component_slots_touched",
+          "unit": "slots",
+          "signal": "operation-count",
+          "budget": {
+            "max": 0
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "Component sparse slots touched by structural work; none during repeated reads."
+        },
+        {
+          "name": "cached_sparse_entity_entries_touched",
+          "unit": "entries",
+          "signal": "operation-count",
+          "budget": {
+            "max": 0
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "Alive-set entries touched; none during repeated reads."
+        },
+        {
+          "name": "archetype_table_rows_touched",
+          "unit": "rows",
+          "signal": "operation-count",
+          "budget": {
+            "max": 0
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "Table rows moved by structural work; none during repeated reads."
         }
       ]
     },
     {
       "id": "add-remove-component",
-      "description": "Remove and re-add Velocity on C changed entities while N-C unrelated entities all match Position+Velocity, so a full query rebuild or table rescan would be paid for the whole population.",
+      "description": "Remove and re-add Velocity on C changed entities while every one of the N entities matches Position+Velocity, so any rescan of the unrelated population would be paid in full. Every structural primitive (alive-set and location entries, component sparse-index slots and dense rows, query rows, archetype table rows) reports what it reads or writes; budgets are the analytic per-change ceiling times 256.",
       "dimensions": {
         "total_entities": {
           "description": "positioned and moving entities N, including the changed ones"
@@ -773,8 +818,8 @@
       ],
       "metrics": [
         {
-          "name": "archetype_structural_table_transitions",
-          "unit": "transitions",
+          "name": "reference_entity_entries_touched",
+          "unit": "entries",
           "signal": "operation-count",
           "budget": {
             "max": 512
@@ -789,7 +834,102 @@
               "bound": "linear"
             }
           ],
-          "notes": "Counted in the branch that moves an entity between tables: two per changed entity."
+          "notes": "Reference map entries read or written."
+        },
+        {
+          "name": "sparse_set_entity_entries_touched",
+          "unit": "entries",
+          "signal": "operation-count",
+          "budget": {
+            "max": 512
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Alive-set entries read or written."
+        },
+        {
+          "name": "sparse_set_component_slots_touched",
+          "unit": "slots",
+          "signal": "operation-count",
+          "budget": {
+            "max": 1792
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Component paged sparse-index entries plus dense rows pushed, overwritten, removed or swap-moved, counted inside SparseSet::insert and SparseSet::remove."
+        },
+        {
+          "name": "cached_sparse_entity_entries_touched",
+          "unit": "entries",
+          "signal": "operation-count",
+          "budget": {
+            "max": 512
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Alive-set entries read or written."
+        },
+        {
+          "name": "cached_sparse_component_slots_touched",
+          "unit": "slots",
+          "signal": "operation-count",
+          "budget": {
+            "max": 3328
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Component sparse-index entries and dense rows touched by SparseSet::insert/remove plus the two sparse reads of each query refresh."
+        },
+        {
+          "name": "cached_sparse_query_rows_inspected",
+          "unit": "rows",
+          "signal": "operation-count",
+          "budget": {
+            "max": 1792
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Query sparse slot plus every query row read, pushed, removed or swap-moved inside MotionQuery::refresh, changed or not."
         },
         {
           "name": "cached_sparse_query_cache_updates",
@@ -808,26 +948,7 @@
               "bound": "linear"
             }
           ],
-          "notes": "Measured row changes: the leaving row, the swap-moved row and the returning row, at most three per changed entity."
-        },
-        {
-          "name": "cached_sparse_query_rows_inspected",
-          "unit": "rows",
-          "signal": "operation-count",
-          "budget": {
-            "max": 768
-          },
-          "growth": [
-            {
-              "dimension": "total_entities",
-              "bound": "constant"
-            },
-            {
-              "dimension": "changed_entities",
-              "bound": "linear"
-            }
-          ],
-          "notes": "Query rows each refresh inspects, counted per refresh whether or not the row changes; a refresh or rebuild that visits every entity grows with N here even when the update count does not."
+          "notes": "Query rows actually changed (outcome)."
         },
         {
           "name": "archetype_entity_locations_inspected",
@@ -846,7 +967,271 @@
               "bound": "linear"
             }
           ],
-          "notes": "Location entries read or written by the table-move path (one read, at most two writes per move); re-indexing a table after a move grows with N here."
+          "notes": "Location entries read or written at the location accessors."
+        },
+        {
+          "name": "archetype_table_rows_touched",
+          "unit": "rows",
+          "signal": "operation-count",
+          "budget": {
+            "max": 1536
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Table rows pushed, overwritten, removed or swap-moved, counted inside the table swap_remove primitives and at each push or overwrite."
+        },
+        {
+          "name": "archetype_structural_table_transitions",
+          "unit": "transitions",
+          "signal": "operation-count",
+          "budget": {
+            "max": 512
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Table moves (outcome)."
+        }
+      ]
+    },
+    {
+      "id": "respawn-entity",
+      "description": "Despawn, respawn and re-add Position and Velocity on C changed entities among N matching entities, covering the spawn and despawn structural paths with the same per-primitive counters.",
+      "dimensions": {
+        "total_entities": {
+          "description": "positioned and moving entities N, including the changed ones"
+        },
+        "changed_entities": {
+          "description": "entities that are despawned and respawned C"
+        }
+      },
+      "scalePoints": [
+        {
+          "total_entities": 1000,
+          "changed_entities": 1
+        },
+        {
+          "total_entities": 10000,
+          "changed_entities": 1
+        },
+        {
+          "total_entities": 100000,
+          "changed_entities": 1
+        },
+        {
+          "total_entities": 100000,
+          "changed_entities": 16
+        },
+        {
+          "total_entities": 100000,
+          "changed_entities": 256
+        }
+      ],
+      "metrics": [
+        {
+          "name": "reference_entity_entries_touched",
+          "unit": "entries",
+          "signal": "operation-count",
+          "budget": {
+            "max": 1280
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Reference map entries read or written."
+        },
+        {
+          "name": "sparse_set_entity_entries_touched",
+          "unit": "entries",
+          "signal": "operation-count",
+          "budget": {
+            "max": 1280
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Alive-set entries read or written."
+        },
+        {
+          "name": "sparse_set_component_slots_touched",
+          "unit": "slots",
+          "signal": "operation-count",
+          "budget": {
+            "max": 3584
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Component paged sparse-index entries plus dense rows pushed, overwritten, removed or swap-moved, counted inside SparseSet::insert and SparseSet::remove."
+        },
+        {
+          "name": "cached_sparse_entity_entries_touched",
+          "unit": "entries",
+          "signal": "operation-count",
+          "budget": {
+            "max": 1280
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Alive-set entries read or written."
+        },
+        {
+          "name": "cached_sparse_component_slots_touched",
+          "unit": "slots",
+          "signal": "operation-count",
+          "budget": {
+            "max": 6144
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Component sparse-index entries and dense rows touched by SparseSet::insert/remove plus the two sparse reads of each query refresh."
+        },
+        {
+          "name": "cached_sparse_query_rows_inspected",
+          "unit": "rows",
+          "signal": "operation-count",
+          "budget": {
+            "max": 2560
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Query sparse slot plus every query row read, pushed, removed or swap-moved inside MotionQuery::refresh, changed or not."
+        },
+        {
+          "name": "cached_sparse_query_cache_updates",
+          "unit": "updates",
+          "signal": "operation-count",
+          "budget": {
+            "max": 1024
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Query rows actually changed (outcome)."
+        },
+        {
+          "name": "archetype_entity_locations_inspected",
+          "unit": "entries",
+          "signal": "operation-count",
+          "budget": {
+            "max": 2816
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Location entries read or written at the location accessors."
+        },
+        {
+          "name": "archetype_table_rows_touched",
+          "unit": "rows",
+          "signal": "operation-count",
+          "budget": {
+            "max": 2304
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Table rows pushed, overwritten, removed or swap-moved, counted inside the table swap_remove primitives and at each push or overwrite."
+        },
+        {
+          "name": "archetype_structural_table_transitions",
+          "unit": "transitions",
+          "signal": "operation-count",
+          "budget": {
+            "max": 512
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Table moves (outcome)."
         }
       ]
     },

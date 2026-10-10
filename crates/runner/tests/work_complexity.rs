@@ -17,7 +17,8 @@ use ecs_cached_sparse::CachedSparseWorld;
 use ecs_reference::ReferenceWorld;
 use ecs_sparse_set::SparseWorld;
 use ecs_workload::{
-    EntityId, Operation, SnapshotWorkStats, StorageWorkStats, Velocity, Workload, WorldSnapshot,
+    EntityId, Operation, Position, SnapshotWorkStats, StorageWorkStats, Velocity, Workload,
+    WorldSnapshot,
 };
 
 const EVIDENCE_DIR_ENV: &str = "ECS_LAB_WORK_EVIDENCE_DIR";
@@ -236,8 +237,10 @@ fn check_growth(context: &str, growth: Growth, points: &[(u64, u64)]) {
 
 fn finish(operation: &str, samples: &[Sample], bounds: &[Bound]) {
     for sample in samples {
-        let declared: Vec<&str> = sample.metrics.iter().map(|(name, _)| *name).collect();
-        let bounded: Vec<&str> = bounds.iter().map(|bound| bound.metric).collect();
+        let mut declared: Vec<&str> = sample.metrics.iter().map(|(name, _)| *name).collect();
+        let mut bounded: Vec<&str> = bounds.iter().map(|bound| bound.metric).collect();
+        declared.sort_unstable();
+        bounded.sort_unstable();
         assert_eq!(declared, bounded, "{operation} metrics and bounds diverge");
     }
     if let Some(dir) = evidence_dir() {
@@ -376,6 +379,17 @@ const REPEAT_QUERY_POINTS: [(u32, u32, u32); 7] = [
     (100_000, 1_000, 16),
 ];
 
+fn zero_constant_in_n(metrics: &[&'static str]) -> Vec<Bound> {
+    metrics
+        .iter()
+        .map(|&metric| Bound {
+            metric,
+            budget_max: Some(0),
+            growth: &[("total_entities", Growth::Constant)],
+        })
+        .collect()
+}
+
 const REPEAT_ROW_GROWTH: &[(&str, Growth)] = &[
     ("total_entities", Growth::Constant),
     ("matching_entities", Growth::Linear),
@@ -434,52 +448,51 @@ fn repeated_cached_query_scales_with_returned_rows() {
                         "archetype_entity_locations_inspected",
                         work.archetype.entity_locations_inspected,
                     ),
+                    (
+                        "cached_sparse_component_slots_touched",
+                        work.cached.component_slots_touched,
+                    ),
+                    (
+                        "cached_sparse_entity_entries_touched",
+                        work.cached.entity_locations_inspected,
+                    ),
+                    (
+                        "archetype_table_rows_touched",
+                        work.archetype.table_rows_touched,
+                    ),
                 ],
             }
         })
         .collect();
 
-    finish(
-        "repeat-cached-query",
-        &samples,
-        &[
-            Bound {
-                metric: "rows_returned",
-                budget_max: None,
-                growth: REPEAT_ROW_GROWTH,
-            },
-            Bound {
-                metric: "cached_sparse_integration_rows_scanned",
-                budget_max: None,
-                growth: REPEAT_ROW_GROWTH,
-            },
-            Bound {
-                metric: "cached_sparse_query_cache_updates",
-                budget_max: Some(0),
-                growth: &[("total_entities", Growth::Constant)],
-            },
-            Bound {
-                metric: "archetype_integration_rows_scanned",
-                budget_max: None,
-                growth: REPEAT_ROW_GROWTH,
-            },
-            Bound {
-                metric: "archetype_structural_table_transitions",
-                budget_max: Some(0),
-                growth: &[("total_entities", Growth::Constant)],
-            },
-            Bound {
-                metric: "cached_sparse_query_rows_inspected",
-                budget_max: Some(0),
-                growth: &[("total_entities", Growth::Constant)],
-            },
-            Bound {
-                metric: "archetype_entity_locations_inspected",
-                budget_max: Some(0),
-                growth: &[("total_entities", Growth::Constant)],
-            },
-        ],
-    );
+    let mut bounds = vec![
+        Bound {
+            metric: "rows_returned",
+            budget_max: None,
+            growth: REPEAT_ROW_GROWTH,
+        },
+        Bound {
+            metric: "cached_sparse_integration_rows_scanned",
+            budget_max: None,
+            growth: REPEAT_ROW_GROWTH,
+        },
+        Bound {
+            metric: "archetype_integration_rows_scanned",
+            budget_max: None,
+            growth: REPEAT_ROW_GROWTH,
+        },
+    ];
+    // No structural maintenance at all while the query only repeats.
+    bounds.extend(zero_constant_in_n(&[
+        "cached_sparse_query_cache_updates",
+        "archetype_structural_table_transitions",
+        "cached_sparse_query_rows_inspected",
+        "archetype_entity_locations_inspected",
+        "cached_sparse_component_slots_touched",
+        "cached_sparse_entity_entries_touched",
+        "archetype_table_rows_touched",
+    ]));
+    finish("repeat-cached-query", &samples, &bounds);
 }
 
 /// `(total_entities, changed_entities)`: unrelated population varies with one changed entity,
@@ -491,96 +504,139 @@ const CHURN_POINTS: [(u32, u32); 5] = [
     (100_000, 16),
     (100_000, 256),
 ];
+const MAX_CHANGED: u64 = 256;
 
-#[test]
-fn single_entity_component_churn_does_not_scale_with_population() {
-    let samples: Vec<Sample> = CHURN_POINTS
+const CONSTANT_N_LINEAR_C: &[(&str, Growth)] = &[
+    ("total_entities", Growth::Constant),
+    ("changed_entities", Growth::Linear),
+];
+
+/// Every structural-path counter, per storage, with its analytic per-changed-entity ceiling.
+///
+/// The ceilings follow from the instrumented primitives: a sparse-set insert touches at most
+/// three slots and a removal at most four, a query refresh at most three rows, an archetype move
+/// one location read plus at most two writes and at most three table rows. Each metric is bound
+/// constant in N, linear in C, and to `ceiling * MAX_CHANGED` at every point.
+fn structural_metrics(work: &Work) -> Vec<(&'static str, u64)> {
+    vec![
+        (
+            "reference_entity_entries_touched",
+            work.reference.entity_locations_inspected,
+        ),
+        (
+            "sparse_set_entity_entries_touched",
+            work.sparse.entity_locations_inspected,
+        ),
+        (
+            "sparse_set_component_slots_touched",
+            work.sparse.component_slots_touched,
+        ),
+        (
+            "cached_sparse_entity_entries_touched",
+            work.cached.entity_locations_inspected,
+        ),
+        (
+            "cached_sparse_component_slots_touched",
+            work.cached.component_slots_touched,
+        ),
+        (
+            "cached_sparse_query_rows_inspected",
+            work.cached.query_rows_inspected,
+        ),
+        (
+            "cached_sparse_query_cache_updates",
+            work.cached.query_cache_updates,
+        ),
+        (
+            "archetype_entity_locations_inspected",
+            work.archetype.entity_locations_inspected,
+        ),
+        (
+            "archetype_table_rows_touched",
+            work.archetype.table_rows_touched,
+        ),
+        (
+            "archetype_structural_table_transitions",
+            work.archetype.structural_table_transitions,
+        ),
+    ]
+}
+
+fn structural_bounds(per_change: [u64; 10]) -> Vec<Bound> {
+    let names = structural_metrics(&Work::default());
+    names
+        .into_iter()
+        .zip(per_change)
+        .map(|((metric, _), ceiling)| Bound {
+            metric,
+            budget_max: Some(ceiling * MAX_CHANGED),
+            growth: CONSTANT_N_LINEAR_C,
+        })
+        .collect()
+}
+
+/// Applies `operations(entity)` to C evenly spaced entities in a world where all N entities match
+/// Position+Velocity, so a rescan of the unrelated population would be paid in full.
+fn structural_samples(operations: impl Fn(EntityId) -> Vec<Operation>) -> Vec<Sample> {
+    CHURN_POINTS
         .into_iter()
         .map(|(total, changed)| {
-            // Every entity matches Position+Velocity, so any full query rebuild or table rescan
-            // would be paid for the whole unrelated population.
             let mut worlds = sparse_motion_worlds(total, total);
             let stride = total / changed;
             let mut work = Work::default();
             for index in 0..changed {
-                let entity = EntityId(index * stride + stride / 2);
-                worlds.apply(Operation::RemoveVelocity(entity), &mut work);
-                worlds.apply(
-                    Operation::SetVelocity(entity, Velocity::new(-3, 2)),
-                    &mut work,
-                );
+                for operation in operations(EntityId(index * stride + stride / 2)) {
+                    worlds.apply(operation, &mut work);
+                }
             }
-            let context = format!("total={total} changed={changed}");
-            worlds.assert_snapshot_parity(&context);
+            worlds.assert_snapshot_parity(&format!("total={total} changed={changed}"));
             Sample {
                 dimensions: vec![
                     ("total_entities", u64::from(total)),
                     ("changed_entities", u64::from(changed)),
                 ],
-                metrics: vec![
-                    (
-                        "archetype_structural_table_transitions",
-                        work.archetype.structural_table_transitions,
-                    ),
-                    (
-                        "cached_sparse_query_cache_updates",
-                        work.cached.query_cache_updates,
-                    ),
-                    (
-                        "cached_sparse_query_rows_inspected",
-                        work.cached.query_rows_inspected,
-                    ),
-                    (
-                        "archetype_entity_locations_inspected",
-                        work.archetype.entity_locations_inspected,
-                    ),
-                ],
+                metrics: structural_metrics(&work),
             }
         })
-        .collect();
+        .collect()
+}
 
-    // One removal and one re-add per changed entity: two table moves, and at most three query
-    // rows touched (the entity leaving, the swap-moved row, the entity returning). The outcome
-    // counters alone cannot see a path that inspects every row and changes few, so the rows and
-    // location entries actually inspected are bounded too: at most three refreshed query rows,
-    // and per move one location read plus at most two writes (the swap-moved row and the entity).
+#[test]
+fn single_entity_component_churn_does_not_scale_with_population() {
+    let samples = structural_samples(|entity| {
+        vec![
+            Operation::RemoveVelocity(entity),
+            Operation::SetVelocity(entity, Velocity::new(-3, 2)),
+        ]
+    });
+    // Per changed entity: two alive/entry checks (reference, sparse, cached); a removal (4) and an
+    // insert (3) of component slots, plus two sparse reads per query refresh (up to 3 refreshes);
+    // query rows 3 (leaving row, swap-moved row) + 2 (moved entity's row) + 2 (returning row);
+    // up to 3 row changes; two archetype moves of 3 locations and 3 table rows each.
     finish(
         "add-remove-component",
         &samples,
-        &[
-            Bound {
-                metric: "archetype_structural_table_transitions",
-                budget_max: Some(2 * 256),
-                growth: &[
-                    ("total_entities", Growth::Constant),
-                    ("changed_entities", Growth::Linear),
-                ],
-            },
-            Bound {
-                metric: "cached_sparse_query_cache_updates",
-                budget_max: Some(3 * 256),
-                growth: &[
-                    ("total_entities", Growth::Constant),
-                    ("changed_entities", Growth::Linear),
-                ],
-            },
-            Bound {
-                metric: "cached_sparse_query_rows_inspected",
-                budget_max: Some(3 * 256),
-                growth: &[
-                    ("total_entities", Growth::Constant),
-                    ("changed_entities", Growth::Linear),
-                ],
-            },
-            Bound {
-                metric: "archetype_entity_locations_inspected",
-                budget_max: Some(6 * 256),
-                growth: &[
-                    ("total_entities", Growth::Constant),
-                    ("changed_entities", Growth::Linear),
-                ],
-            },
-        ],
+        &structural_bounds([2, 2, 7, 2, 13, 7, 3, 6, 6, 2]),
+    );
+}
+
+#[test]
+fn single_entity_respawn_does_not_scale_with_population() {
+    let samples = structural_samples(|entity| {
+        vec![
+            Operation::Despawn(entity),
+            Operation::Spawn(entity),
+            Operation::SetPosition(entity, Position::new(4, -4)),
+            Operation::SetVelocity(entity, Velocity::new(1, 1)),
+        ]
+    });
+    // Per changed entity: despawn removes two components (4 slots each) and refreshes up to three
+    // query rows; spawn and two inserts follow. Archetype: despawn (3 locations, 2 rows), spawn
+    // (2 locations, 1 row) and two moves (3 locations, 3 rows each).
+    finish(
+        "respawn-entity",
+        &samples,
+        &structural_bounds([5, 5, 14, 5, 24, 10, 4, 11, 9, 2]),
     );
 }
 
@@ -695,6 +751,8 @@ fn predicted_operation_work_matches_measured_work_on_v1_fixtures() {
             let measured = measured.map(|work| StorageWorkStats {
                 query_rows_inspected: 0,
                 entity_locations_inspected: 0,
+                component_slots_touched: 0,
+                table_rows_touched: 0,
                 ..work
             });
             assert_eq!(measured, predicted, "{context}");

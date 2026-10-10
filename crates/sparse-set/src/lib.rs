@@ -24,15 +24,17 @@ impl<T> Default for SparseSet<T> {
 }
 
 impl<T> SparseSet<T> {
-    fn insert(&mut self, entity: EntityId, value: T) {
+    /// Inserts or overwrites the value and returns the sparse slots and dense rows touched.
+    fn insert(&mut self, entity: EntityId, value: T) -> u64 {
         if let Some(index) = self.sparse.get(entity.0) {
             self.dense_values[index] = value;
-            return;
+            return 2;
         }
         let index = self.dense_values.len();
         self.sparse.set(entity.0, index);
         self.dense_entities.push(entity);
         self.dense_values.push(value);
+        3
     }
 
     fn index(&self, entity: EntityId) -> Option<usize> {
@@ -44,15 +46,19 @@ impl<T> SparseSet<T> {
             .and_then(|index| self.dense_values.get(index))
     }
 
-    fn remove(&mut self, entity: EntityId) -> Option<T> {
-        let index = self.sparse.remove(entity.0)?;
+    /// Removes the value and returns the sparse slots and dense rows touched.
+    fn remove(&mut self, entity: EntityId) -> u64 {
+        let Some(index) = self.sparse.remove(entity.0) else {
+            return 1;
+        };
         self.dense_entities.swap_remove(index);
-        let removed = self.dense_values.swap_remove(index);
+        self.dense_values.swap_remove(index);
         if index < self.dense_entities.len() {
             let moved = self.dense_entities[index];
             self.sparse.set(moved.0, index);
+            return 4;
         }
-        Some(removed)
+        2
     }
 }
 
@@ -93,7 +99,8 @@ impl SparseWorld {
     /// Applies one operation and returns the work the executed path actually performed.
     ///
     /// Unlike [`Self::operation_work`], which predicts work from the current state, these counters
-    /// are incremented inside the integration loop that runs.
+    /// are incremented inside the integration loop that runs, and structural operations report
+    /// the alive-set entries and component sparse slots and dense rows they touch.
     ///
     /// # Errors
     ///
@@ -102,42 +109,40 @@ impl SparseWorld {
         &mut self,
         operation: Operation,
     ) -> Result<StorageWorkStats, WorkloadError> {
+        let mut work = StorageWorkStats::default();
         match operation {
             Operation::Spawn(entity) => {
+                work.entity_locations_inspected += 1;
                 if !self.alive.insert(entity) {
                     return Err(WorkloadError::EntityAlreadyExists(entity));
                 }
-                Ok(StorageWorkStats::default())
             }
             Operation::Despawn(entity) => {
-                self.require_alive(entity)?;
+                self.require_alive(entity, &mut work)?;
                 self.alive.remove(&entity);
-                self.positions.remove(entity);
-                self.velocities.remove(entity);
-                Ok(StorageWorkStats::default())
+                work.entity_locations_inspected += 1;
+                work.component_slots_touched +=
+                    self.positions.remove(entity) + self.velocities.remove(entity);
             }
             Operation::SetPosition(entity, position) => {
-                self.require_alive(entity)?;
-                self.positions.insert(entity, position);
-                Ok(StorageWorkStats::default())
+                self.require_alive(entity, &mut work)?;
+                work.component_slots_touched += self.positions.insert(entity, position);
             }
             Operation::RemovePosition(entity) => {
-                self.require_alive(entity)?;
-                self.positions.remove(entity);
-                Ok(StorageWorkStats::default())
+                self.require_alive(entity, &mut work)?;
+                work.component_slots_touched += self.positions.remove(entity);
             }
             Operation::SetVelocity(entity, velocity) => {
-                self.require_alive(entity)?;
-                self.velocities.insert(entity, velocity);
-                Ok(StorageWorkStats::default())
+                self.require_alive(entity, &mut work)?;
+                work.component_slots_touched += self.velocities.insert(entity, velocity);
             }
             Operation::RemoveVelocity(entity) => {
-                self.require_alive(entity)?;
-                self.velocities.remove(entity);
-                Ok(StorageWorkStats::default())
+                self.require_alive(entity, &mut work)?;
+                work.component_slots_touched += self.velocities.remove(entity);
             }
-            Operation::Integrate { ticks } => Ok(self.integrate(ticks)),
+            Operation::Integrate { ticks } => work = self.integrate(ticks),
         }
+        Ok(work)
     }
 
     /// Replays every operation in order.
@@ -223,7 +228,12 @@ impl SparseWorld {
         }
     }
 
-    fn require_alive(&self, entity: EntityId) -> Result<(), WorkloadError> {
+    fn require_alive(
+        &self,
+        entity: EntityId,
+        work: &mut StorageWorkStats,
+    ) -> Result<(), WorkloadError> {
+        work.entity_locations_inspected += 1;
         if self.alive.contains(&entity) {
             Ok(())
         } else {
