@@ -11,7 +11,8 @@
   "capabilityCommands": {
     ".": {
       "benchmark": ["bash", "scripts/benchmark.sh", "full"],
-      "benchmark:smoke": ["bash", "scripts/benchmark.sh", "smoke"]
+      "benchmark:smoke": ["bash", "scripts/benchmark.sh", "smoke"],
+      "performance:work": ["bash", "scripts/collect-work-evidence.sh"]
     }
   },
   "merge": {

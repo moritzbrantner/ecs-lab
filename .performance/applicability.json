@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "components": [
+    {
+      "component": ".",
+      "scenarios": [
+        {
+          "family": "work-complexity",
+          "capability": "performance:work",
+          "path": ".performance/contract.json",
+          "tools": ["cargo", "python3"],
+          "platforms": ["linux", "darwin"]
+        }
+      ]
+    }
+  ]
+}

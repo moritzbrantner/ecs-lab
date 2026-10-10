@@ -26,7 +26,7 @@ jobs:
           cargo fetch --locked --manifest-path experiments/tower-wgpu-renderer/Cargo.toml
 
       - name: Run fast validation tier
-        uses: moritzbrantner/coding-tooling@a630598d369ac94d0f549dce5c859b9dd28b250c
+        uses: moritzbrantner/coding-tooling@42444c4a4e3a3e95858d3c32ff2bc3d76f4afe0f
         with:
           operation: run
           tier: fast
@@ -63,14 +63,14 @@ jobs:
 
       - name: Check repository conformance
         if: steps.structure.outputs.changed == 'true'
-        uses: moritzbrantner/coding-tooling@a630598d369ac94d0f549dce5c859b9dd28b250c
+        uses: moritzbrantner/coding-tooling@42444c4a4e3a3e95858d3c32ff2bc3d76f4afe0f
         with:
           operation: conformance
           install-mode: none
 
       - name: Check deterministic findings
         if: steps.structure.outputs.changed == 'true'
-        uses: moritzbrantner/coding-tooling@a630598d369ac94d0f549dce5c859b9dd28b250c
+        uses: moritzbrantner/coding-tooling@42444c4a4e3a3e95858d3c32ff2bc3d76f4afe0f
         with:
           operation: findings
           install-mode: none

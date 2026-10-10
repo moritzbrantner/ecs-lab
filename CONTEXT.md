@@ -18,6 +18,8 @@ Measure how different ECS storage strategies behave under identical deterministi
 
 **Benchmark scenario** — A named, versionable workload configuration with explicit entity count, operation mix/seed, measured unit, and environment identity.
 
+**Measured work** — Deterministic counters a candidate increments inside the loops and branches it actually executes (`apply_measured`, `snapshot_with_stats`). Operation scaling contracts in `.performance/contract.json` use measured work; `operation_work` is a state-based prediction kept for the v1 storage ratchet and must agree with measured work on the v1 fixtures.
+
 **Physics workload** — A storage-independent transformation from an observable snapshot plus body configuration into ordinary ECS workload operations and descriptive contact evidence.
 
 **Collision-kernel boundary** — Reusable collision decisions live in pinned `rust-kernels` crates. ECS Lab owns ECS-facing scheduling/integration/response experiments and does not depend on the Collision Lab application.

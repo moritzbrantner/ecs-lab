@@ -87,44 +87,56 @@ impl SparseWorld {
     ///
     /// Returns [`WorkloadError`] for invalid entity lifecycle operations.
     pub fn apply(&mut self, operation: Operation) -> Result<(), WorkloadError> {
+        self.apply_measured(operation).map(|_| ())
+    }
+
+    /// Applies one operation and returns the work the executed path actually performed.
+    ///
+    /// Unlike [`Self::operation_work`], which predicts work from the current state, these counters
+    /// are incremented inside the integration loop that runs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WorkloadError`] under the same conditions as [`Self::apply`].
+    pub fn apply_measured(
+        &mut self,
+        operation: Operation,
+    ) -> Result<StorageWorkStats, WorkloadError> {
         match operation {
             Operation::Spawn(entity) => {
                 if !self.alive.insert(entity) {
                     return Err(WorkloadError::EntityAlreadyExists(entity));
                 }
-                Ok(())
+                Ok(StorageWorkStats::default())
             }
             Operation::Despawn(entity) => {
                 self.require_alive(entity)?;
                 self.alive.remove(&entity);
                 self.positions.remove(entity);
                 self.velocities.remove(entity);
-                Ok(())
+                Ok(StorageWorkStats::default())
             }
             Operation::SetPosition(entity, position) => {
                 self.require_alive(entity)?;
                 self.positions.insert(entity, position);
-                Ok(())
+                Ok(StorageWorkStats::default())
             }
             Operation::RemovePosition(entity) => {
                 self.require_alive(entity)?;
                 self.positions.remove(entity);
-                Ok(())
+                Ok(StorageWorkStats::default())
             }
             Operation::SetVelocity(entity, velocity) => {
                 self.require_alive(entity)?;
                 self.velocities.insert(entity, velocity);
-                Ok(())
+                Ok(StorageWorkStats::default())
             }
             Operation::RemoveVelocity(entity) => {
                 self.require_alive(entity)?;
                 self.velocities.remove(entity);
-                Ok(())
+                Ok(StorageWorkStats::default())
             }
-            Operation::Integrate { ticks } => {
-                self.integrate(ticks);
-                Ok(())
-            }
+            Operation::Integrate { ticks } => Ok(self.integrate(ticks)),
         }
     }
 
@@ -142,28 +154,24 @@ impl SparseWorld {
 
     #[must_use]
     pub fn snapshot(&self) -> WorldSnapshot {
-        WorldSnapshot::new(
-            self.alive
-                .iter()
-                .map(|&id| EntitySnapshot {
-                    id,
-                    position: self.positions.get(id).copied(),
-                    velocity: self.velocities.get(id).copied(),
-                })
-                .collect(),
-        )
+        self.snapshot_with_stats().0
     }
 
+    /// Projects the canonical snapshot and counts the slots the projection loop visited.
     #[must_use]
     pub fn snapshot_with_stats(&self) -> (WorldSnapshot, SnapshotWorkStats) {
-        let entity_count = u64::try_from(self.alive.len()).unwrap_or(u64::MAX);
-        (
-            self.snapshot(),
-            SnapshotWorkStats {
-                slots_scanned: entity_count,
-                entities_materialized: entity_count,
-            },
-        )
+        let mut work = SnapshotWorkStats::default();
+        let mut entities = Vec::with_capacity(self.alive.len());
+        for &id in &self.alive {
+            work.slots_scanned += 1;
+            entities.push(EntitySnapshot {
+                id,
+                position: self.positions.get(id).copied(),
+                velocity: self.velocities.get(id).copied(),
+            });
+            work.entities_materialized += 1;
+        }
+        (WorldSnapshot::new(entities), work)
     }
 
     #[must_use]
@@ -223,14 +231,18 @@ impl SparseWorld {
         }
     }
 
-    fn integrate(&mut self, ticks: i32) {
+    fn integrate(&mut self, ticks: i32) -> StorageWorkStats {
         let ticks = i64::from(ticks);
+        let mut work = StorageWorkStats::default();
         if self.positions.dense_entities.len() <= self.velocities.dense_entities.len() {
             for position_index in 0..self.positions.dense_entities.len() {
+                work.integration_rows_scanned += 1;
                 let entity = self.positions.dense_entities[position_index];
+                work.component_lookups += 1;
                 let Some(velocity) = self.velocities.get(entity).copied() else {
                     continue;
                 };
+                work.integrated_entities += 1;
                 integrate_position(
                     &mut self.positions.dense_values[position_index],
                     velocity,
@@ -239,10 +251,13 @@ impl SparseWorld {
             }
         } else {
             for velocity_index in 0..self.velocities.dense_entities.len() {
+                work.integration_rows_scanned += 1;
                 let entity = self.velocities.dense_entities[velocity_index];
+                work.component_lookups += 1;
                 let Some(position_index) = self.positions.index(entity) else {
                     continue;
                 };
+                work.integrated_entities += 1;
                 let velocity = self.velocities.dense_values[velocity_index];
                 integrate_position(
                     &mut self.positions.dense_values[position_index],
@@ -251,6 +266,7 @@ impl SparseWorld {
                 );
             }
         }
+        work
     }
 }
 
