@@ -144,8 +144,9 @@ impl ArchetypeWorld {
     /// Applies one operation and returns the work the executed path actually performed.
     ///
     /// Unlike [`Self::operation_work`], which predicts work from the current state, integration
-    /// rows are counted in the motion-table loop and a structural table transition is counted in
-    /// the branch that moves an entity between tables.
+    /// rows are counted in the motion-table loop, a structural table transition is counted in
+    /// the branch that moves an entity between tables, and every entity-location entry read or
+    /// written by a structural operation is counted at the location accessors.
     ///
     /// # Errors
     ///
@@ -154,19 +155,21 @@ impl ArchetypeWorld {
         &mut self,
         operation: Operation,
     ) -> Result<StorageWorkStats, WorkloadError> {
-        let structural_table_transitions = match operation {
-            Operation::Spawn(entity) => self.spawn(entity).map(|()| 0)?,
-            Operation::Despawn(entity) => self.despawn(entity).map(|()| 0)?,
-            Operation::SetPosition(entity, position) => self.set_position(entity, position)?,
-            Operation::RemovePosition(entity) => self.remove_position(entity)?,
-            Operation::SetVelocity(entity, velocity) => self.set_velocity(entity, velocity)?,
-            Operation::RemoveVelocity(entity) => self.remove_velocity(entity)?,
-            Operation::Integrate { ticks } => return Ok(self.integrate(ticks)),
-        };
-        Ok(StorageWorkStats {
-            structural_table_transitions,
-            ..StorageWorkStats::default()
-        })
+        match operation {
+            Operation::Spawn(entity) => {
+                self.spawn_bundle_measured(entity, None, None)
+                    .map(|entity_locations_inspected| StorageWorkStats {
+                        entity_locations_inspected,
+                        ..StorageWorkStats::default()
+                    })
+            }
+            Operation::Despawn(entity) => self.despawn(entity),
+            Operation::SetPosition(entity, position) => self.set_position(entity, position),
+            Operation::RemovePosition(entity) => self.remove_position(entity),
+            Operation::SetVelocity(entity, velocity) => self.set_velocity(entity, velocity),
+            Operation::RemoveVelocity(entity) => self.remove_velocity(entity),
+            Operation::Integrate { ticks } => Ok(self.integrate(ticks)),
+        }
     }
 
     /// Replays every operation in order.
@@ -195,6 +198,17 @@ impl ArchetypeWorld {
         position: Option<Position>,
         velocity: Option<Velocity>,
     ) -> Result<(), WorkloadError> {
+        self.spawn_bundle_measured(entity, position, velocity)
+            .map(|_| ())
+    }
+
+    /// Returns the number of entity-location entries read or written.
+    fn spawn_bundle_measured(
+        &mut self,
+        entity: EntityId,
+        position: Option<Position>,
+        velocity: Option<Velocity>,
+    ) -> Result<u64, WorkloadError> {
         if self.locations.contains_key(&entity) {
             return Err(WorkloadError::EntityAlreadyExists(entity));
         }
@@ -208,8 +222,7 @@ impl ArchetypeWorld {
                 self.motion.push(entity, position, velocity),
             ),
         };
-        self.set_location(entity, table, index);
-        Ok(())
+        Ok(1 + self.set_location(entity, table, index))
     }
 
     /// Projects the observable world in canonical entity-id order.
@@ -304,50 +317,58 @@ impl ArchetypeWorld {
         }
     }
 
-    fn spawn(&mut self, entity: EntityId) -> Result<(), WorkloadError> {
-        self.spawn_bundle(entity, None, None)
-    }
-
-    fn despawn(&mut self, entity: EntityId) -> Result<(), WorkloadError> {
+    fn despawn(&mut self, entity: EntityId) -> Result<StorageWorkStats, WorkloadError> {
         let location = self.location(entity)?;
+        let mut locations_inspected = 1;
         match location.table {
             TableKind::Empty => {
                 let (removed, moved) = self.empty.swap_remove(location.index);
                 debug_assert_eq!(removed, entity);
-                self.repair_moved(moved, TableKind::Empty, location.index);
+                locations_inspected += self.repair_moved(moved, TableKind::Empty, location.index);
             }
             TableKind::Position => {
                 let (removed, _position, moved) = self.positions.swap_remove(location.index);
                 debug_assert_eq!(removed, entity);
-                self.repair_moved(moved, TableKind::Position, location.index);
+                locations_inspected +=
+                    self.repair_moved(moved, TableKind::Position, location.index);
             }
             TableKind::Velocity => {
                 let (removed, _velocity, moved) = self.velocities.swap_remove(location.index);
                 debug_assert_eq!(removed, entity);
-                self.repair_moved(moved, TableKind::Velocity, location.index);
+                locations_inspected +=
+                    self.repair_moved(moved, TableKind::Velocity, location.index);
             }
             TableKind::Motion => {
                 let (removed, _position, _velocity, moved) =
                     self.motion.swap_remove(location.index);
                 debug_assert_eq!(removed, entity);
-                self.repair_moved(moved, TableKind::Motion, location.index);
+                locations_inspected += self.repair_moved(moved, TableKind::Motion, location.index);
             }
         }
 
         self.locations.remove(&entity);
-        Ok(())
+        locations_inspected += 1;
+        Ok(StorageWorkStats {
+            entity_locations_inspected: locations_inspected,
+            ..StorageWorkStats::default()
+        })
     }
 
-    /// Returns the number of structural table transitions this call performed.
-    fn set_position(&mut self, entity: EntityId, position: Position) -> Result<u64, WorkloadError> {
+    /// Returns the table transitions and entity-location entries this call performed.
+    fn set_position(
+        &mut self,
+        entity: EntityId,
+        position: Position,
+    ) -> Result<StorageWorkStats, WorkloadError> {
         let location = self.location(entity)?;
+        let mut locations_inspected = 1;
         let transitions = match location.table {
             TableKind::Empty => {
                 let (removed, moved) = self.empty.swap_remove(location.index);
                 debug_assert_eq!(removed, entity);
-                self.repair_moved(moved, TableKind::Empty, location.index);
+                locations_inspected += self.repair_moved(moved, TableKind::Empty, location.index);
                 let index = self.positions.push(entity, position);
-                self.set_location(entity, TableKind::Position, index);
+                locations_inspected += self.set_location(entity, TableKind::Position, index);
                 1
             }
             TableKind::Position => {
@@ -357,9 +378,10 @@ impl ArchetypeWorld {
             TableKind::Velocity => {
                 let (removed, velocity, moved) = self.velocities.swap_remove(location.index);
                 debug_assert_eq!(removed, entity);
-                self.repair_moved(moved, TableKind::Velocity, location.index);
+                locations_inspected +=
+                    self.repair_moved(moved, TableKind::Velocity, location.index);
                 let index = self.motion.push(entity, position, velocity);
-                self.set_location(entity, TableKind::Motion, index);
+                locations_inspected += self.set_location(entity, TableKind::Motion, index);
                 1
             }
             TableKind::Motion => {
@@ -367,52 +389,68 @@ impl ArchetypeWorld {
                 0
             }
         };
-        Ok(transitions)
+        Ok(StorageWorkStats {
+            structural_table_transitions: transitions,
+            entity_locations_inspected: locations_inspected,
+            ..StorageWorkStats::default()
+        })
     }
 
-    /// Returns the number of structural table transitions this call performed.
-    fn remove_position(&mut self, entity: EntityId) -> Result<u64, WorkloadError> {
+    /// Returns the table transitions and entity-location entries this call performed.
+    fn remove_position(&mut self, entity: EntityId) -> Result<StorageWorkStats, WorkloadError> {
         let location = self.location(entity)?;
+        let mut locations_inspected = 1;
         let transitions = match location.table {
             TableKind::Empty | TableKind::Velocity => 0,
             TableKind::Position => {
                 let (removed, _position, moved) = self.positions.swap_remove(location.index);
                 debug_assert_eq!(removed, entity);
-                self.repair_moved(moved, TableKind::Position, location.index);
+                locations_inspected +=
+                    self.repair_moved(moved, TableKind::Position, location.index);
                 let index = self.empty.push(entity);
-                self.set_location(entity, TableKind::Empty, index);
+                locations_inspected += self.set_location(entity, TableKind::Empty, index);
                 1
             }
             TableKind::Motion => {
                 let (removed, _position, velocity, moved) = self.motion.swap_remove(location.index);
                 debug_assert_eq!(removed, entity);
-                self.repair_moved(moved, TableKind::Motion, location.index);
+                locations_inspected += self.repair_moved(moved, TableKind::Motion, location.index);
                 let index = self.velocities.push(entity, velocity);
-                self.set_location(entity, TableKind::Velocity, index);
+                locations_inspected += self.set_location(entity, TableKind::Velocity, index);
                 1
             }
         };
-        Ok(transitions)
+        Ok(StorageWorkStats {
+            structural_table_transitions: transitions,
+            entity_locations_inspected: locations_inspected,
+            ..StorageWorkStats::default()
+        })
     }
 
-    /// Returns the number of structural table transitions this call performed.
-    fn set_velocity(&mut self, entity: EntityId, velocity: Velocity) -> Result<u64, WorkloadError> {
+    /// Returns the table transitions and entity-location entries this call performed.
+    fn set_velocity(
+        &mut self,
+        entity: EntityId,
+        velocity: Velocity,
+    ) -> Result<StorageWorkStats, WorkloadError> {
         let location = self.location(entity)?;
+        let mut locations_inspected = 1;
         let transitions = match location.table {
             TableKind::Empty => {
                 let (removed, moved) = self.empty.swap_remove(location.index);
                 debug_assert_eq!(removed, entity);
-                self.repair_moved(moved, TableKind::Empty, location.index);
+                locations_inspected += self.repair_moved(moved, TableKind::Empty, location.index);
                 let index = self.velocities.push(entity, velocity);
-                self.set_location(entity, TableKind::Velocity, index);
+                locations_inspected += self.set_location(entity, TableKind::Velocity, index);
                 1
             }
             TableKind::Position => {
                 let (removed, position, moved) = self.positions.swap_remove(location.index);
                 debug_assert_eq!(removed, entity);
-                self.repair_moved(moved, TableKind::Position, location.index);
+                locations_inspected +=
+                    self.repair_moved(moved, TableKind::Position, location.index);
                 let index = self.motion.push(entity, position, velocity);
-                self.set_location(entity, TableKind::Motion, index);
+                locations_inspected += self.set_location(entity, TableKind::Motion, index);
                 1
             }
             TableKind::Velocity => {
@@ -424,32 +462,42 @@ impl ArchetypeWorld {
                 0
             }
         };
-        Ok(transitions)
+        Ok(StorageWorkStats {
+            structural_table_transitions: transitions,
+            entity_locations_inspected: locations_inspected,
+            ..StorageWorkStats::default()
+        })
     }
 
-    /// Returns the number of structural table transitions this call performed.
-    fn remove_velocity(&mut self, entity: EntityId) -> Result<u64, WorkloadError> {
+    /// Returns the table transitions and entity-location entries this call performed.
+    fn remove_velocity(&mut self, entity: EntityId) -> Result<StorageWorkStats, WorkloadError> {
         let location = self.location(entity)?;
+        let mut locations_inspected = 1;
         let transitions = match location.table {
             TableKind::Empty | TableKind::Position => 0,
             TableKind::Velocity => {
                 let (removed, _velocity, moved) = self.velocities.swap_remove(location.index);
                 debug_assert_eq!(removed, entity);
-                self.repair_moved(moved, TableKind::Velocity, location.index);
+                locations_inspected +=
+                    self.repair_moved(moved, TableKind::Velocity, location.index);
                 let index = self.empty.push(entity);
-                self.set_location(entity, TableKind::Empty, index);
+                locations_inspected += self.set_location(entity, TableKind::Empty, index);
                 1
             }
             TableKind::Motion => {
                 let (removed, position, _velocity, moved) = self.motion.swap_remove(location.index);
                 debug_assert_eq!(removed, entity);
-                self.repair_moved(moved, TableKind::Motion, location.index);
+                locations_inspected += self.repair_moved(moved, TableKind::Motion, location.index);
                 let index = self.positions.push(entity, position);
-                self.set_location(entity, TableKind::Position, index);
+                locations_inspected += self.set_location(entity, TableKind::Position, index);
                 1
             }
         };
-        Ok(transitions)
+        Ok(StorageWorkStats {
+            structural_table_transitions: transitions,
+            entity_locations_inspected: locations_inspected,
+            ..StorageWorkStats::default()
+        })
     }
 
     fn integrate(&mut self, ticks: i32) -> StorageWorkStats {
@@ -490,14 +538,15 @@ impl ArchetypeWorld {
             .ok_or(WorkloadError::MissingEntity(entity))
     }
 
-    fn set_location(&mut self, entity: EntityId, table: TableKind, index: usize) {
+    /// Writes one entity-location entry and returns the number of entries written.
+    fn set_location(&mut self, entity: EntityId, table: TableKind, index: usize) -> u64 {
         self.locations.insert(entity, Location { table, index });
+        1
     }
 
-    fn repair_moved(&mut self, moved: Option<EntityId>, table: TableKind, index: usize) {
-        if let Some(entity) = moved {
-            self.set_location(entity, table, index);
-        }
+    /// Re-points the swap-moved row, returning the number of location entries written.
+    fn repair_moved(&mut self, moved: Option<EntityId>, table: TableKind, index: usize) -> u64 {
+        moved.map_or(0, |entity| self.set_location(entity, table, index))
     }
 
     fn transition_work(

@@ -234,6 +234,12 @@ pub struct StorageWorkStats {
     pub component_lookups: u64,
     pub structural_table_transitions: u64,
     pub query_cache_updates: u64,
+    /// Cached-query rows inspected by query maintenance (one per refreshed entity), whether or
+    /// not the row changed. Only measured work (`apply_measured`) fills this; predictions leave 0.
+    pub query_rows_inspected: u64,
+    /// Entity-location index entries read or written by structural operations. Only measured
+    /// work (`apply_measured`) fills this; predictions leave 0.
+    pub entity_locations_inspected: u64,
 }
 
 impl StorageWorkStats {
@@ -253,6 +259,12 @@ impl StorageWorkStats {
         self.query_cache_updates = self
             .query_cache_updates
             .saturating_add(other.query_cache_updates);
+        self.query_rows_inspected = self
+            .query_rows_inspected
+            .saturating_add(other.query_rows_inspected);
+        self.entity_locations_inspected = self
+            .entity_locations_inspected
+            .saturating_add(other.entity_locations_inspected);
     }
 }
 

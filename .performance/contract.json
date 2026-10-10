@@ -705,6 +705,36 @@
               "bound": "constant"
             }
           ]
+        },
+        {
+          "name": "cached_sparse_query_rows_inspected",
+          "unit": "rows",
+          "signal": "operation-count",
+          "budget": {
+            "max": 0
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "Query rows inspected by cache maintenance, changed or not; a rebuild that rescans rows without changing them makes this non-zero."
+        },
+        {
+          "name": "archetype_entity_locations_inspected",
+          "unit": "entries",
+          "signal": "operation-count",
+          "budget": {
+            "max": 0
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "Entity-location entries read or written by structural work; repeated reads touch none."
         }
       ]
     },
@@ -779,6 +809,44 @@
             }
           ],
           "notes": "Measured row changes: the leaving row, the swap-moved row and the returning row, at most three per changed entity."
+        },
+        {
+          "name": "cached_sparse_query_rows_inspected",
+          "unit": "rows",
+          "signal": "operation-count",
+          "budget": {
+            "max": 768
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Query rows each refresh inspects, counted per refresh whether or not the row changes; a refresh or rebuild that visits every entity grows with N here even when the update count does not."
+        },
+        {
+          "name": "archetype_entity_locations_inspected",
+          "unit": "entries",
+          "signal": "operation-count",
+          "budget": {
+            "max": 1536
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Location entries read or written by the table-move path (one read, at most two writes per move); re-indexing a table after a move grows with N here."
         }
       ]
     },

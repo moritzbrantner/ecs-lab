@@ -95,13 +95,15 @@ impl MotionQuery {
         self.sparse.get(entity.0)
     }
 
+    /// Refreshes one entity's query row and returns the measured maintenance work.
     fn refresh(
         &mut self,
         entity: EntityId,
         position_index: Option<usize>,
         velocity_index: Option<usize>,
-    ) -> u64 {
-        match (position_index, velocity_index, self.row_index(entity)) {
+    ) -> StorageWorkStats {
+        // One query row (the entity's sparse slot and dense indices) is inspected per refresh.
+        let query_cache_updates = match (position_index, velocity_index, self.row_index(entity)) {
             (Some(position_index), Some(velocity_index), Some(row_index)) => {
                 let row = &mut self.rows[row_index];
                 if row.position_index == position_index && row.velocity_index == velocity_index {
@@ -131,6 +133,11 @@ impl MotionQuery {
                 1
             }
             _ => 0,
+        };
+        StorageWorkStats {
+            query_rows_inspected: 1,
+            query_cache_updates,
+            ..StorageWorkStats::default()
         }
     }
 }
@@ -183,8 +190,8 @@ impl CachedSparseWorld {
     /// Applies one operation and returns the work the executed path actually performed.
     ///
     /// Unlike [`Self::operation_work`], which predicts work from the current state, integration
-    /// rows are counted in the cached-query loop and query-cache updates are the row changes the
-    /// query refreshes really made.
+    /// rows are counted in the cached-query loop, every query row a refresh inspects is counted,
+    /// and query-cache updates are the row changes those refreshes really made.
     ///
     /// # Errors
     ///
@@ -204,47 +211,47 @@ impl CachedSparseWorld {
                 self.require_alive(entity)?;
                 let position_removed = self.positions.remove(entity);
                 let velocity_removed = self.velocities.remove(entity);
-                work.query_cache_updates += self.refresh_motion(entity);
+                work.accumulate(self.refresh_motion(entity));
                 if let Some(removed) = position_removed
                     && let Some((moved, _)) = removed.moved
                 {
-                    work.query_cache_updates += self.refresh_motion(moved);
+                    work.accumulate(self.refresh_motion(moved));
                 }
                 if let Some(removed) = velocity_removed
                     && let Some((moved, _)) = removed.moved
                 {
-                    work.query_cache_updates += self.refresh_motion(moved);
+                    work.accumulate(self.refresh_motion(moved));
                 }
                 self.alive.remove(&entity);
             }
             Operation::SetPosition(entity, position) => {
                 self.require_alive(entity)?;
                 self.positions.insert(entity, position);
-                work.query_cache_updates += self.refresh_motion(entity);
+                work.accumulate(self.refresh_motion(entity));
             }
             Operation::RemovePosition(entity) => {
                 self.require_alive(entity)?;
                 let removed = self.positions.remove(entity);
-                work.query_cache_updates += self.refresh_motion(entity);
+                work.accumulate(self.refresh_motion(entity));
                 if let Some(removed) = removed
                     && let Some((moved, _)) = removed.moved
                 {
-                    work.query_cache_updates += self.refresh_motion(moved);
+                    work.accumulate(self.refresh_motion(moved));
                 }
             }
             Operation::SetVelocity(entity, velocity) => {
                 self.require_alive(entity)?;
                 self.velocities.insert(entity, velocity);
-                work.query_cache_updates += self.refresh_motion(entity);
+                work.accumulate(self.refresh_motion(entity));
             }
             Operation::RemoveVelocity(entity) => {
                 self.require_alive(entity)?;
                 let removed = self.velocities.remove(entity);
-                work.query_cache_updates += self.refresh_motion(entity);
+                work.accumulate(self.refresh_motion(entity));
                 if let Some(removed) = removed
                     && let Some((moved, _)) = removed.moved
                 {
-                    work.query_cache_updates += self.refresh_motion(moved);
+                    work.accumulate(self.refresh_motion(moved));
                 }
             }
             Operation::Integrate { ticks } => work = self.integrate(ticks),
@@ -385,7 +392,7 @@ impl CachedSparseWorld {
         target.saturating_add(moved)
     }
 
-    fn refresh_motion(&mut self, entity: EntityId) -> u64 {
+    fn refresh_motion(&mut self, entity: EntityId) -> StorageWorkStats {
         let position_index = self.positions.index(entity);
         let velocity_index = self.velocities.index(entity);
         self.motion_query

@@ -426,6 +426,14 @@ fn repeated_cached_query_scales_with_returned_rows() {
                         "archetype_structural_table_transitions",
                         work.archetype.structural_table_transitions,
                     ),
+                    (
+                        "cached_sparse_query_rows_inspected",
+                        work.cached.query_rows_inspected,
+                    ),
+                    (
+                        "archetype_entity_locations_inspected",
+                        work.archetype.entity_locations_inspected,
+                    ),
                 ],
             }
         })
@@ -457,6 +465,16 @@ fn repeated_cached_query_scales_with_returned_rows() {
             },
             Bound {
                 metric: "archetype_structural_table_transitions",
+                budget_max: Some(0),
+                growth: &[("total_entities", Growth::Constant)],
+            },
+            Bound {
+                metric: "cached_sparse_query_rows_inspected",
+                budget_max: Some(0),
+                growth: &[("total_entities", Growth::Constant)],
+            },
+            Bound {
+                metric: "archetype_entity_locations_inspected",
                 budget_max: Some(0),
                 growth: &[("total_entities", Growth::Constant)],
             },
@@ -508,13 +526,24 @@ fn single_entity_component_churn_does_not_scale_with_population() {
                         "cached_sparse_query_cache_updates",
                         work.cached.query_cache_updates,
                     ),
+                    (
+                        "cached_sparse_query_rows_inspected",
+                        work.cached.query_rows_inspected,
+                    ),
+                    (
+                        "archetype_entity_locations_inspected",
+                        work.archetype.entity_locations_inspected,
+                    ),
                 ],
             }
         })
         .collect();
 
     // One removal and one re-add per changed entity: two table moves, and at most three query
-    // rows touched (the entity leaving, the swap-moved row, the entity returning).
+    // rows touched (the entity leaving, the swap-moved row, the entity returning). The outcome
+    // counters alone cannot see a path that inspects every row and changes few, so the rows and
+    // location entries actually inspected are bounded too: at most three refreshed query rows,
+    // and per move one location read plus at most two writes (the swap-moved row and the entity).
     finish(
         "add-remove-component",
         &samples,
@@ -530,6 +559,22 @@ fn single_entity_component_churn_does_not_scale_with_population() {
             Bound {
                 metric: "cached_sparse_query_cache_updates",
                 budget_max: Some(3 * 256),
+                growth: &[
+                    ("total_entities", Growth::Constant),
+                    ("changed_entities", Growth::Linear),
+                ],
+            },
+            Bound {
+                metric: "cached_sparse_query_rows_inspected",
+                budget_max: Some(3 * 256),
+                growth: &[
+                    ("total_entities", Growth::Constant),
+                    ("changed_entities", Growth::Linear),
+                ],
+            },
+            Bound {
+                metric: "archetype_entity_locations_inspected",
+                budget_max: Some(6 * 256),
                 growth: &[
                     ("total_entities", Growth::Constant),
                     ("changed_entities", Growth::Linear),
@@ -646,6 +691,12 @@ fn predicted_operation_work_matches_measured_work_on_v1_fixtures() {
                     .apply_measured(operation)
                     .expect("archetype"),
             ];
+            // Inspection counters exist only on the measured path; predictions leave them 0.
+            let measured = measured.map(|work| StorageWorkStats {
+                query_rows_inspected: 0,
+                entity_locations_inspected: 0,
+                ..work
+            });
             assert_eq!(measured, predicted, "{context}");
         }
         worlds.assert_snapshot_parity(name);
