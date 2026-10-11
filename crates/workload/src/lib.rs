@@ -234,6 +234,18 @@ pub struct StorageWorkStats {
     pub component_lookups: u64,
     pub structural_table_transitions: u64,
     pub query_cache_updates: u64,
+    /// Cached-query rows read or written by query maintenance (the refreshed row plus any
+    /// swap-moved row), whether or not a row changed. Only measured work (`apply_measured`)
+    /// fills the inspection counters below; `operation_work` predictions leave them 0.
+    pub query_rows_inspected: u64,
+    /// Entity-index entries (archetype locations, the sparse storages' alive set, the reference
+    /// map) read or written by structural operations. A tree descent counts as one entry.
+    pub entity_locations_inspected: u64,
+    /// Component sparse-set slots read or written by structural operations: paged sparse-index
+    /// entries plus dense rows pushed, overwritten, removed or swap-moved.
+    pub component_slots_touched: u64,
+    /// Archetype table rows pushed, overwritten, removed or swap-moved by structural operations.
+    pub table_rows_touched: u64,
 }
 
 impl StorageWorkStats {
@@ -253,6 +265,18 @@ impl StorageWorkStats {
         self.query_cache_updates = self
             .query_cache_updates
             .saturating_add(other.query_cache_updates);
+        self.query_rows_inspected = self
+            .query_rows_inspected
+            .saturating_add(other.query_rows_inspected);
+        self.entity_locations_inspected = self
+            .entity_locations_inspected
+            .saturating_add(other.entity_locations_inspected);
+        self.component_slots_touched = self
+            .component_slots_touched
+            .saturating_add(other.component_slots_touched);
+        self.table_rows_touched = self
+            .table_rows_touched
+            .saturating_add(other.table_rows_touched);
     }
 }
 

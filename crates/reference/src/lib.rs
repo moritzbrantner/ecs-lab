@@ -31,29 +31,42 @@ impl ReferenceWorld {
     /// Returns [`WorkloadError`] when an operation addresses a missing entity or attempts to spawn
     /// an entity that is already alive.
     pub fn apply(&mut self, operation: Operation) -> Result<(), WorkloadError> {
+        self.apply_measured(operation).map(|_| ())
+    }
+
+    /// Applies one operation and returns the work the executed path actually performed.
+    ///
+    /// Unlike [`Self::operation_work`], which predicts work from the current state, these counters
+    /// are incremented inside the loops that run, so a changed traversal changes the evidence.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WorkloadError`] under the same conditions as [`Self::apply`].
+    pub fn apply_measured(
+        &mut self,
+        operation: Operation,
+    ) -> Result<StorageWorkStats, WorkloadError> {
         match operation {
-            Operation::Spawn(entity) => self.spawn(entity),
-            Operation::Despawn(entity) => self.despawn(entity),
+            // Spawn reads and writes one map entry; every other structural operation touches one.
+            Operation::Spawn(entity) => self.spawn(entity).map(|()| entity_entries(2)),
+            Operation::Despawn(entity) => self.despawn(entity).map(|()| entity_entries(1)),
             Operation::SetPosition(entity, position) => {
                 self.entity_mut(entity)?.position = Some(position);
-                Ok(())
+                Ok(entity_entries(1))
             }
             Operation::RemovePosition(entity) => {
                 self.entity_mut(entity)?.position = None;
-                Ok(())
+                Ok(entity_entries(1))
             }
             Operation::SetVelocity(entity, velocity) => {
                 self.entity_mut(entity)?.velocity = Some(velocity);
-                Ok(())
+                Ok(entity_entries(1))
             }
             Operation::RemoveVelocity(entity) => {
                 self.entity_mut(entity)?.velocity = None;
-                Ok(())
+                Ok(entity_entries(1))
             }
-            Operation::Integrate { ticks } => {
-                self.integrate(ticks);
-                Ok(())
-            }
+            Operation::Integrate { ticks } => Ok(self.integrate(ticks)),
         }
     }
 
@@ -72,28 +85,24 @@ impl ReferenceWorld {
 
     #[must_use]
     pub fn snapshot(&self) -> WorldSnapshot {
-        WorldSnapshot::new(
-            self.entities
-                .iter()
-                .map(|(&id, state)| EntitySnapshot {
-                    id,
-                    position: state.position,
-                    velocity: state.velocity,
-                })
-                .collect(),
-        )
+        self.snapshot_with_stats().0
     }
 
+    /// Projects the canonical snapshot and counts the slots the projection loop visited.
     #[must_use]
     pub fn snapshot_with_stats(&self) -> (WorldSnapshot, SnapshotWorkStats) {
-        let entity_count = u64::try_from(self.entities.len()).unwrap_or(u64::MAX);
-        (
-            self.snapshot(),
-            SnapshotWorkStats {
-                slots_scanned: entity_count,
-                entities_materialized: entity_count,
-            },
-        )
+        let mut work = SnapshotWorkStats::default();
+        let mut entities = Vec::with_capacity(self.entities.len());
+        for (&id, state) in &self.entities {
+            work.slots_scanned += 1;
+            entities.push(EntitySnapshot {
+                id,
+                position: state.position,
+                velocity: state.velocity,
+            });
+            work.entities_materialized += 1;
+        }
+        (WorldSnapshot::new(entities), work)
     }
 
     #[must_use]
@@ -147,12 +156,15 @@ impl ReferenceWorld {
             .ok_or(WorkloadError::MissingEntity(entity))
     }
 
-    fn integrate(&mut self, ticks: i32) {
+    fn integrate(&mut self, ticks: i32) -> StorageWorkStats {
         let ticks = i64::from(ticks);
+        let mut work = StorageWorkStats::default();
         for state in self.entities.values_mut() {
+            work.integration_rows_scanned += 1;
             let (Some(position), Some(velocity)) = (&mut state.position, state.velocity) else {
                 continue;
             };
+            work.integrated_entities += 1;
             position.x = position
                 .x
                 .saturating_add(i64::from(velocity.x).saturating_mul(ticks));
@@ -163,6 +175,21 @@ impl ReferenceWorld {
                 .z
                 .saturating_add(i64::from(velocity.z).saturating_mul(ticks));
         }
+        work
+    }
+}
+
+const fn entity_entries(entity_locations_inspected: u64) -> StorageWorkStats {
+    StorageWorkStats {
+        integration_rows_scanned: 0,
+        integrated_entities: 0,
+        component_lookups: 0,
+        structural_table_transitions: 0,
+        query_cache_updates: 0,
+        query_rows_inspected: 0,
+        entity_locations_inspected,
+        component_slots_touched: 0,
+        table_rows_touched: 0,
     }
 }
 

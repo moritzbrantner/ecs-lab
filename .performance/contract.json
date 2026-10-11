@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "suite": "ecs-lab/benchmark-smoke",
   "description": "Representative ECS integration contract. Storage parity and physics semantics are correctness gates; deterministic work plus logical index footprint are first-class evidence while shared-runner elapsed time remains advisory.",
   "scenarios": [
@@ -415,6 +415,1141 @@
           "direction": "lower",
           "signal": "wall-clock",
           "blocking": false
+        }
+      ]
+    }
+  ],
+  "operations": [
+    {
+      "id": "integrate-sparse-subset",
+      "description": "Integrate once over N positioned entities of which M also own Velocity (the mixed-motion fixture at stride N/M). Counters are measured inside the executed integration loops through apply_measured, not predicted by operation_work; snapshot equality across all four storages is asserted first.",
+      "dimensions": {
+        "total_entities": {
+          "description": "positioned entities N"
+        },
+        "moving_entities": {
+          "description": "entities matching Position+Velocity M"
+        }
+      },
+      "scalePoints": [
+        {
+          "total_entities": 1000,
+          "moving_entities": 1000
+        },
+        {
+          "total_entities": 10000,
+          "moving_entities": 1000
+        },
+        {
+          "total_entities": 100000,
+          "moving_entities": 1000
+        },
+        {
+          "total_entities": 100000,
+          "moving_entities": 10000
+        },
+        {
+          "total_entities": 100000,
+          "moving_entities": 100000
+        }
+      ],
+      "metrics": [
+        {
+          "name": "integrated_entities",
+          "unit": "entities",
+          "signal": "operation-count",
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "moving_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Useful work; asserted equal across reference, sparse-set, cached-sparse and archetype."
+        },
+        {
+          "name": "reference_integration_rows_scanned",
+          "unit": "rows",
+          "signal": "operation-count",
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "linear"
+            },
+            {
+              "dimension": "moving_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "The reference model scans every entity by design; linear in N is the declared contract."
+        },
+        {
+          "name": "sparse_set_integration_rows_scanned",
+          "unit": "rows",
+          "signal": "operation-count",
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "moving_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Selectivity-aware scan of the smaller component pool."
+        },
+        {
+          "name": "sparse_set_component_lookups",
+          "unit": "lookups",
+          "signal": "operation-count",
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "moving_entities",
+              "bound": "linear"
+            }
+          ]
+        },
+        {
+          "name": "cached_sparse_integration_rows_scanned",
+          "unit": "rows",
+          "signal": "operation-count",
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "moving_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Cached Position+Velocity query rows; a fallback to scanning all entities fails the constant bound in N."
+        },
+        {
+          "name": "cached_sparse_component_lookups",
+          "unit": "lookups",
+          "signal": "operation-count",
+          "budget": {
+            "max": 0
+          }
+        },
+        {
+          "name": "archetype_integration_rows_scanned",
+          "unit": "rows",
+          "signal": "operation-count",
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "moving_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Motion-table rows; a scan of all tables fails the constant bound in N."
+        },
+        {
+          "name": "archetype_component_lookups",
+          "unit": "lookups",
+          "signal": "operation-count",
+          "budget": {
+            "max": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "repeat-cached-query",
+      "description": "After the fixture's warm-up integration, repeat the Position+Velocity query R times with no structural changes. Query maintenance must stay zero and read work must follow returned rows, not stored entities.",
+      "dimensions": {
+        "total_entities": {
+          "description": "positioned entities N"
+        },
+        "matching_entities": {
+          "description": "entities matching Position+Velocity M"
+        },
+        "repetitions": {
+          "description": "measured query executions R after warm-up"
+        }
+      },
+      "scalePoints": [
+        {
+          "total_entities": 1000,
+          "matching_entities": 1000,
+          "repetitions": 4
+        },
+        {
+          "total_entities": 10000,
+          "matching_entities": 1000,
+          "repetitions": 4
+        },
+        {
+          "total_entities": 100000,
+          "matching_entities": 1000,
+          "repetitions": 4
+        },
+        {
+          "total_entities": 100000,
+          "matching_entities": 10000,
+          "repetitions": 4
+        },
+        {
+          "total_entities": 100000,
+          "matching_entities": 100000,
+          "repetitions": 4
+        },
+        {
+          "total_entities": 100000,
+          "matching_entities": 1000,
+          "repetitions": 1
+        },
+        {
+          "total_entities": 100000,
+          "matching_entities": 1000,
+          "repetitions": 16
+        }
+      ],
+      "metrics": [
+        {
+          "name": "rows_returned",
+          "unit": "rows",
+          "signal": "operation-count",
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "matching_entities",
+              "bound": "linear"
+            },
+            {
+              "dimension": "repetitions",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Integrated rows; asserted equal across all four storages and equal to M x R."
+        },
+        {
+          "name": "cached_sparse_integration_rows_scanned",
+          "unit": "rows",
+          "signal": "operation-count",
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "matching_entities",
+              "bound": "linear"
+            },
+            {
+              "dimension": "repetitions",
+              "bound": "linear"
+            }
+          ]
+        },
+        {
+          "name": "cached_sparse_query_cache_updates",
+          "unit": "updates",
+          "signal": "operation-count",
+          "budget": {
+            "max": 0
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "Measured row changes made by query refreshes; a hidden full-index rebuild makes this non-zero."
+        },
+        {
+          "name": "archetype_integration_rows_scanned",
+          "unit": "rows",
+          "signal": "operation-count",
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "matching_entities",
+              "bound": "linear"
+            },
+            {
+              "dimension": "repetitions",
+              "bound": "linear"
+            }
+          ]
+        },
+        {
+          "name": "archetype_structural_table_transitions",
+          "unit": "transitions",
+          "signal": "operation-count",
+          "budget": {
+            "max": 0
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ]
+        },
+        {
+          "name": "cached_sparse_query_rows_inspected",
+          "unit": "rows",
+          "signal": "operation-count",
+          "budget": {
+            "max": 0
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "Query rows inspected by cache maintenance, changed or not; a rebuild that rescans rows without changing them makes this non-zero."
+        },
+        {
+          "name": "archetype_entity_locations_inspected",
+          "unit": "entries",
+          "signal": "operation-count",
+          "budget": {
+            "max": 0
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "Entity-location entries read or written by structural work; repeated reads touch none."
+        },
+        {
+          "name": "cached_sparse_component_slots_touched",
+          "unit": "slots",
+          "signal": "operation-count",
+          "budget": {
+            "max": 0
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "Component sparse slots touched by structural work; none during repeated reads."
+        },
+        {
+          "name": "cached_sparse_entity_entries_touched",
+          "unit": "entries",
+          "signal": "operation-count",
+          "budget": {
+            "max": 0
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "Alive-set entries touched; none during repeated reads."
+        },
+        {
+          "name": "archetype_table_rows_touched",
+          "unit": "rows",
+          "signal": "operation-count",
+          "budget": {
+            "max": 0
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "Table rows moved by structural work; none during repeated reads."
+        }
+      ]
+    },
+    {
+      "id": "add-remove-component",
+      "description": "Remove and re-add Velocity on C changed entities while every one of the N entities matches Position+Velocity, so any rescan of the unrelated population would be paid in full. Every structural primitive (alive-set and location entries, component sparse-index slots and dense rows, query rows, archetype table rows) reports what it reads or writes; each raw counter is bound constant in N and linear in C, and its per-change normalization is budgeted at the analytic per-change ceiling at every sample.",
+      "dimensions": {
+        "total_entities": {
+          "description": "positioned and moving entities N, including the changed ones"
+        },
+        "changed_entities": {
+          "description": "entities that remove and re-add Velocity C"
+        }
+      },
+      "scalePoints": [
+        {
+          "total_entities": 1000,
+          "changed_entities": 1
+        },
+        {
+          "total_entities": 10000,
+          "changed_entities": 1
+        },
+        {
+          "total_entities": 100000,
+          "changed_entities": 1
+        },
+        {
+          "total_entities": 100000,
+          "changed_entities": 16
+        },
+        {
+          "total_entities": 100000,
+          "changed_entities": 256
+        }
+      ],
+      "metrics": [
+        {
+          "name": "reference_entity_entries_touched",
+          "unit": "entries",
+          "signal": "operation-count",
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Reference map entries read or written."
+        },
+        {
+          "name": "sparse_set_entity_entries_touched",
+          "unit": "entries",
+          "signal": "operation-count",
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Alive-set entries read or written."
+        },
+        {
+          "name": "sparse_set_component_slots_touched",
+          "unit": "slots",
+          "signal": "operation-count",
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Component paged sparse-index entries plus dense rows pushed, overwritten, removed or swap-moved, counted inside SparseSet::insert and SparseSet::remove."
+        },
+        {
+          "name": "cached_sparse_entity_entries_touched",
+          "unit": "entries",
+          "signal": "operation-count",
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Alive-set entries read or written."
+        },
+        {
+          "name": "cached_sparse_component_slots_touched",
+          "unit": "slots",
+          "signal": "operation-count",
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Component sparse-index entries and dense rows touched by SparseSet::insert/remove plus the two sparse reads of each query refresh."
+        },
+        {
+          "name": "cached_sparse_query_rows_inspected",
+          "unit": "rows",
+          "signal": "operation-count",
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Query sparse-index reads and writes plus every query row read, pushed, removed or swap-moved inside MotionQuery::refresh, changed or not."
+        },
+        {
+          "name": "cached_sparse_query_cache_updates",
+          "unit": "updates",
+          "signal": "operation-count",
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Query rows actually changed (outcome)."
+        },
+        {
+          "name": "archetype_entity_locations_inspected",
+          "unit": "entries",
+          "signal": "operation-count",
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Location entries read or written at the location accessors."
+        },
+        {
+          "name": "archetype_table_rows_touched",
+          "unit": "rows",
+          "signal": "operation-count",
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Table rows pushed, overwritten, removed or swap-moved, counted inside the table swap_remove primitives and at each push or overwrite."
+        },
+        {
+          "name": "archetype_structural_table_transitions",
+          "unit": "transitions",
+          "signal": "operation-count",
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Table moves (outcome)."
+        },
+        {
+          "name": "reference_entity_entries_touched_per_change",
+          "unit": "entries per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 2
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "ceil(reference_entity_entries_touched / changed_entities); the budget is the analytic per-change ceiling, so every sample satisfies reference_entity_entries_touched <= 2 * changed_entities."
+        },
+        {
+          "name": "sparse_set_entity_entries_touched_per_change",
+          "unit": "entries per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 2
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "ceil(sparse_set_entity_entries_touched / changed_entities); the budget is the analytic per-change ceiling, so every sample satisfies sparse_set_entity_entries_touched <= 2 * changed_entities."
+        },
+        {
+          "name": "sparse_set_component_slots_touched_per_change",
+          "unit": "slots per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 7
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "ceil(sparse_set_component_slots_touched / changed_entities); the budget is the analytic per-change ceiling, so every sample satisfies sparse_set_component_slots_touched <= 7 * changed_entities."
+        },
+        {
+          "name": "cached_sparse_entity_entries_touched_per_change",
+          "unit": "entries per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 2
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "ceil(cached_sparse_entity_entries_touched / changed_entities); the budget is the analytic per-change ceiling, so every sample satisfies cached_sparse_entity_entries_touched <= 2 * changed_entities."
+        },
+        {
+          "name": "cached_sparse_component_slots_touched_per_change",
+          "unit": "slots per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 13
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "ceil(cached_sparse_component_slots_touched / changed_entities); the budget is the analytic per-change ceiling, so every sample satisfies cached_sparse_component_slots_touched <= 13 * changed_entities."
+        },
+        {
+          "name": "cached_sparse_query_rows_inspected_per_change",
+          "unit": "rows per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 10
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "ceil(cached_sparse_query_rows_inspected / changed_entities); the budget is the analytic per-change ceiling, so every sample satisfies cached_sparse_query_rows_inspected <= 10 * changed_entities."
+        },
+        {
+          "name": "cached_sparse_query_cache_updates_per_change",
+          "unit": "updates per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 3
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "ceil(cached_sparse_query_cache_updates / changed_entities); the budget is the analytic per-change ceiling, so every sample satisfies cached_sparse_query_cache_updates <= 3 * changed_entities."
+        },
+        {
+          "name": "archetype_entity_locations_inspected_per_change",
+          "unit": "entries per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 6
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "ceil(archetype_entity_locations_inspected / changed_entities); the budget is the analytic per-change ceiling, so every sample satisfies archetype_entity_locations_inspected <= 6 * changed_entities."
+        },
+        {
+          "name": "archetype_table_rows_touched_per_change",
+          "unit": "rows per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 6
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "ceil(archetype_table_rows_touched / changed_entities); the budget is the analytic per-change ceiling, so every sample satisfies archetype_table_rows_touched <= 6 * changed_entities."
+        },
+        {
+          "name": "archetype_structural_table_transitions_per_change",
+          "unit": "transitions per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 2
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "ceil(archetype_structural_table_transitions / changed_entities); the budget is the analytic per-change ceiling, so every sample satisfies archetype_structural_table_transitions <= 2 * changed_entities."
+        }
+      ]
+    },
+    {
+      "id": "respawn-entity",
+      "description": "Despawn, respawn and re-add Position and Velocity on C changed entities among N matching entities, covering the spawn and despawn structural paths with the same per-primitive counters.",
+      "dimensions": {
+        "total_entities": {
+          "description": "positioned and moving entities N, including the changed ones"
+        },
+        "changed_entities": {
+          "description": "entities that are despawned and respawned C"
+        }
+      },
+      "scalePoints": [
+        {
+          "total_entities": 1000,
+          "changed_entities": 1
+        },
+        {
+          "total_entities": 10000,
+          "changed_entities": 1
+        },
+        {
+          "total_entities": 100000,
+          "changed_entities": 1
+        },
+        {
+          "total_entities": 100000,
+          "changed_entities": 16
+        },
+        {
+          "total_entities": 100000,
+          "changed_entities": 256
+        }
+      ],
+      "metrics": [
+        {
+          "name": "reference_entity_entries_touched",
+          "unit": "entries",
+          "signal": "operation-count",
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Reference map entries read or written."
+        },
+        {
+          "name": "sparse_set_entity_entries_touched",
+          "unit": "entries",
+          "signal": "operation-count",
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Alive-set entries read or written."
+        },
+        {
+          "name": "sparse_set_component_slots_touched",
+          "unit": "slots",
+          "signal": "operation-count",
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Component paged sparse-index entries plus dense rows pushed, overwritten, removed or swap-moved, counted inside SparseSet::insert and SparseSet::remove."
+        },
+        {
+          "name": "cached_sparse_entity_entries_touched",
+          "unit": "entries",
+          "signal": "operation-count",
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Alive-set entries read or written."
+        },
+        {
+          "name": "cached_sparse_component_slots_touched",
+          "unit": "slots",
+          "signal": "operation-count",
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Component sparse-index entries and dense rows touched by SparseSet::insert/remove plus the two sparse reads of each query refresh."
+        },
+        {
+          "name": "cached_sparse_query_rows_inspected",
+          "unit": "rows",
+          "signal": "operation-count",
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Query sparse-index reads and writes plus every query row read, pushed, removed or swap-moved inside MotionQuery::refresh, changed or not."
+        },
+        {
+          "name": "cached_sparse_query_cache_updates",
+          "unit": "updates",
+          "signal": "operation-count",
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Query rows actually changed (outcome)."
+        },
+        {
+          "name": "archetype_entity_locations_inspected",
+          "unit": "entries",
+          "signal": "operation-count",
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Location entries read or written at the location accessors."
+        },
+        {
+          "name": "archetype_table_rows_touched",
+          "unit": "rows",
+          "signal": "operation-count",
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Table rows pushed, overwritten, removed or swap-moved, counted inside the table swap_remove primitives and at each push or overwrite."
+        },
+        {
+          "name": "archetype_structural_table_transitions",
+          "unit": "transitions",
+          "signal": "operation-count",
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Table moves (outcome)."
+        },
+        {
+          "name": "reference_entity_entries_touched_per_change",
+          "unit": "entries per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 5
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "ceil(reference_entity_entries_touched / changed_entities); the budget is the analytic per-change ceiling, so every sample satisfies reference_entity_entries_touched <= 5 * changed_entities."
+        },
+        {
+          "name": "sparse_set_entity_entries_touched_per_change",
+          "unit": "entries per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 5
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "ceil(sparse_set_entity_entries_touched / changed_entities); the budget is the analytic per-change ceiling, so every sample satisfies sparse_set_entity_entries_touched <= 5 * changed_entities."
+        },
+        {
+          "name": "sparse_set_component_slots_touched_per_change",
+          "unit": "slots per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 14
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "ceil(sparse_set_component_slots_touched / changed_entities); the budget is the analytic per-change ceiling, so every sample satisfies sparse_set_component_slots_touched <= 14 * changed_entities."
+        },
+        {
+          "name": "cached_sparse_entity_entries_touched_per_change",
+          "unit": "entries per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 5
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "ceil(cached_sparse_entity_entries_touched / changed_entities); the budget is the analytic per-change ceiling, so every sample satisfies cached_sparse_entity_entries_touched <= 5 * changed_entities."
+        },
+        {
+          "name": "cached_sparse_component_slots_touched_per_change",
+          "unit": "slots per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 24
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "ceil(cached_sparse_component_slots_touched / changed_entities); the budget is the analytic per-change ceiling, so every sample satisfies cached_sparse_component_slots_touched <= 24 * changed_entities."
+        },
+        {
+          "name": "cached_sparse_query_rows_inspected_per_change",
+          "unit": "rows per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 13
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "ceil(cached_sparse_query_rows_inspected / changed_entities); the budget is the analytic per-change ceiling, so every sample satisfies cached_sparse_query_rows_inspected <= 13 * changed_entities."
+        },
+        {
+          "name": "cached_sparse_query_cache_updates_per_change",
+          "unit": "updates per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 4
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "ceil(cached_sparse_query_cache_updates / changed_entities); the budget is the analytic per-change ceiling, so every sample satisfies cached_sparse_query_cache_updates <= 4 * changed_entities."
+        },
+        {
+          "name": "archetype_entity_locations_inspected_per_change",
+          "unit": "entries per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 11
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "ceil(archetype_entity_locations_inspected / changed_entities); the budget is the analytic per-change ceiling, so every sample satisfies archetype_entity_locations_inspected <= 11 * changed_entities."
+        },
+        {
+          "name": "archetype_table_rows_touched_per_change",
+          "unit": "rows per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 9
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "ceil(archetype_table_rows_touched / changed_entities); the budget is the analytic per-change ceiling, so every sample satisfies archetype_table_rows_touched <= 9 * changed_entities."
+        },
+        {
+          "name": "archetype_structural_table_transitions_per_change",
+          "unit": "transitions per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 2
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "ceil(archetype_structural_table_transitions / changed_entities); the budget is the analytic per-change ceiling, so every sample satisfies archetype_structural_table_transitions <= 2 * changed_entities."
+        }
+      ]
+    },
+    {
+      "id": "full-snapshot",
+      "description": "Project the full canonical snapshot. Scanning every live entity is legitimate here, so linear growth in N is declared and allowed, unlike the incremental operations above.",
+      "dimensions": {
+        "total_entities": {
+          "description": "live entities N (every fourth one moving)"
+        }
+      },
+      "scalePoints": [
+        {
+          "total_entities": 1000
+        },
+        {
+          "total_entities": 10000
+        },
+        {
+          "total_entities": 100000
+        }
+      ],
+      "metrics": [
+        {
+          "name": "reference_snapshot_slots_scanned",
+          "unit": "slots",
+          "signal": "operation-count",
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "linear"
+            }
+          ]
+        },
+        {
+          "name": "sparse_set_snapshot_slots_scanned",
+          "unit": "slots",
+          "signal": "operation-count",
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "linear"
+            }
+          ]
+        },
+        {
+          "name": "cached_sparse_snapshot_slots_scanned",
+          "unit": "slots",
+          "signal": "operation-count",
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "linear"
+            }
+          ]
+        },
+        {
+          "name": "archetype_snapshot_slots_scanned",
+          "unit": "slots",
+          "signal": "operation-count",
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "linear"
+            }
+          ]
+        },
+        {
+          "name": "snapshot_entities_materialized",
+          "unit": "entities",
+          "signal": "operation-count",
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Asserted equal for all four storages and to the reference snapshot length."
         }
       ]
     }
