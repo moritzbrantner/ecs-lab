@@ -25,10 +25,11 @@ struct EntityTable {
 }
 
 impl EntityTable {
-    fn push(&mut self, entity: EntityId) -> usize {
+    /// Appends a row and returns its index and the rows touched.
+    fn push(&mut self, entity: EntityId) -> (usize, u64) {
         let index = self.entities.len();
         self.entities.push(entity);
-        index
+        (index, 1)
     }
 
     /// Returns the removed entity, the swap-moved entity, and the rows touched.
@@ -55,11 +56,18 @@ impl<T> Default for ComponentTable<T> {
 }
 
 impl<T> ComponentTable<T> {
-    fn push(&mut self, entity: EntityId, value: T) -> usize {
+    /// Appends a row and returns its index and the rows touched.
+    fn push(&mut self, entity: EntityId, value: T) -> (usize, u64) {
         let index = self.entities.len();
         self.entities.push(entity);
         self.values.push(value);
-        index
+        (index, 1)
+    }
+
+    /// Overwrites one row's value in place and returns the rows touched.
+    fn set_value(&mut self, index: usize, value: T) -> u64 {
+        self.values[index] = value;
+        1
     }
 
     /// Returns the removed row, the swap-moved entity, and the rows touched.
@@ -84,12 +92,25 @@ struct MotionTable {
 }
 
 impl MotionTable {
-    fn push(&mut self, entity: EntityId, position: Position, velocity: Velocity) -> usize {
+    /// Appends a row and returns its index and the rows touched.
+    fn push(&mut self, entity: EntityId, position: Position, velocity: Velocity) -> (usize, u64) {
         let index = self.entities.len();
         self.entities.push(entity);
         self.positions.push(position);
         self.velocities.push(velocity);
-        index
+        (index, 1)
+    }
+
+    /// Overwrites one row's position in place and returns the rows touched.
+    fn set_position(&mut self, index: usize, position: Position) -> u64 {
+        self.positions[index] = position;
+        1
+    }
+
+    /// Overwrites one row's velocity in place and returns the rows touched.
+    fn set_velocity(&mut self, index: usize, velocity: Velocity) -> u64 {
+        self.velocities[index] = velocity;
+        1
     }
 
     /// Returns the removed row, the swap-moved entity, and the rows touched.
@@ -224,7 +245,7 @@ impl ArchetypeWorld {
             return Err(WorkloadError::EntityAlreadyExists(entity));
         }
 
-        let (table, index) = match (position, velocity) {
+        let (table, (index, table_rows_touched)) = match (position, velocity) {
             (None, None) => (TableKind::Empty, self.empty.push(entity)),
             (Some(position), None) => (TableKind::Position, self.positions.push(entity, position)),
             (None, Some(velocity)) => (TableKind::Velocity, self.velocities.push(entity, velocity)),
@@ -235,7 +256,7 @@ impl ArchetypeWorld {
         };
         Ok(StorageWorkStats {
             entity_locations_inspected: 1 + self.set_location(entity, table, index),
-            table_rows_touched: 1,
+            table_rows_touched,
             ..StorageWorkStats::default()
         })
     }
@@ -392,14 +413,13 @@ impl ArchetypeWorld {
                 rows += touched;
                 debug_assert_eq!(removed, entity);
                 locations_inspected += self.repair_moved(moved, TableKind::Empty, location.index);
-                rows += 1;
-                let index = self.positions.push(entity, position);
+                let (index, touched) = self.positions.push(entity, position);
+                rows += touched;
                 locations_inspected += self.set_location(entity, TableKind::Position, index);
                 1
             }
             TableKind::Position => {
-                self.positions.values[location.index] = position;
-                rows += 1;
+                rows += self.positions.set_value(location.index, position);
                 0
             }
             TableKind::Velocity => {
@@ -409,14 +429,13 @@ impl ArchetypeWorld {
                 debug_assert_eq!(removed, entity);
                 locations_inspected +=
                     self.repair_moved(moved, TableKind::Velocity, location.index);
-                rows += 1;
-                let index = self.motion.push(entity, position, velocity);
+                let (index, touched) = self.motion.push(entity, position, velocity);
+                rows += touched;
                 locations_inspected += self.set_location(entity, TableKind::Motion, index);
                 1
             }
             TableKind::Motion => {
-                self.motion.positions[location.index] = position;
-                rows += 1;
+                rows += self.motion.set_position(location.index, position);
                 0
             }
         };
@@ -442,8 +461,8 @@ impl ArchetypeWorld {
                 debug_assert_eq!(removed, entity);
                 locations_inspected +=
                     self.repair_moved(moved, TableKind::Position, location.index);
-                rows += 1;
-                let index = self.empty.push(entity);
+                let (index, touched) = self.empty.push(entity);
+                rows += touched;
                 locations_inspected += self.set_location(entity, TableKind::Empty, index);
                 1
             }
@@ -453,8 +472,8 @@ impl ArchetypeWorld {
                 rows += touched;
                 debug_assert_eq!(removed, entity);
                 locations_inspected += self.repair_moved(moved, TableKind::Motion, location.index);
-                rows += 1;
-                let index = self.velocities.push(entity, velocity);
+                let (index, touched) = self.velocities.push(entity, velocity);
+                rows += touched;
                 locations_inspected += self.set_location(entity, TableKind::Velocity, index);
                 1
             }
@@ -482,8 +501,8 @@ impl ArchetypeWorld {
                 rows += touched;
                 debug_assert_eq!(removed, entity);
                 locations_inspected += self.repair_moved(moved, TableKind::Empty, location.index);
-                rows += 1;
-                let index = self.velocities.push(entity, velocity);
+                let (index, touched) = self.velocities.push(entity, velocity);
+                rows += touched;
                 locations_inspected += self.set_location(entity, TableKind::Velocity, index);
                 1
             }
@@ -494,19 +513,17 @@ impl ArchetypeWorld {
                 debug_assert_eq!(removed, entity);
                 locations_inspected +=
                     self.repair_moved(moved, TableKind::Position, location.index);
-                rows += 1;
-                let index = self.motion.push(entity, position, velocity);
+                let (index, touched) = self.motion.push(entity, position, velocity);
+                rows += touched;
                 locations_inspected += self.set_location(entity, TableKind::Motion, index);
                 1
             }
             TableKind::Velocity => {
-                self.velocities.values[location.index] = velocity;
-                rows += 1;
+                rows += self.velocities.set_value(location.index, velocity);
                 0
             }
             TableKind::Motion => {
-                self.motion.velocities[location.index] = velocity;
-                rows += 1;
+                rows += self.motion.set_velocity(location.index, velocity);
                 0
             }
         };
@@ -532,8 +549,8 @@ impl ArchetypeWorld {
                 debug_assert_eq!(removed, entity);
                 locations_inspected +=
                     self.repair_moved(moved, TableKind::Velocity, location.index);
-                rows += 1;
-                let index = self.empty.push(entity);
+                let (index, touched) = self.empty.push(entity);
+                rows += touched;
                 locations_inspected += self.set_location(entity, TableKind::Empty, index);
                 1
             }
@@ -543,8 +560,8 @@ impl ArchetypeWorld {
                 rows += touched;
                 debug_assert_eq!(removed, entity);
                 locations_inspected += self.repair_moved(moved, TableKind::Motion, location.index);
-                rows += 1;
-                let index = self.positions.push(entity, position);
+                let (index, touched) = self.positions.push(entity, position);
+                rows += touched;
                 locations_inspected += self.set_location(entity, TableKind::Position, index);
                 1
             }

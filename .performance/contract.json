@@ -785,7 +785,7 @@
     },
     {
       "id": "add-remove-component",
-      "description": "Remove and re-add Velocity on C changed entities while every one of the N entities matches Position+Velocity, so any rescan of the unrelated population would be paid in full. Every structural primitive (alive-set and location entries, component sparse-index slots and dense rows, query rows, archetype table rows) reports what it reads or writes; budgets are the analytic per-change ceiling times 256.",
+      "description": "Remove and re-add Velocity on C changed entities while every one of the N entities matches Position+Velocity, so any rescan of the unrelated population would be paid in full. Every structural primitive (alive-set and location entries, component sparse-index slots and dense rows, query rows, archetype table rows) reports what it reads or writes; each raw counter is bound constant in N and linear in C, and its per-change normalization is budgeted at the analytic per-change ceiling at every sample.",
       "dimensions": {
         "total_entities": {
           "description": "positioned and moving entities N, including the changed ones"
@@ -821,9 +821,6 @@
           "name": "reference_entity_entries_touched",
           "unit": "entries",
           "signal": "operation-count",
-          "budget": {
-            "max": 512
-          },
           "growth": [
             {
               "dimension": "total_entities",
@@ -840,9 +837,6 @@
           "name": "sparse_set_entity_entries_touched",
           "unit": "entries",
           "signal": "operation-count",
-          "budget": {
-            "max": 512
-          },
           "growth": [
             {
               "dimension": "total_entities",
@@ -859,9 +853,6 @@
           "name": "sparse_set_component_slots_touched",
           "unit": "slots",
           "signal": "operation-count",
-          "budget": {
-            "max": 1792
-          },
           "growth": [
             {
               "dimension": "total_entities",
@@ -878,9 +869,6 @@
           "name": "cached_sparse_entity_entries_touched",
           "unit": "entries",
           "signal": "operation-count",
-          "budget": {
-            "max": 512
-          },
           "growth": [
             {
               "dimension": "total_entities",
@@ -897,9 +885,6 @@
           "name": "cached_sparse_component_slots_touched",
           "unit": "slots",
           "signal": "operation-count",
-          "budget": {
-            "max": 3328
-          },
           "growth": [
             {
               "dimension": "total_entities",
@@ -916,9 +901,6 @@
           "name": "cached_sparse_query_rows_inspected",
           "unit": "rows",
           "signal": "operation-count",
-          "budget": {
-            "max": 1792
-          },
           "growth": [
             {
               "dimension": "total_entities",
@@ -929,15 +911,12 @@
               "bound": "linear"
             }
           ],
-          "notes": "Query sparse slot plus every query row read, pushed, removed or swap-moved inside MotionQuery::refresh, changed or not."
+          "notes": "Query sparse-index reads and writes plus every query row read, pushed, removed or swap-moved inside MotionQuery::refresh, changed or not."
         },
         {
           "name": "cached_sparse_query_cache_updates",
           "unit": "updates",
           "signal": "operation-count",
-          "budget": {
-            "max": 768
-          },
           "growth": [
             {
               "dimension": "total_entities",
@@ -954,9 +933,6 @@
           "name": "archetype_entity_locations_inspected",
           "unit": "entries",
           "signal": "operation-count",
-          "budget": {
-            "max": 1536
-          },
           "growth": [
             {
               "dimension": "total_entities",
@@ -973,9 +949,6 @@
           "name": "archetype_table_rows_touched",
           "unit": "rows",
           "signal": "operation-count",
-          "budget": {
-            "max": 1536
-          },
           "growth": [
             {
               "dimension": "total_entities",
@@ -992,9 +965,6 @@
           "name": "archetype_structural_table_transitions",
           "unit": "transitions",
           "signal": "operation-count",
-          "budget": {
-            "max": 512
-          },
           "growth": [
             {
               "dimension": "total_entities",
@@ -1006,6 +976,156 @@
             }
           ],
           "notes": "Table moves (outcome)."
+        },
+        {
+          "name": "reference_entity_entries_touched_per_change",
+          "unit": "entries per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 2
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "ceil(reference_entity_entries_touched / changed_entities); the budget is the analytic per-change ceiling, so every sample satisfies reference_entity_entries_touched <= 2 * changed_entities."
+        },
+        {
+          "name": "sparse_set_entity_entries_touched_per_change",
+          "unit": "entries per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 2
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "ceil(sparse_set_entity_entries_touched / changed_entities); the budget is the analytic per-change ceiling, so every sample satisfies sparse_set_entity_entries_touched <= 2 * changed_entities."
+        },
+        {
+          "name": "sparse_set_component_slots_touched_per_change",
+          "unit": "slots per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 7
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "ceil(sparse_set_component_slots_touched / changed_entities); the budget is the analytic per-change ceiling, so every sample satisfies sparse_set_component_slots_touched <= 7 * changed_entities."
+        },
+        {
+          "name": "cached_sparse_entity_entries_touched_per_change",
+          "unit": "entries per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 2
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "ceil(cached_sparse_entity_entries_touched / changed_entities); the budget is the analytic per-change ceiling, so every sample satisfies cached_sparse_entity_entries_touched <= 2 * changed_entities."
+        },
+        {
+          "name": "cached_sparse_component_slots_touched_per_change",
+          "unit": "slots per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 13
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "ceil(cached_sparse_component_slots_touched / changed_entities); the budget is the analytic per-change ceiling, so every sample satisfies cached_sparse_component_slots_touched <= 13 * changed_entities."
+        },
+        {
+          "name": "cached_sparse_query_rows_inspected_per_change",
+          "unit": "rows per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 10
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "ceil(cached_sparse_query_rows_inspected / changed_entities); the budget is the analytic per-change ceiling, so every sample satisfies cached_sparse_query_rows_inspected <= 10 * changed_entities."
+        },
+        {
+          "name": "cached_sparse_query_cache_updates_per_change",
+          "unit": "updates per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 3
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "ceil(cached_sparse_query_cache_updates / changed_entities); the budget is the analytic per-change ceiling, so every sample satisfies cached_sparse_query_cache_updates <= 3 * changed_entities."
+        },
+        {
+          "name": "archetype_entity_locations_inspected_per_change",
+          "unit": "entries per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 6
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "ceil(archetype_entity_locations_inspected / changed_entities); the budget is the analytic per-change ceiling, so every sample satisfies archetype_entity_locations_inspected <= 6 * changed_entities."
+        },
+        {
+          "name": "archetype_table_rows_touched_per_change",
+          "unit": "rows per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 6
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "ceil(archetype_table_rows_touched / changed_entities); the budget is the analytic per-change ceiling, so every sample satisfies archetype_table_rows_touched <= 6 * changed_entities."
+        },
+        {
+          "name": "archetype_structural_table_transitions_per_change",
+          "unit": "transitions per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 2
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "ceil(archetype_structural_table_transitions / changed_entities); the budget is the analytic per-change ceiling, so every sample satisfies archetype_structural_table_transitions <= 2 * changed_entities."
         }
       ]
     },
@@ -1047,9 +1167,6 @@
           "name": "reference_entity_entries_touched",
           "unit": "entries",
           "signal": "operation-count",
-          "budget": {
-            "max": 1280
-          },
           "growth": [
             {
               "dimension": "total_entities",
@@ -1066,9 +1183,6 @@
           "name": "sparse_set_entity_entries_touched",
           "unit": "entries",
           "signal": "operation-count",
-          "budget": {
-            "max": 1280
-          },
           "growth": [
             {
               "dimension": "total_entities",
@@ -1085,9 +1199,6 @@
           "name": "sparse_set_component_slots_touched",
           "unit": "slots",
           "signal": "operation-count",
-          "budget": {
-            "max": 3584
-          },
           "growth": [
             {
               "dimension": "total_entities",
@@ -1104,9 +1215,6 @@
           "name": "cached_sparse_entity_entries_touched",
           "unit": "entries",
           "signal": "operation-count",
-          "budget": {
-            "max": 1280
-          },
           "growth": [
             {
               "dimension": "total_entities",
@@ -1123,9 +1231,6 @@
           "name": "cached_sparse_component_slots_touched",
           "unit": "slots",
           "signal": "operation-count",
-          "budget": {
-            "max": 6144
-          },
           "growth": [
             {
               "dimension": "total_entities",
@@ -1142,9 +1247,6 @@
           "name": "cached_sparse_query_rows_inspected",
           "unit": "rows",
           "signal": "operation-count",
-          "budget": {
-            "max": 2560
-          },
           "growth": [
             {
               "dimension": "total_entities",
@@ -1155,15 +1257,12 @@
               "bound": "linear"
             }
           ],
-          "notes": "Query sparse slot plus every query row read, pushed, removed or swap-moved inside MotionQuery::refresh, changed or not."
+          "notes": "Query sparse-index reads and writes plus every query row read, pushed, removed or swap-moved inside MotionQuery::refresh, changed or not."
         },
         {
           "name": "cached_sparse_query_cache_updates",
           "unit": "updates",
           "signal": "operation-count",
-          "budget": {
-            "max": 1024
-          },
           "growth": [
             {
               "dimension": "total_entities",
@@ -1180,9 +1279,6 @@
           "name": "archetype_entity_locations_inspected",
           "unit": "entries",
           "signal": "operation-count",
-          "budget": {
-            "max": 2816
-          },
           "growth": [
             {
               "dimension": "total_entities",
@@ -1199,9 +1295,6 @@
           "name": "archetype_table_rows_touched",
           "unit": "rows",
           "signal": "operation-count",
-          "budget": {
-            "max": 2304
-          },
           "growth": [
             {
               "dimension": "total_entities",
@@ -1218,9 +1311,6 @@
           "name": "archetype_structural_table_transitions",
           "unit": "transitions",
           "signal": "operation-count",
-          "budget": {
-            "max": 512
-          },
           "growth": [
             {
               "dimension": "total_entities",
@@ -1232,6 +1322,156 @@
             }
           ],
           "notes": "Table moves (outcome)."
+        },
+        {
+          "name": "reference_entity_entries_touched_per_change",
+          "unit": "entries per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 5
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "ceil(reference_entity_entries_touched / changed_entities); the budget is the analytic per-change ceiling, so every sample satisfies reference_entity_entries_touched <= 5 * changed_entities."
+        },
+        {
+          "name": "sparse_set_entity_entries_touched_per_change",
+          "unit": "entries per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 5
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "ceil(sparse_set_entity_entries_touched / changed_entities); the budget is the analytic per-change ceiling, so every sample satisfies sparse_set_entity_entries_touched <= 5 * changed_entities."
+        },
+        {
+          "name": "sparse_set_component_slots_touched_per_change",
+          "unit": "slots per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 14
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "ceil(sparse_set_component_slots_touched / changed_entities); the budget is the analytic per-change ceiling, so every sample satisfies sparse_set_component_slots_touched <= 14 * changed_entities."
+        },
+        {
+          "name": "cached_sparse_entity_entries_touched_per_change",
+          "unit": "entries per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 5
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "ceil(cached_sparse_entity_entries_touched / changed_entities); the budget is the analytic per-change ceiling, so every sample satisfies cached_sparse_entity_entries_touched <= 5 * changed_entities."
+        },
+        {
+          "name": "cached_sparse_component_slots_touched_per_change",
+          "unit": "slots per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 24
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "ceil(cached_sparse_component_slots_touched / changed_entities); the budget is the analytic per-change ceiling, so every sample satisfies cached_sparse_component_slots_touched <= 24 * changed_entities."
+        },
+        {
+          "name": "cached_sparse_query_rows_inspected_per_change",
+          "unit": "rows per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 13
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "ceil(cached_sparse_query_rows_inspected / changed_entities); the budget is the analytic per-change ceiling, so every sample satisfies cached_sparse_query_rows_inspected <= 13 * changed_entities."
+        },
+        {
+          "name": "cached_sparse_query_cache_updates_per_change",
+          "unit": "updates per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 4
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "ceil(cached_sparse_query_cache_updates / changed_entities); the budget is the analytic per-change ceiling, so every sample satisfies cached_sparse_query_cache_updates <= 4 * changed_entities."
+        },
+        {
+          "name": "archetype_entity_locations_inspected_per_change",
+          "unit": "entries per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 11
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "ceil(archetype_entity_locations_inspected / changed_entities); the budget is the analytic per-change ceiling, so every sample satisfies archetype_entity_locations_inspected <= 11 * changed_entities."
+        },
+        {
+          "name": "archetype_table_rows_touched_per_change",
+          "unit": "rows per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 9
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "ceil(archetype_table_rows_touched / changed_entities); the budget is the analytic per-change ceiling, so every sample satisfies archetype_table_rows_touched <= 9 * changed_entities."
+        },
+        {
+          "name": "archetype_structural_table_transitions_per_change",
+          "unit": "transitions per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 2
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "ceil(archetype_structural_table_transitions / changed_entities); the budget is the analytic per-change ceiling, so every sample satisfies archetype_structural_table_transitions <= 2 * changed_entities."
         }
       ]
     },

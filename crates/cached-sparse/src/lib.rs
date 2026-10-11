@@ -113,8 +113,8 @@ impl MotionQuery {
         position_index: Option<usize>,
         velocity_index: Option<usize>,
     ) -> StorageWorkStats {
-        // The entity's query sparse slot is always inspected; each row read, written, pushed,
-        // removed or swap-moved below adds one more.
+        // The entity's query sparse slot is always read; every further sparse-index read or
+        // write and every row read, written, pushed, removed or swap-moved adds one more.
         let mut query_rows_inspected = 1;
         let query_cache_updates = match (position_index, velocity_index, self.row_index(entity)) {
             (Some(position_index), Some(velocity_index), Some(row_index)) => {
@@ -135,15 +135,18 @@ impl MotionQuery {
                     position_index,
                     velocity_index,
                 });
+                query_rows_inspected += 1;
                 self.sparse.set(entity.0, row_index);
                 query_rows_inspected += 1;
                 1
             }
             (_, _, Some(row_index)) => {
                 self.sparse.remove(entity.0);
+                query_rows_inspected += 1;
                 self.rows.swap_remove(row_index);
                 query_rows_inspected += 1;
                 if let Some(moved) = self.rows.get(row_index).copied() {
+                    query_rows_inspected += 1;
                     self.sparse.set(moved.entity.0, row_index);
                     query_rows_inspected += 1;
                 }

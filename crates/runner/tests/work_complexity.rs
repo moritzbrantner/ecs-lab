@@ -504,7 +504,6 @@ const CHURN_POINTS: [(u32, u32); 5] = [
     (100_000, 16),
     (100_000, 256),
 ];
-const MAX_CHANGED: u64 = 256;
 
 const CONSTANT_N_LINEAR_C: &[(&str, Growth)] = &[
     ("total_entities", Growth::Constant),
@@ -514,9 +513,8 @@ const CONSTANT_N_LINEAR_C: &[(&str, Growth)] = &[
 /// Every structural-path counter, per storage, with its analytic per-changed-entity ceiling.
 ///
 /// The ceilings follow from the instrumented primitives: a sparse-set insert touches at most
-/// three slots and a removal at most four, a query refresh at most three rows, an archetype move
-/// one location read plus at most two writes and at most three table rows. Each metric is bound
-/// constant in N, linear in C, and to `ceiling * MAX_CHANGED` at every point.
+/// three slots and a removal at most four, a query refresh at most five sparse-index entries and
+/// rows, an archetype move one location read plus at most two writes and at most three table rows.
 fn structural_metrics(work: &Work) -> Vec<(&'static str, u64)> {
     vec![
         (
@@ -562,17 +560,118 @@ fn structural_metrics(work: &Work) -> Vec<(&'static str, u64)> {
     ]
 }
 
+/// Bounds for the raw counters (constant in N, linear in C) and for their per-change
+/// normalization `ceil(observed / C)`, whose budget is the analytic per-change ceiling. Because
+/// `ceil(observed / C) <= ceiling` exactly when `observed <= ceiling * C`, the contract enforces
+/// the per-change ceiling at every sample, not only at the largest C.
 fn structural_bounds(per_change: [u64; 10]) -> Vec<Bound> {
     let names = structural_metrics(&Work::default());
-    names
-        .into_iter()
+    let raw = names.iter().map(|&(metric, _)| Bound {
+        metric,
+        budget_max: None,
+        growth: CONSTANT_N_LINEAR_C,
+    });
+    let normalized = names
+        .iter()
         .zip(per_change)
-        .map(|((metric, _), ceiling)| Bound {
-            metric,
-            budget_max: Some(ceiling * MAX_CHANGED),
-            growth: CONSTANT_N_LINEAR_C,
+        .map(|(&(metric, _), ceiling)| Bound {
+            metric: per_change_name(metric),
+            budget_max: Some(ceiling),
+            growth: &[("total_entities", Growth::Constant)],
+        });
+    raw.chain(normalized).collect()
+}
+
+/// Raw structural metric names paired with their per-change normalization, in
+/// `structural_metrics` order.
+const PER_CHANGE_NAMES: [(&str, &str); 10] = [
+    (
+        "reference_entity_entries_touched",
+        "reference_entity_entries_touched_per_change",
+    ),
+    (
+        "sparse_set_entity_entries_touched",
+        "sparse_set_entity_entries_touched_per_change",
+    ),
+    (
+        "sparse_set_component_slots_touched",
+        "sparse_set_component_slots_touched_per_change",
+    ),
+    (
+        "cached_sparse_entity_entries_touched",
+        "cached_sparse_entity_entries_touched_per_change",
+    ),
+    (
+        "cached_sparse_component_slots_touched",
+        "cached_sparse_component_slots_touched_per_change",
+    ),
+    (
+        "cached_sparse_query_rows_inspected",
+        "cached_sparse_query_rows_inspected_per_change",
+    ),
+    (
+        "cached_sparse_query_cache_updates",
+        "cached_sparse_query_cache_updates_per_change",
+    ),
+    (
+        "archetype_entity_locations_inspected",
+        "archetype_entity_locations_inspected_per_change",
+    ),
+    (
+        "archetype_table_rows_touched",
+        "archetype_table_rows_touched_per_change",
+    ),
+    (
+        "archetype_structural_table_transitions",
+        "archetype_structural_table_transitions_per_change",
+    ),
+];
+
+fn per_change_name(metric: &str) -> &'static str {
+    PER_CHANGE_NAMES
+        .iter()
+        .find(|(raw, _)| *raw == metric)
+        .map_or_else(
+            || panic!("no per-change name for {metric}"),
+            |(_, name)| *name,
+        )
+}
+
+/// Asserts `observed <= ceiling * changed_entities` for every raw structural counter and sample.
+fn assert_per_change_ceilings(operation: &str, samples: &[Sample], per_change: [u64; 10]) {
+    for sample in samples {
+        let changed = value(&sample.dimensions, "changed_entities");
+        for (&(metric, observed), ceiling) in sample.metrics.iter().zip(per_change) {
+            assert!(
+                observed <= ceiling * changed,
+                "{operation}.{metric} = {observed} exceeds {ceiling} per change at {:?}",
+                sample.dimensions
+            );
+        }
+    }
+}
+
+/// Runs one structural operation and records raw and per-change counters.
+fn finish_structural(operation: &str, samples: &[Sample], per_change: [u64; 10]) {
+    if evidence_dir().is_none() {
+        assert_per_change_ceilings(operation, samples, per_change);
+    }
+    let samples: Vec<Sample> = samples
+        .iter()
+        .map(|sample| {
+            let changed = value(&sample.dimensions, "changed_entities");
+            let normalized: Vec<(&'static str, u64)> = sample
+                .metrics
+                .iter()
+                .map(|&(metric, observed)| (per_change_name(metric), observed.div_ceil(changed)))
+                .collect();
+            Sample {
+                dimensions: sample.dimensions.clone(),
+                metrics: sample.metrics.iter().copied().chain(normalized).collect(),
+            }
         })
-        .collect()
+        .collect();
+    finish(operation, &samples, &structural_bounds(per_change));
 }
 
 /// Applies `operations(entity)` to C evenly spaced entities in a world where all N entities match
@@ -611,12 +710,13 @@ fn single_entity_component_churn_does_not_scale_with_population() {
     });
     // Per changed entity: two alive/entry checks (reference, sparse, cached); a removal (4) and an
     // insert (3) of component slots, plus two sparse reads per query refresh (up to 3 refreshes);
-    // query rows 3 (leaving row, swap-moved row) + 2 (moved entity's row) + 2 (returning row);
+    // query refreshes 5 (slot read, sparse remove, row swap_remove, moved row read and sparse
+    // repair) + 2 (moved entity's slot and row) + 3 (slot read, row push, sparse write);
     // up to 3 row changes; two archetype moves of 3 locations and 3 table rows each.
-    finish(
+    finish_structural(
         "add-remove-component",
         &samples,
-        &structural_bounds([2, 2, 7, 2, 13, 7, 3, 6, 6, 2]),
+        [2, 2, 7, 2, 13, 10, 3, 6, 6, 2],
     );
 }
 
@@ -630,13 +730,14 @@ fn single_entity_respawn_does_not_scale_with_population() {
             Operation::SetVelocity(entity, Velocity::new(1, 1)),
         ]
     });
-    // Per changed entity: despawn removes two components (4 slots each) and refreshes up to three
-    // query rows; spawn and two inserts follow. Archetype: despawn (3 locations, 2 rows), spawn
+    // Per changed entity: despawn removes two components (4 slots each) and refreshes the leaving
+    // row (5) and up to two swap-moved rows (2 each); spawn and two inserts follow, refreshing a
+    // non-matching slot (1) and then pushing the returning row (3). Archetype: despawn (3 locations, 2 rows), spawn
     // (2 locations, 1 row) and two moves (3 locations, 3 rows each).
-    finish(
+    finish_structural(
         "respawn-entity",
         &samples,
-        &structural_bounds([5, 5, 14, 5, 24, 10, 4, 11, 9, 2]),
+        [5, 5, 14, 5, 24, 13, 4, 11, 9, 2],
     );
 }
 
