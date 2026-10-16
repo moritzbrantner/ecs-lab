@@ -18,7 +18,7 @@ required-features = ["rebuild-reference"]
 ecs-physics = { path = "../physics" }
 ecs-reference = { path = "../reference" }
 ecs-workload = { path = "../workload" }
-geometry-kernels = { git = "https://github.com/moritzbrantner/rust-kernels", rev = "986bff4dc8d13a64b90fab3a9f7f02bb8d1aa35e" }
+geometry-kernels = { git = "https://github.com/moritzbrantner/rust-kernels", rev = "c9a2d1bdaad586e6c4a25ffce2d78dba8060c758" }
 physics-engine = { git = "https://github.com/moritzbrantner/physics-engine", rev = "46d4eed291762815becde11f79c97019857533d9" }
 spatial-kernels = { git = "https://github.com/moritzbrantner/rust-kernels", rev = "986bff4dc8d13a64b90fab3a9f7f02bb8d1aa35e" }
 
