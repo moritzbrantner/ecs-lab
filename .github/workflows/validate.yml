@@ -104,7 +104,7 @@ jobs:
     uses: ./.github/workflows/evidence.yml
 
   merge-ready:
-    name: merge-ready
+    name: ${{ github.event_name == 'pull_request' && 'merge-ready' || 'validation-summary' }}
     if: always()
     needs: ["validate", "ecs-evidence"]
     runs-on: ubuntu-latest
