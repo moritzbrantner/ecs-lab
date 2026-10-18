@@ -1,11 +1,10 @@
 name: Runtime evidence and Moonlight
 
 on:
-  pull_request:
-    branches: [main]
+  workflow_call:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  group: ecs-evidence-${{ github.workflow }}-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 permissions:

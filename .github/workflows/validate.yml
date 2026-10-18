@@ -98,3 +98,20 @@ jobs:
       artifact_paths: pages-dist
       reuse_across_runs: true
       artifact_retention_days: 7
+
+  ecs-evidence:
+    if: github.event_name == 'pull_request'
+    uses: ./.github/workflows/evidence.yml
+
+  merge-ready:
+    name: merge-ready
+    if: always()
+    needs: ["validate", "ecs-evidence"]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require successful validation
+        uses: moritzbrantner/reusable-workflows/.github/actions/merge-ready@b0f25f241d76af2584dfc9e375084ff5c5cb97da
+        with:
+          needs: ${{ toJSON(needs) }}
+          required: '["validate", "ecs-evidence"]'
+          allow-skipped: ${{ github.event_name != 'pull_request' && '["ecs-evidence"]' || '[]' }}
