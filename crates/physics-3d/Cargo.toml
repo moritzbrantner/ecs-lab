@@ -20,7 +20,7 @@ ecs-reference = { path = "../reference" }
 ecs-workload = { path = "../workload" }
 geometry-kernels = { git = "https://github.com/moritzbrantner/rust-kernels", rev = "986bff4dc8d13a64b90fab3a9f7f02bb8d1aa35e" }
 physics-engine = { git = "https://github.com/moritzbrantner/physics-engine", rev = "46d4eed291762815becde11f79c97019857533d9" }
-spatial-kernels = { git = "https://github.com/moritzbrantner/rust-kernels", rev = "986bff4dc8d13a64b90fab3a9f7f02bb8d1aa35e" }
+spatial-kernels = { git = "https://github.com/moritzbrantner/rust-kernels", rev = "61a218d873893aa2dbc6fe9b4f1b32ecb2e078ae" }
 
 [dev-dependencies]
 ecs-sparse-set = { path = "../sparse-set" }
