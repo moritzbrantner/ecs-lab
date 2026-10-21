@@ -3,5 +3,17 @@
   "extends": [
     "github>moritzbrantner/coding-agent-conventions"
   ],
-  "platformAutomerge": true
+  "platformAutomerge": true,
+  "packageRules": [
+    {
+      "description": "Crates from one git repository must move together; single-crate digest bumps split the graph across revisions.",
+      "matchManagers": [
+        "cargo"
+      ],
+      "matchUpdateTypes": [
+        "digest"
+      ],
+      "groupName": "git-pinned crate revisions"
+    }
+  ]
 }
