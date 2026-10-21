@@ -190,6 +190,9 @@ const fn entity_entries(entity_locations_inspected: u64) -> StorageWorkStats {
         entity_locations_inspected,
         component_slots_touched: 0,
         table_rows_touched: 0,
+        sparse_page_descents: 0,
+        sparse_pages_allocated: 0,
+        sparse_pages_released: 0,
     }
 }
 

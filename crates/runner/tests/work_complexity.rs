@@ -557,14 +557,41 @@ fn structural_metrics(work: &Work) -> Vec<(&'static str, u64)> {
             "archetype_structural_table_transitions",
             work.archetype.structural_table_transitions,
         ),
+        (
+            "sparse_set_sparse_page_descents",
+            work.sparse.sparse_page_descents,
+        ),
+        (
+            "sparse_set_sparse_pages_allocated",
+            work.sparse.sparse_pages_allocated,
+        ),
+        (
+            "sparse_set_sparse_pages_released",
+            work.sparse.sparse_pages_released,
+        ),
+        (
+            "cached_sparse_sparse_page_descents",
+            work.cached.sparse_page_descents,
+        ),
+        (
+            "cached_sparse_sparse_pages_allocated",
+            work.cached.sparse_pages_allocated,
+        ),
+        (
+            "cached_sparse_sparse_pages_released",
+            work.cached.sparse_pages_released,
+        ),
     ]
 }
+
+/// Number of raw structural counters in `structural_metrics`.
+const STRUCTURAL_METRICS: usize = 16;
 
 /// Bounds for the raw counters (constant in N, linear in C) and for their per-change
 /// normalization `ceil(observed / C)`, whose budget is the analytic per-change ceiling. Because
 /// `ceil(observed / C) <= ceiling` exactly when `observed <= ceiling * C`, the contract enforces
 /// the per-change ceiling at every sample, not only at the largest C.
-fn structural_bounds(per_change: [u64; 10]) -> Vec<Bound> {
+fn structural_bounds(per_change: [u64; STRUCTURAL_METRICS]) -> Vec<Bound> {
     let names = structural_metrics(&Work::default());
     let raw = names.iter().map(|&(metric, _)| Bound {
         metric,
@@ -584,7 +611,7 @@ fn structural_bounds(per_change: [u64; 10]) -> Vec<Bound> {
 
 /// Raw structural metric names paired with their per-change normalization, in
 /// `structural_metrics` order.
-const PER_CHANGE_NAMES: [(&str, &str); 10] = [
+const PER_CHANGE_NAMES: [(&str, &str); STRUCTURAL_METRICS] = [
     (
         "reference_entity_entries_touched",
         "reference_entity_entries_touched_per_change",
@@ -625,6 +652,30 @@ const PER_CHANGE_NAMES: [(&str, &str); 10] = [
         "archetype_structural_table_transitions",
         "archetype_structural_table_transitions_per_change",
     ),
+    (
+        "sparse_set_sparse_page_descents",
+        "sparse_set_sparse_page_descents_per_change",
+    ),
+    (
+        "sparse_set_sparse_pages_allocated",
+        "sparse_set_sparse_pages_allocated_per_change",
+    ),
+    (
+        "sparse_set_sparse_pages_released",
+        "sparse_set_sparse_pages_released_per_change",
+    ),
+    (
+        "cached_sparse_sparse_page_descents",
+        "cached_sparse_sparse_page_descents_per_change",
+    ),
+    (
+        "cached_sparse_sparse_pages_allocated",
+        "cached_sparse_sparse_pages_allocated_per_change",
+    ),
+    (
+        "cached_sparse_sparse_pages_released",
+        "cached_sparse_sparse_pages_released_per_change",
+    ),
 ];
 
 fn per_change_name(metric: &str) -> &'static str {
@@ -638,7 +689,11 @@ fn per_change_name(metric: &str) -> &'static str {
 }
 
 /// Asserts `observed <= ceiling * changed_entities` for every raw structural counter and sample.
-fn assert_per_change_ceilings(operation: &str, samples: &[Sample], per_change: [u64; 10]) {
+fn assert_per_change_ceilings(
+    operation: &str,
+    samples: &[Sample],
+    per_change: [u64; STRUCTURAL_METRICS],
+) {
     for sample in samples {
         let changed = value(&sample.dimensions, "changed_entities");
         for (&(metric, observed), ceiling) in sample.metrics.iter().zip(per_change) {
@@ -652,7 +707,7 @@ fn assert_per_change_ceilings(operation: &str, samples: &[Sample], per_change: [
 }
 
 /// Runs one structural operation and records raw and per-change counters.
-fn finish_structural(operation: &str, samples: &[Sample], per_change: [u64; 10]) {
+fn finish_structural(operation: &str, samples: &[Sample], per_change: [u64; STRUCTURAL_METRICS]) {
     if evidence_dir().is_none() {
         assert_per_change_ceilings(operation, samples, per_change);
     }
@@ -713,10 +768,16 @@ fn single_entity_component_churn_does_not_scale_with_population() {
     // query refreshes 5 (slot read, sparse remove, row swap_remove, moved row read and sparse
     // repair) + 2 (moved entity's slot and row) + 3 (slot read, row push, sparse write);
     // up to 3 row changes; two archetype moves of 3 locations and 3 table rows each.
+    // Paged sparse indexes: one page-map descent per access, plus one when a removal releases
+    // its emptied page; only a first key in a page range allocates. Sparse-set: removal (<= 3
+    // descents) and insert (2); at most one allocation and one release. Cached-sparse adds the
+    // query index: refreshes read two component slots and the query slot, then remove (<= 2) and
+    // repair (1) or push (1) a row: 3 + 6 + 3 + 2 + 4 descents, allocating and releasing at
+    // most one component page and one query page.
     finish_structural(
         "add-remove-component",
         &samples,
-        [2, 2, 7, 2, 13, 10, 3, 6, 6, 2],
+        [2, 2, 7, 2, 13, 10, 3, 6, 6, 2, 5, 1, 1, 18, 2, 2],
     );
 }
 
@@ -734,10 +795,15 @@ fn single_entity_respawn_does_not_scale_with_population() {
     // row (5) and up to two swap-moved rows (2 each); spawn and two inserts follow, refreshing a
     // non-matching slot (1) and then pushing the returning row (3). Archetype: despawn (3 locations, 2 rows), spawn
     // (2 locations, 1 row) and two moves (3 locations, 3 rows each).
+    // Paged sparse indexes: sparse-set despawn removes two components (<= 3 descents each) and
+    // two inserts take 2 each; up to two component pages are released and re-allocated.
+    // Cached-sparse adds query refreshes: the leaving row (<= 6), two swap-moved rows (3 each),
+    // the non-matching slot (3) and the returning row (4), so 6 + 6 + 3 + 3 + 2 + 3 + 2 + 4;
+    // the query index adds one more page allocation and release.
     finish_structural(
         "respawn-entity",
         &samples,
-        [5, 5, 14, 5, 24, 13, 4, 11, 9, 2],
+        [5, 5, 14, 5, 24, 13, 4, 11, 9, 2, 10, 2, 2, 29, 3, 3],
     );
 }
 
@@ -854,6 +920,9 @@ fn predicted_operation_work_matches_measured_work_on_v1_fixtures() {
                 entity_locations_inspected: 0,
                 component_slots_touched: 0,
                 table_rows_touched: 0,
+                sparse_page_descents: 0,
+                sparse_pages_allocated: 0,
+                sparse_pages_released: 0,
                 ..work
             });
             assert_eq!(measured, predicted, "{context}");

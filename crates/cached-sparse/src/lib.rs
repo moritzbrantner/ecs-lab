@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use ecs_sparse_index::PagedSparseIndex;
+use ecs_sparse_index::{PageWork, PagedSparseIndex};
 use ecs_workload::{
     EntityId, EntitySnapshot, Operation, Position, SnapshotWorkStats, StorageIndexStats,
     StorageWorkStats, Velocity, Workload, WorkloadError, WorldSnapshot,
@@ -31,14 +31,14 @@ struct Removed {
 
 impl<T> SparseSet<T> {
     /// Inserts or overwrites the value and returns the sparse slots and dense rows touched.
-    fn insert(&mut self, entity: EntityId, value: T) -> u64 {
-        if let Some(index) = self.sparse.get(entity.0) {
+    fn insert(&mut self, entity: EntityId, value: T, pages: &mut PageWork) -> u64 {
+        if let Some(index) = self.sparse.get_counted(entity.0, pages) {
             self.dense_values[index] = value;
             return 2;
         }
 
         let index = self.dense_values.len();
-        self.sparse.set(entity.0, index);
+        self.sparse.set(entity.0, index, pages);
         self.dense_entities.push(entity);
         self.dense_values.push(value);
         3
@@ -63,9 +63,9 @@ impl<T> SparseSet<T> {
         }
     }
 
-    fn remove(&mut self, entity: EntityId) -> Removed {
+    fn remove(&mut self, entity: EntityId, pages: &mut PageWork) -> Removed {
         let mut touched = 1;
-        let Some(index) = self.sparse.remove(entity.0) else {
+        let Some(index) = self.sparse.remove(entity.0, pages) else {
             return Removed {
                 moved: None,
                 touched,
@@ -77,7 +77,7 @@ impl<T> SparseSet<T> {
         touched += 1;
         let moved = if index < self.dense_entities.len() {
             let moved_entity = self.dense_entities[index];
-            self.sparse.set(moved_entity.0, index);
+            self.sparse.set(moved_entity.0, index, pages);
             touched += 2;
             Some((moved_entity, index))
         } else {
@@ -102,21 +102,19 @@ struct MotionQuery {
 }
 
 impl MotionQuery {
-    fn row_index(&self, entity: EntityId) -> Option<usize> {
-        self.sparse.get(entity.0)
-    }
-
     /// Refreshes one entity's query row and returns the measured maintenance work.
     fn refresh(
         &mut self,
         entity: EntityId,
         position_index: Option<usize>,
         velocity_index: Option<usize>,
+        pages: &mut PageWork,
     ) -> StorageWorkStats {
         // The entity's query sparse slot is always read; every further sparse-index read or
         // write and every row read, written, pushed, removed or swap-moved adds one more.
         let mut query_rows_inspected = 1;
-        let query_cache_updates = match (position_index, velocity_index, self.row_index(entity)) {
+        let row_index = self.sparse.get_counted(entity.0, pages);
+        let query_cache_updates = match (position_index, velocity_index, row_index) {
             (Some(position_index), Some(velocity_index), Some(row_index)) => {
                 let row = &mut self.rows[row_index];
                 query_rows_inspected += 1;
@@ -136,18 +134,18 @@ impl MotionQuery {
                     velocity_index,
                 });
                 query_rows_inspected += 1;
-                self.sparse.set(entity.0, row_index);
+                self.sparse.set(entity.0, row_index, pages);
                 query_rows_inspected += 1;
                 1
             }
             (_, _, Some(row_index)) => {
-                self.sparse.remove(entity.0);
+                self.sparse.remove(entity.0, pages);
                 query_rows_inspected += 1;
                 self.rows.swap_remove(row_index);
                 query_rows_inspected += 1;
                 if let Some(moved) = self.rows.get(row_index).copied() {
                     query_rows_inspected += 1;
-                    self.sparse.set(moved.entity.0, row_index);
+                    self.sparse.set(moved.entity.0, row_index, pages);
                     query_rows_inspected += 1;
                 }
                 1
@@ -221,6 +219,7 @@ impl CachedSparseWorld {
         operation: Operation,
     ) -> Result<StorageWorkStats, WorkloadError> {
         let mut work = StorageWorkStats::default();
+        let mut pages = PageWork::default();
         match operation {
             Operation::Spawn(entity) => {
                 work.entity_locations_inspected += 1;
@@ -230,49 +229,53 @@ impl CachedSparseWorld {
             }
             Operation::Despawn(entity) => {
                 self.require_alive(entity, &mut work)?;
-                let position_removed = self.positions.remove(entity);
-                let velocity_removed = self.velocities.remove(entity);
+                let position_removed = self.positions.remove(entity, &mut pages);
+                let velocity_removed = self.velocities.remove(entity, &mut pages);
                 work.component_slots_touched += position_removed.touched + velocity_removed.touched;
-                work.accumulate(self.refresh_motion(entity));
+                work.accumulate(self.refresh_motion(entity, &mut pages));
                 if let Some((moved, _)) = position_removed.moved {
-                    work.accumulate(self.refresh_motion(moved));
+                    work.accumulate(self.refresh_motion(moved, &mut pages));
                 }
                 if let Some((moved, _)) = velocity_removed.moved {
-                    work.accumulate(self.refresh_motion(moved));
+                    work.accumulate(self.refresh_motion(moved, &mut pages));
                 }
                 self.alive.remove(&entity);
                 work.entity_locations_inspected += 1;
             }
             Operation::SetPosition(entity, position) => {
                 self.require_alive(entity, &mut work)?;
-                work.component_slots_touched += self.positions.insert(entity, position);
-                work.accumulate(self.refresh_motion(entity));
+                work.component_slots_touched += self.positions.insert(entity, position, &mut pages);
+                work.accumulate(self.refresh_motion(entity, &mut pages));
             }
             Operation::RemovePosition(entity) => {
                 self.require_alive(entity, &mut work)?;
-                let removed = self.positions.remove(entity);
+                let removed = self.positions.remove(entity, &mut pages);
                 work.component_slots_touched += removed.touched;
-                work.accumulate(self.refresh_motion(entity));
+                work.accumulate(self.refresh_motion(entity, &mut pages));
                 if let Some((moved, _)) = removed.moved {
-                    work.accumulate(self.refresh_motion(moved));
+                    work.accumulate(self.refresh_motion(moved, &mut pages));
                 }
             }
             Operation::SetVelocity(entity, velocity) => {
                 self.require_alive(entity, &mut work)?;
-                work.component_slots_touched += self.velocities.insert(entity, velocity);
-                work.accumulate(self.refresh_motion(entity));
+                work.component_slots_touched +=
+                    self.velocities.insert(entity, velocity, &mut pages);
+                work.accumulate(self.refresh_motion(entity, &mut pages));
             }
             Operation::RemoveVelocity(entity) => {
                 self.require_alive(entity, &mut work)?;
-                let removed = self.velocities.remove(entity);
+                let removed = self.velocities.remove(entity, &mut pages);
                 work.component_slots_touched += removed.touched;
-                work.accumulate(self.refresh_motion(entity));
+                work.accumulate(self.refresh_motion(entity, &mut pages));
                 if let Some((moved, _)) = removed.moved {
-                    work.accumulate(self.refresh_motion(moved));
+                    work.accumulate(self.refresh_motion(moved, &mut pages));
                 }
             }
             Operation::Integrate { ticks } => work = self.integrate(ticks),
         }
+        work.sparse_page_descents += pages.page_descents;
+        work.sparse_pages_allocated += pages.pages_allocated;
+        work.sparse_pages_released += pages.pages_released;
         Ok(work)
     }
 
@@ -409,12 +412,12 @@ impl CachedSparseWorld {
         target.saturating_add(moved)
     }
 
-    fn refresh_motion(&mut self, entity: EntityId) -> StorageWorkStats {
-        let position_index = self.positions.index(entity);
-        let velocity_index = self.velocities.index(entity);
+    fn refresh_motion(&mut self, entity: EntityId, pages: &mut PageWork) -> StorageWorkStats {
+        let position_index = self.positions.sparse.get_counted(entity.0, pages);
+        let velocity_index = self.velocities.sparse.get_counted(entity.0, pages);
         let mut work = self
             .motion_query
-            .refresh(entity, position_index, velocity_index);
+            .refresh(entity, position_index, velocity_index, pages);
         // The two component sparse-index reads above.
         work.component_slots_touched += 2;
         work

@@ -246,6 +246,13 @@ pub struct StorageWorkStats {
     pub component_slots_touched: u64,
     /// Archetype table rows pushed, overwritten, removed or swap-moved by structural operations.
     pub table_rows_touched: u64,
+    /// Page-map descents inside paged sparse indexes (component and query) on structural paths.
+    /// Each descent counts as one regardless of tree depth.
+    pub sparse_page_descents: u64,
+    /// Sparse-index pages allocated by structural operations.
+    pub sparse_pages_allocated: u64,
+    /// Sparse-index pages released by structural operations.
+    pub sparse_pages_released: u64,
 }
 
 impl StorageWorkStats {
@@ -277,6 +284,15 @@ impl StorageWorkStats {
         self.table_rows_touched = self
             .table_rows_touched
             .saturating_add(other.table_rows_touched);
+        self.sparse_page_descents = self
+            .sparse_page_descents
+            .saturating_add(other.sparse_page_descents);
+        self.sparse_pages_allocated = self
+            .sparse_pages_allocated
+            .saturating_add(other.sparse_pages_allocated);
+        self.sparse_pages_released = self
+            .sparse_pages_released
+            .saturating_add(other.sparse_pages_released);
     }
 }
 

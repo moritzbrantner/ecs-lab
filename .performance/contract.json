@@ -978,6 +978,98 @@
           "notes": "Table moves (outcome)."
         },
         {
+          "name": "sparse_set_sparse_page_descents",
+          "unit": "descents",
+          "signal": "operation-count",
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Page-map lookups inside the component PagedSparseIndex; one per access plus one per page release. Tree depth is not counted."
+        },
+        {
+          "name": "sparse_set_sparse_pages_allocated",
+          "unit": "pages",
+          "signal": "operation-count",
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ]
+        },
+        {
+          "name": "sparse_set_sparse_pages_released",
+          "unit": "pages",
+          "signal": "operation-count",
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ]
+        },
+        {
+          "name": "cached_sparse_sparse_page_descents",
+          "unit": "descents",
+          "signal": "operation-count",
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Page-map lookups inside the component and query PagedSparseIndex instances."
+        },
+        {
+          "name": "cached_sparse_sparse_pages_allocated",
+          "unit": "pages",
+          "signal": "operation-count",
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ]
+        },
+        {
+          "name": "cached_sparse_sparse_pages_released",
+          "unit": "pages",
+          "signal": "operation-count",
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ]
+        },
+        {
           "name": "reference_entity_entries_touched_per_change",
           "unit": "entries per changed entity",
           "signal": "operation-count",
@@ -1126,6 +1218,92 @@
             }
           ],
           "notes": "ceil(archetype_structural_table_transitions / changed_entities); the budget is the analytic per-change ceiling, so every sample satisfies archetype_structural_table_transitions <= 2 * changed_entities."
+        },
+        {
+          "name": "sparse_set_sparse_page_descents_per_change",
+          "unit": "descents per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 5
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "ceil(sparse_set_sparse_page_descents / changed_entities): removal <= 3 (remove, release, swap repair) plus insert 2 (lookup, set)."
+        },
+        {
+          "name": "sparse_set_sparse_pages_allocated_per_change",
+          "unit": "pages per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 1
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ]
+        },
+        {
+          "name": "sparse_set_sparse_pages_released_per_change",
+          "unit": "pages per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 1
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ]
+        },
+        {
+          "name": "cached_sparse_sparse_page_descents_per_change",
+          "unit": "descents per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 18
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "ceil(cached_sparse_sparse_page_descents / changed_entities): component removal 3, leaving refresh 6, moved refresh 3, insert 2, returning refresh 4."
+        },
+        {
+          "name": "cached_sparse_sparse_pages_allocated_per_change",
+          "unit": "pages per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 2
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ]
+        },
+        {
+          "name": "cached_sparse_sparse_pages_released_per_change",
+          "unit": "pages per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 2
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ]
         }
       ]
     },
@@ -1324,6 +1502,98 @@
           "notes": "Table moves (outcome)."
         },
         {
+          "name": "sparse_set_sparse_page_descents",
+          "unit": "descents",
+          "signal": "operation-count",
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Page-map lookups inside the component PagedSparseIndex; one per access plus one per page release. Tree depth is not counted."
+        },
+        {
+          "name": "sparse_set_sparse_pages_allocated",
+          "unit": "pages",
+          "signal": "operation-count",
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ]
+        },
+        {
+          "name": "sparse_set_sparse_pages_released",
+          "unit": "pages",
+          "signal": "operation-count",
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ]
+        },
+        {
+          "name": "cached_sparse_sparse_page_descents",
+          "unit": "descents",
+          "signal": "operation-count",
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ],
+          "notes": "Page-map lookups inside the component and query PagedSparseIndex instances."
+        },
+        {
+          "name": "cached_sparse_sparse_pages_allocated",
+          "unit": "pages",
+          "signal": "operation-count",
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ]
+        },
+        {
+          "name": "cached_sparse_sparse_pages_released",
+          "unit": "pages",
+          "signal": "operation-count",
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            },
+            {
+              "dimension": "changed_entities",
+              "bound": "linear"
+            }
+          ]
+        },
+        {
           "name": "reference_entity_entries_touched_per_change",
           "unit": "entries per changed entity",
           "signal": "operation-count",
@@ -1472,6 +1742,92 @@
             }
           ],
           "notes": "ceil(archetype_structural_table_transitions / changed_entities); the budget is the analytic per-change ceiling, so every sample satisfies archetype_structural_table_transitions <= 2 * changed_entities."
+        },
+        {
+          "name": "sparse_set_sparse_page_descents_per_change",
+          "unit": "descents per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 10
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "ceil(sparse_set_sparse_page_descents / changed_entities): two removals <= 3 each plus two inserts of 2."
+        },
+        {
+          "name": "sparse_set_sparse_pages_allocated_per_change",
+          "unit": "pages per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 2
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ]
+        },
+        {
+          "name": "sparse_set_sparse_pages_released_per_change",
+          "unit": "pages per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 2
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ]
+        },
+        {
+          "name": "cached_sparse_sparse_page_descents_per_change",
+          "unit": "descents per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 29
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ],
+          "notes": "ceil(cached_sparse_sparse_page_descents / changed_entities): removals 6, leaving refresh 6, two moved refreshes 3 each, two inserts 2 each, non-matching refresh 3, returning refresh 4."
+        },
+        {
+          "name": "cached_sparse_sparse_pages_allocated_per_change",
+          "unit": "pages per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 3
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ]
+        },
+        {
+          "name": "cached_sparse_sparse_pages_released_per_change",
+          "unit": "pages per changed entity",
+          "signal": "operation-count",
+          "budget": {
+            "max": 3
+          },
+          "growth": [
+            {
+              "dimension": "total_entities",
+              "bound": "constant"
+            }
+          ]
         }
       ]
     },
