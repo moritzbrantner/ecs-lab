@@ -51,6 +51,31 @@ Malformed counters, unknown/missing fields, duplicate/missing/extra rows, and em
 partial output fail closed. The shell pipeline also fails when the native process fails.
 Advisory timing records are excluded from comparison, including arbitrarily slow ones.
 
+## Counting depth of structural operation contracts
+
+The `add-remove-component` and `respawn-entity` operations in `.performance/contract.json`
+count each structural primitive. Inside `PagedSparseIndex` they also count page-map
+descents, page allocations and page releases (`PageWork`) for the sparse-set and
+cached-sparse storages, each with an analytic per-change ceiling. The dense churn fixtures
+never empty or open a page, so the allocation and release counters record 0 there. The
+sparse-index unit tests cover the release path.
+
+The following refinements are deliberately not gated:
+
+- **Tree node visits.** A `BTreeMap`/`BTreeSet` descent (page map, alive set, archetype
+  locations, reference map) counts as one. Counting visited nodes would need a log-N growth
+  bound that the contract vocabulary (`constant`, `linear`) does not have. It would also
+  need instrumentation inside `std` collections. Their depth is logarithmic and does not
+  depend on the operation path, so it cannot hide a rescan.
+- **`Vec` growth and reallocation copies.** Amortized growth depends on the capacity
+  policy of `std`, not on the storage path, and the counters stay logical rather than
+  allocator-based. Retained index footprint is already budgeted through the allocated
+  page slots in the storage ratchet.
+- **Debug-only count cross-checks.** Primitives return the counts they increment in the
+  branches that run. `predicted_operation_work_matches_measured_work_on_v1_fixtures`
+  already compares measured work against an independent prediction. A second debug-only
+  counter per primitive would only duplicate that.
+
 ## One-way budget changes
 
 CI passes its base revision through `BASE_SHA`. The gate compares the committed budget

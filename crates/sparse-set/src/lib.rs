@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use ecs_sparse_index::PagedSparseIndex;
+use ecs_sparse_index::{PageWork, PagedSparseIndex};
 use ecs_workload::{
     EntityId, EntitySnapshot, Operation, Position, SnapshotWorkStats, StorageIndexStats,
     StorageWorkStats, Velocity, Workload, WorkloadError, WorldSnapshot,
@@ -25,13 +25,13 @@ impl<T> Default for SparseSet<T> {
 
 impl<T> SparseSet<T> {
     /// Inserts or overwrites the value and returns the sparse slots and dense rows touched.
-    fn insert(&mut self, entity: EntityId, value: T) -> u64 {
-        if let Some(index) = self.sparse.get(entity.0) {
+    fn insert(&mut self, entity: EntityId, value: T, pages: &mut PageWork) -> u64 {
+        if let Some(index) = self.sparse.get_counted(entity.0, pages) {
             self.dense_values[index] = value;
             return 2;
         }
         let index = self.dense_values.len();
-        self.sparse.set(entity.0, index);
+        self.sparse.set(entity.0, index, pages);
         self.dense_entities.push(entity);
         self.dense_values.push(value);
         3
@@ -47,15 +47,15 @@ impl<T> SparseSet<T> {
     }
 
     /// Removes the value and returns the sparse slots and dense rows touched.
-    fn remove(&mut self, entity: EntityId) -> u64 {
-        let Some(index) = self.sparse.remove(entity.0) else {
+    fn remove(&mut self, entity: EntityId, pages: &mut PageWork) -> u64 {
+        let Some(index) = self.sparse.remove(entity.0, pages) else {
             return 1;
         };
         self.dense_entities.swap_remove(index);
         self.dense_values.swap_remove(index);
         if index < self.dense_entities.len() {
             let moved = self.dense_entities[index];
-            self.sparse.set(moved.0, index);
+            self.sparse.set(moved.0, index, pages);
             return 4;
         }
         2
@@ -110,6 +110,7 @@ impl SparseWorld {
         operation: Operation,
     ) -> Result<StorageWorkStats, WorkloadError> {
         let mut work = StorageWorkStats::default();
+        let mut pages = PageWork::default();
         match operation {
             Operation::Spawn(entity) => {
                 work.entity_locations_inspected += 1;
@@ -121,27 +122,31 @@ impl SparseWorld {
                 self.require_alive(entity, &mut work)?;
                 self.alive.remove(&entity);
                 work.entity_locations_inspected += 1;
-                work.component_slots_touched +=
-                    self.positions.remove(entity) + self.velocities.remove(entity);
+                work.component_slots_touched += self.positions.remove(entity, &mut pages)
+                    + self.velocities.remove(entity, &mut pages);
             }
             Operation::SetPosition(entity, position) => {
                 self.require_alive(entity, &mut work)?;
-                work.component_slots_touched += self.positions.insert(entity, position);
+                work.component_slots_touched += self.positions.insert(entity, position, &mut pages);
             }
             Operation::RemovePosition(entity) => {
                 self.require_alive(entity, &mut work)?;
-                work.component_slots_touched += self.positions.remove(entity);
+                work.component_slots_touched += self.positions.remove(entity, &mut pages);
             }
             Operation::SetVelocity(entity, velocity) => {
                 self.require_alive(entity, &mut work)?;
-                work.component_slots_touched += self.velocities.insert(entity, velocity);
+                work.component_slots_touched +=
+                    self.velocities.insert(entity, velocity, &mut pages);
             }
             Operation::RemoveVelocity(entity) => {
                 self.require_alive(entity, &mut work)?;
-                work.component_slots_touched += self.velocities.remove(entity);
+                work.component_slots_touched += self.velocities.remove(entity, &mut pages);
             }
             Operation::Integrate { ticks } => work = self.integrate(ticks),
         }
+        work.sparse_page_descents += pages.page_descents;
+        work.sparse_pages_allocated += pages.pages_allocated;
+        work.sparse_pages_released += pages.pages_released;
         Ok(work)
     }
 

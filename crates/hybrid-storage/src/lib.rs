@@ -1,4 +1,4 @@
-use ecs_sparse_index::PagedSparseIndex;
+use ecs_sparse_index::{PageWork, PagedSparseIndex};
 use ecs_sparse_set::SparseWorld;
 use ecs_workload::{EntityId, EntitySnapshot, Operation, Position, Velocity, WorldSnapshot};
 
@@ -51,17 +51,19 @@ impl SparseStatus {
         }
         let dense = self.entities.len();
         self.entities.push(entity);
-        self.index.set(entity.0, dense);
+        // Hybrid storage does not report page-level work; its comparison is status churn.
+        self.index.set(entity.0, dense, &mut PageWork::default());
         true
     }
 
     fn remove(&mut self, entity: EntityId) -> bool {
-        let Some(dense) = self.index.remove(entity.0) else {
+        let mut pages = PageWork::default();
+        let Some(dense) = self.index.remove(entity.0, &mut pages) else {
             return false;
         };
         self.entities.swap_remove(dense);
         if let Some(moved) = self.entities.get(dense).copied() {
-            self.index.set(moved.0, dense);
+            self.index.set(moved.0, dense, &mut pages);
         }
         true
     }
