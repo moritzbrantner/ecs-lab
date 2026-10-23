@@ -158,7 +158,7 @@ mod tests {
             ControllerConfig3d::default(),
         )
         .expect("valid controller command");
-        assert!(operations.is_empty());
+        assert_eq!(operations, [] as [ecs_workload::Operation; 0]);
     }
 
     #[test]
@@ -175,7 +175,7 @@ mod tests {
             ControllerConfig3d::default(),
         )
         .expect("valid controller command");
-        assert!(operations.is_empty());
+        assert_eq!(operations, [] as [ecs_workload::Operation; 0]);
     }
 
     #[test]

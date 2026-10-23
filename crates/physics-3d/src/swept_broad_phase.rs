@@ -232,7 +232,7 @@ mod tests {
             .collect::<Vec<_>>();
         let pairs = swept_candidate_pairs(&bodies, SCALE, SCALE).expect("grid should be usable");
         assert!(pairs.len() < bodies.len() * (bodies.len() - 1) / 2);
-        assert!(pairs.is_empty());
+        assert_eq!(pairs, [] as [(usize, usize); 0]);
     }
 
     #[test]

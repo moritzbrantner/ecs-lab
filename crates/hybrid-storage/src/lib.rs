@@ -554,8 +554,11 @@ mod tests {
     #[test]
     fn empty_world_is_supported() {
         let evidence = run_status_churn_scenario(0, 8, 0, 0);
-        assert!(evidence.snapshot.world.entities().is_empty());
-        assert!(evidence.snapshot.status_entities.is_empty());
+        assert_eq!(evidence.snapshot.world.entities(), []);
+        assert_eq!(
+            evidence.snapshot.status_entities,
+            [] as [ecs_workload::EntityId; 0]
+        );
         assert_eq!(evidence.stats, HybridStats::default());
     }
 }

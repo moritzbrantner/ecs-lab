@@ -852,8 +852,8 @@ mod tests {
                 resolved_contacts: 0,
             }
         );
-        assert!(physics.contacts().is_empty());
-        assert!(physics.supporting_entities().is_empty());
+        assert_eq!(physics.contacts(), []);
+        assert_eq!(physics.supporting_entities(), []);
     }
 
     #[test]
@@ -1080,7 +1080,7 @@ mod tests {
         )
         .expect("touching contact should succeed");
 
-        assert!(physics.operations().is_empty());
+        assert_eq!(physics.operations(), []);
         assert_eq!(physics.stats().contacts, 1);
         assert_eq!(physics.stats().resolved_contacts, 0);
         assert_eq!(physics.contacts()[0].penetration, 0);

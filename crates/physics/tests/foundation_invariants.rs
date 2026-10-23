@@ -379,7 +379,7 @@ fn support_evidence_is_sorted_unique_across_multiple_floor_contacts() {
     )
     .expect("multi-support fixture should succeed");
 
-    assert!(physics.operations().is_empty());
+    assert_eq!(physics.operations(), []);
     assert_eq!(physics.supporting_entities(), [dynamic]);
     assert_eq!(
         physics

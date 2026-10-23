@@ -252,7 +252,7 @@ mod tests {
         assert_eq!(failure.committed.commands_committed, 0);
         assert_eq!(failure.remaining_commands, 2);
         assert_eq!(buffer.len(), 2);
-        assert!(world.snapshot().entities().is_empty());
+        assert_eq!(world.snapshot().entities(), []);
     }
 
     #[test]

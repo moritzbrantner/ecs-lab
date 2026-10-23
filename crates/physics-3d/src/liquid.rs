@@ -271,7 +271,7 @@ mod tests {
             Velocity::new3(0, -10, 0),
         )
         .expect("valid liquid response");
-        assert!(operations.is_empty());
+        assert_eq!(operations, [] as [ecs_workload::Operation; 0]);
     }
 
     #[test]
