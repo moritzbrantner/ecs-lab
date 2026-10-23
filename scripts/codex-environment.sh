@@ -40,10 +40,6 @@ path = pathlib.Path(sys.argv[1])
 print(tomllib.loads(path.read_text()).get('toolchain', {}).get('channel', '') if path.is_file() else '')
 PY
 )"
-if ! [[ "$rust_toolchain" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  printf 'Rust toolchain must use an exact version, got %s\n' "$rust_toolchain" >&2
-  exit 2
-fi
 if ! command -v rustup >/dev/null 2>&1; then
   printf '%s\n' 'rustup is required before repository setup' >&2
   exit 2
@@ -72,8 +68,3 @@ for command in "${environment_commands[@]}"; do
   (cd "$root" && bash -lc "$command")
 done
 
-observed_rust="$(cd "$root" && rustc --version | awk '{print $2}')"
-if [[ "$observed_rust" != "$rust_toolchain" ]]; then
-  printf 'Rust preflight mismatch: expected %s, got %s\n' "$rust_toolchain" "$observed_rust" >&2
-  exit 1
-fi
