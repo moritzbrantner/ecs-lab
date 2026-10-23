@@ -382,10 +382,10 @@ mod tests {
             fragment_count: 4,
             separation_speed: 2,
         };
-        assert!(
+        assert_eq!(
             destruction_operations(&snapshot(), &evidence, BODY, EntityId(100), recipe)
-                .expect("valid recipe")
-                .is_empty()
+                .expect("valid recipe"),
+            [] as [ecs_workload::Operation; 0]
         );
     }
 }

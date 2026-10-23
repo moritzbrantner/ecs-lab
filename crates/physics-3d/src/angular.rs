@@ -378,7 +378,7 @@ fn integer_sqrt(value: u128) -> u128 {
     if value < 2 {
         return value;
     }
-    let bit_length = u128::BITS - value.leading_zeros();
+    let bit_length = value.bit_width();
     let mut estimate = 1_u128 << bit_length.div_ceil(2);
     loop {
         let next = u128::midpoint(estimate, value / estimate);
