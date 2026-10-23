@@ -230,10 +230,9 @@ mod tests {
             .with_filter(CollisionFilter3d::new(0b0001, 0b0010));
         let solid =
             sphere(2, 0, ColliderRole3d::Solid).with_filter(CollisionFilter3d::new(0b0100, 0b0001));
-        assert!(
-            sensor_events(&[sensor, solid])
-                .expect("valid shapes")
-                .is_empty()
+        assert_eq!(
+            sensor_events(&[sensor, solid]).expect("valid shapes"),
+            [] as [SensorEvent3d; 0]
         );
     }
 }
