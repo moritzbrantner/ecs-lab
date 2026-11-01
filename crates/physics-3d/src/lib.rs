@@ -1,73 +1,25 @@
-mod angular;
-mod angular_substep;
-mod box_plane;
-mod colliders;
-mod continuous_solver;
-mod controller;
-mod impact;
-mod interactions;
-mod liquid;
-mod oriented_box;
-mod persistent_physics;
-#[cfg(test)]
-mod persistent_physics_tests;
-mod physics_engine_adapter;
-mod rigid_box;
-mod scenario;
-mod sphere_obb;
-mod sphere_obb_response;
-mod swept_broad_phase;
-mod types;
+//! Rapier-backed rigid-box physics for ECS Lab.
+//!
+//! Rapier (`rapier3d`, 3D f32, default features) is the rigid-body authority. The ECS keeps its
+//! integer components: every frame quantizes Rapier's state into [`RigidBox3d`] views and integer
+//! [`ecs_workload::Operation`]s. Rapier with default features replays bit-identically only on the
+//! same machine and binary, so scenarios assert tolerance-based physical-quality bounds plus
+//! same-machine replay, not cross-platform integer parity.
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    reason = "this crate is the f32 Rapier <-> integer ECS quantization seam; casts round or saturate by design"
+)]
 
-pub use angular::{
-    ANGULAR_VELOCITY_SCALE, AngularError3d, AngularState3d, AngularVelocity3d, BoxInertia3d,
-    ORIENTATION_SCALE, Orientation3d, box_inertia, contact_angular_impulse, integrate_orientation,
+mod body;
+mod geometry;
+mod scenario;
+mod world;
+
+pub use body::{
+    ANGULAR_VELOCITY_SCALE, AngularState3d, AngularVelocity3d, ORIENTATION_SCALE, Orientation3d,
+    PhysicsBody3d, RigidBox3d, RigidBoxState3d,
 };
-pub use angular_substep::{
-    AngularSubstepError3d, AngularSubstepPolicy3d, DEFAULT_MAX_ANGULAR_STEP_UNITS,
-    DEFAULT_MAX_ANGULAR_SUBSTEPS, MAX_ANGULAR_SUBSTEPS, required_angular_substeps,
-};
-pub use box_plane::{
-    BoxPlaneConfig3d, BoxPlaneContact3d, BoxPlaneError3d, BoxPlaneState3d, BoxPlaneStep3d,
-    oriented_box_vertices, step_box_on_plane,
-};
-pub use colliders::{
-    Collider3d, ColliderContact3d, ColliderError3d, ColliderShape3d, collider_contact,
-};
-pub use continuous_solver::step_3d;
-pub use controller::{
-    ControllerConfig3d, ControllerError3d, ControllerInput3d, controller_operations,
-};
-pub use impact::{
-    DestructionRecipe3d, ImpactError3d, ImpactEvidence3d, destruction_operations, impact_evidence,
-};
-pub use interactions::{
-    ColliderRole3d, CollisionFilter3d, InteractiveCollider3d, PairInteraction3d, SensorEvent3d,
-    pair_interaction, sensor_events,
-};
-pub use liquid::{LiquidError3d, LiquidVolume3d, liquid_operations};
-pub use oriented_box::{
-    ObbAxisFeature3d, ObbContactSeed3d, OrientedBox3d, OrientedBoxError3d, obb_contact_seed,
-};
-pub use persistent_physics::{
-    PersistentPhysicsWorld3d, PhysicsEngineAdapterRetained3d, PhysicsEngineAdapterWork3d,
-    PhysicsEngineMotionAuthority3d,
-};
-#[cfg(any(test, feature = "rebuild-reference"))]
-pub use physics_engine_adapter::step_rigid_box_world_with_physics_engine;
-pub use physics_engine_adapter::{
-    PhysicsEngineAdapterError3d, PhysicsEngineAdapterStep3d, physics_engine_boxes_penetrate,
-};
-pub use rigid_box::{
-    RigidBox3d, RigidBoxState3d, RigidBoxWorldConfig3d, RotatingContactSearchConfig3d,
-};
-pub use scenario::{BouncingRoom3dScenario, BroadPhaseBody3d, BroadPhaseFrame3d, ScenarioError3d};
-pub use sphere_obb::{Sphere3d, SphereObbContact3d, SphereObbError3d, sphere_obb_contact};
-pub use sphere_obb_response::{
-    RigidSphereState3d, SphereBody3d, SphereObbResponseContact3d, SphereObbResponseError3d,
-    SphereObbStep3d, resolve_sphere_obb_contact, stabilize_sphere_obb_contact,
-};
-pub use types::{
-    ContactNormal3d, PhysicsBody3d, PhysicsConfig3d, PhysicsContact3d, PhysicsError3d,
-    PhysicsStep3d, PhysicsStep3dStats,
-};
+pub use geometry::oriented_box_vertices;
+pub use scenario::BouncingRoom3dScenario;
+pub use world::{PairContact3d, PhysicsError3d, RapierFrame3d, RapierWorld3d, RapierWorldConfig3d};

@@ -1,150 +1,68 @@
-# Deterministic physics workloads
+# Physics workloads
 
 ## Purpose
 
-Use physics as a realistic deterministic ECS workload without turning `ecs-lab` into a general-purpose game engine. The repository keeps three deliberately distinct surfaces:
+Use physics as a realistic ECS workload without turning `ecs-lab` into a game engine. The repository keeps two distinct surfaces:
 
-- `ecs-physics`: the existing 2D AABB solver retained as the compatibility, regression, and benchmark foundation;
-- the continuous AABB work in `ecs-physics-3d`: an ECS Lab reference/experiment for three-axis translational CCD and simultaneous AABB contacts;
-- the pinned standalone `physics-engine`: the reusable authority for rotating rigid-box world stepping used by the committed 3D playground and trebuchet tower.
+- `ecs-physics`: the 2D integer AABB solver retained as the deterministic workload generator for the storage benchmarks and invariant suite;
+- `ecs-physics-3d`: the 3D rigid-box scenarios (room, tower, dice, material traces), with Rapier (`rapier3d =0.36.1`, 3D f32, default features, matching ARPG) as the rigid-body authority.
 
-All ECS Lab surfaces consume observable ECS-shaped state rather than owning storage. Rendering and browser interaction remain consumer concerns.
+All ECS Lab surfaces consume or produce observable ECS-shaped state rather than owning storage. Rendering and browser interaction remain consumer concerns.
 
 ## Three-axis ECS state
 
-`ecs-workload::Position` and `Velocity` carry X, Y, and Z. The existing two-argument constructors remain source-compatible and set Z to zero, while `Position::new3(...)` and `Velocity::new3(...)` construct explicit three-dimensional values.
+`ecs-workload::Position` and `Velocity` carry X, Y, and Z. The two-argument constructors set Z to zero, while `Position::new3(...)` and `Velocity::new3(...)` construct explicit three-dimensional values. Every storage candidate integrates all three axes and is parity-checked against `ReferenceWorld`.
 
-`ReferenceWorld` and `SparseWorld` both integrate all three axes. This keeps storage parity as the same fundamental contract whether a workload stays on the legacy Z=0 plane or moves through depth.
+## 2D workload generator
 
-## Cross-repository physics boundaries
+`ecs-physics` stays intentionally stable. Its constructors, deterministic pair ordering, mass/restitution/friction behavior, contact/support evidence, regression matrices, `falling-boxes`, `BouncingRoomScenario`, and benchmark fixtures operate on the Z=0 plane. The storage benchmarks compute each frame's physics from the storage's own snapshot inside the timed loop and assert exact snapshot parity across storages before timing, so this generator must be a pure function of the snapshot. It is kept until a replacement workload exists (#154).
 
-Reusable low-level AABB and spatial decisions remain in pinned `rust-kernels` crates:
+Reusable low-level AABB and spatial decisions for it remain in the pinned `rust-kernels` crates (`geometry-kernels`, `spatial-kernels`).
 
-- `geometry-kernels` / `spatial-kernels`
-- `rust-kernels` revision `986bff4dc8d13a64b90fab3a9f7f02bb8d1aa35e`
+## Rapier rigid-box authority
 
-Reusable rotating rigid-body semantics belong to the separately pinned `physics-engine`. That engine owns rotating-cuboid integration, sampled collision/re-contact discovery, OBB contact response, restitution, friction, and persistent-contact tail handling. ECS Lab owns scenario composition, ECS-shaped body/state conversion, bounded frame policy, deterministic evidence projection, and browser adaptation around that engine.
+`RapierWorld3d` builds one persistent Rapier world from ECS Lab `RigidBox3d` values (entity, kind, half extents, mass units, material, integer pose, velocity and spin) and steps it once per frame. Rapier owns integration, collision detection, CCD, contact response, restitution, friction and sleeping. ECS Lab owns scenario composition and the quantization seam:
 
-The current engine pin is `46d4eed291762815becde11f79c97019857533d9`. It uses floating-point CPU math by default behind the existing integer rotating-box compatibility API. [Engine adoption evidence](rotating-engine-adoption.md) records the native/WASM trajectory changes separately from the persistent adapter work in #133. The production adapter now retains its engine world across frames; [persistent adapter evidence](persistent-physics.md) documents ownership and mutation commands. Adopting the engine's floating-state API remains separate work.
+- one Rapier metre is `spatial_scale` integer units; linear velocity is units per second; quaternions are scaled by `ORIENTATION_SCALE` (2³⁰) and angular velocity by `ANGULAR_VELOCITY_SCALE` (10⁶ per rad/s);
+- every frame quantizes Rapier's state (round to nearest) into `RigidBox3d` views and integer `SetPosition` / `SetVelocity` operations for each dynamic body;
+- the integer view never feeds back into Rapier, so quantization error does not accumulate;
+- fixed bodies keep their exact integer pose and never receive operations;
+- restitution and friction (`0..=1000` thousandths) combine with Rapier's `Max` rule, matching the 2D solver.
 
-Application and teaching repositories such as `collision-lab` remain independent consumers and are not implementation dependencies.
+Following the owner's oracle strategy, a scenario moves to `physics-engine` only once physics-engine's Rapier oracle shows it matches.
 
-## Legacy 2D solver
+## Scenarios
 
-`ecs-physics` remains intentionally stable. Existing constructors, deterministic pair ordering, mass/restitution/friction behavior, contact/support evidence, regression matrices, `falling-boxes`, `BouncingRoomScenario`, and benchmark fixtures continue to operate on the Z=0 plane.
+- **Bouncing room** (`BouncingRoom3dScenario`): 48 spinning dynamic boxes with varied footprints, masses and materials inside six fixed slabs, 60 Hz, 3600 units per room unit, gravity 1 unit/s².
+- **Trebuchet tower**: a 24-mass projectile at 24 m/s through a two-layer, 30-block tower on a 120 × 60 m floor, gravity 10 m/s².
+- **Dice**: one tilted die dropped on a fixed slab, gravity 10 m/s².
+- **Material traces**: six rotation-locked cubes that differ only in restitution and friction.
 
-Keeping this surface intact provides historical correctness and performance evidence without forcing the newer 3D experiments into the same implementation.
+Tuning defaults, chosen to match the retired integer solver's per-frame behavior:
 
-## Continuous AABB reference experiment
+| Scenario | Angular damping (1/s) | Solver iterations |
+| --- | --- | --- |
+| Room | 0.12 (≈ 0.998 per frame) | 6 |
+| Tower | 0.24 (≈ 0.996 per frame) | 10 |
+| Dice | 0.3 (≈ 0.995 per frame) | 4 |
+| Material traces | 0, rotation locked | 4 |
 
-The translational continuous solver in `ecs-physics-3d` remains an independent ECS Lab experiment. It runs the supported AABB collision set on one deterministic continuous timeline:
+A tower body counts as spinning above 0.05 rad/s.
 
-1. dynamic bodies receive integer X/Y/Z gravity;
-2. every pair containing at least one dynamic body is considered across the remaining `(x, y, z, t)` interval rather than only at the end position;
-3. pair-relative motion turns AABB-vs-AABB into a swept point against a Minkowski-expanded relative AABB;
-4. a conservative swept broad phase reduces candidates without becoming simulation authority;
-5. X/Y/Z slab entry and exit intervals produce exact candidate times of impact;
-6. dynamic↔fixed and dynamic↔dynamic candidates compete for the same globally earliest exact TOI;
-7. every pair at that TOI and every tied collision axis within those pairs is collected into one deterministic contact set;
-8. all dynamic bodies advance once to that shared time using deterministic Q32.32 subticks;
-9. contact constraints are projected and resolved through bounded stable-order passes;
-10. material restitution is admitted on the first response pass and later passes are non-restorative correction;
-11. deterministic tangent friction follows normal convergence;
-12. the remaining timestep is searched again under the same event-set policy; and
-13. final private fixed-point positions are converted deterministically back to integer ECS coordinates.
+## Evidence contract
 
-The same material scale is reused: `0..=1000` thousandths for restitution and friction. Dynamic bodies require positive integer mass units; fixed bodies remain immovable.
+Rapier with default features is f32 and not cross-platform deterministic. Evidence is therefore tolerance-based physical quality plus same-machine replay:
 
-This solver is retained as inspectable translational AABB evidence. It is not the implementation used by the committed rotating OBB worlds and should not grow into a second rotating rigid-body authority.
+- **Same-machine replay**: two fresh worlds produce identical quantized frames (room, tower over 480 frames, dice). The browser projection check (`scripts/record-rotating-consumers-wasm.mjs`) also asserts reset/dispose replay inside the actual Wasm build.
+- **Room**: every dynamic center stays inside the walls (0.25 unit slack) and collider overlap stays below 0.2 units for 240 frames.
+- **Tower**: blocks tilt less than 0.01 rad and do not spin before impact; the projectile passes the front face; at least four blocks spin; overlap stays below 0.5 m in every frame (impact transient ≈ 0.42 m, below the 0.75 m smallest half extent); no corner sinks more than 0.2 m into the floor; at rest the overlap is below 0.01 m and nothing spins.
+- **Dice**: the off-center impact spins the die; no corner sinks more than 0.1 m in any frame or 0.01 m at rest.
+- **Storage seam**: replaying Rapier-generated operations keeps `ReferenceWorld` and `SparseWorld` in exact lockstep, with snapshots equal to the quantized boxes.
 
-## Standalone rotating rigid-box authority
-
-The browser playground and trebuchet tower create one `PersistentPhysicsWorld3d` from ECS Lab `RigidBox3d` state, then advance its authoritative engine across frames. The adapter deliberately stays thin:
-
-- ECS entity identity maps to stable engine-local body identity;
-- ECS Lab retains scenario/body metadata and integer export contracts;
-- frame-level angular damping and bounded angular substep selection remain explicit consumer policy;
-- every selected substep is executed by `physics-engine`;
-- sampled rotating collision-event search, OBB response, restitution, friction, and persistent-tail stabilization stay inside the engine;
-- engine results are mapped back to the existing ECS-facing state without introducing a second solver path.
-
-Rotational collision discovery remains explicitly sampled rather than analytic rotational CCD. The browser must not describe the current solver as analytic rotational CCD or as owning guarantees beyond the engine's bounded sampled model.
-
-## Bouncing room 3D scenario
-
-`BouncingRoom3dScenario` is the canonical dense 3D browser fixture. It contains 48 dynamic boxes arranged across three depth layers and four height rows. Their footprints, mass, restitution, friction, and X/Y/Z velocities vary deterministically. They move inside six fixed slabs:
-
-- floor and ceiling;
-- left and right X walls;
-- back and front Z walls.
-
-The scenario itself remains owned by ECS Lab. Its committed rotating playback is advanced through the pinned `physics-engine` adapter, while the exported broad-phase evidence and browser representation remain ECS Lab concerns.
-
-The scenario can also replay through `ReferenceWorld` and `SparseWorld` where storage differential evidence is required. Those storage comparisons remain separate from engine ownership.
-
-## Trebuchet tower scenario
-
-The tower is another engine consumer, not a local solver. ECS Lab defines the floor, projectile, block arrangement, material/mass values, frame rate, damping, bounded response-pass policy, and exported OBB vertices. `physics-engine` advances the rotating world.
-
-Acceptance is deliberately behavioral: the tower stays quiescent before impact, the projectile produces multi-block angular response, and exported dynamic geometry must not finish below the floor surface. Engine-native sampled-event and persistent-tail counts are evidence only; they are not reinterpreted by the browser as a second contact solver.
+The long tower run (`tower_long_horizon_regression`) runs in the Runtime evidence workflow.
 
 ## Browser and WebGPU ownership
 
-The dedicated `/physics/` Pages demo reads authoritative X/Y/Z positions, 3D half extents, body/material metadata, orientation, and pair evidence from Wasm.
+The `/physics/` Pages demo reads quantized X/Y/Z positions, half extents, body/material metadata, orientation and pair evidence from Wasm. Smooth motion is presentation-only: displayed state snaps exactly to the Rust frame at each step, and JavaScript never integrates velocity or resolves contacts. Camera state is presentation-only.
 
-Smooth motion is presentation-only. The browser preloads discrete deterministic Rust frames and interpolates displayed positions between consecutive frames. At each integer physics step, the displayed state snaps exactly to the Rust result; JavaScript never integrates velocity or resolves contacts.
-
-Camera state and the optional timeline matrix are presentation-only. Pointer drag, pan, zoom, and reset controls never write ECS or physics state.
-
-WebGPU has two independent roles:
-
-- **3D rendering** — WebGPU or the Canvas fallback displays already-authoritative Rust state;
-- **broad-phase evidence** — the existing compute path may check exported AABB pair evidence, but it is accepted only after equality with the authoritative Rust result.
-
-Neither GPU path feeds impulses, gravity, friction, contact iteration, collision timing, or ECS mutation back into the simulation.
-
-## Determinism contract
-
-Across ECS Lab physics workloads:
-
-- body configuration order cannot change canonical observable ordering;
-- ECS positions, velocities, masses, and material coefficients remain integer-valued;
-- fixed bodies never receive generated ECS motion writes;
-- browser rendering and WebGPU evidence cannot become simulation authority;
-- unsupported bounded work fails closed rather than silently dropping collision work.
-
-For the local continuous AABB experiment specifically:
-
-- fixed and dynamic pair candidates compete on one timeline;
-- TOI comparisons use exact integer fractions;
-- all pair/axis contacts at the globally earliest exact TOI form one set;
-- temporal integration uses private fixed-point state;
-- final positions use deterministic integer quantization;
-- bounded projection/normal/stabilization work fails closed.
-
-For rotating worlds specifically:
-
-- `physics-engine` is the sole collision/integration authority;
-- ECS Lab may select frame/search/substep budgets but does not duplicate their algorithms;
-- the pinned engine revision is immutable and part of the repository environment fingerprint;
-- rotational collision discovery is sampled and bounded, not analytic CCD.
-
-## Performance evidence
-
-Existing 2D benchmark fixtures remain the historical performance baseline:
-
-- motion replay;
-- falling boxes through reference and sparse-set storage;
-- sparse and dense material-step fixtures;
-- long-running 2D bouncing-room replay.
-
-Timing remains descriptive rather than a correctness threshold. Performance experiments must not fork reusable rotating collision semantics back into `ecs-lab`; reusable engine improvements belong upstream in `physics-engine` and can then be consumed through a new immutable pin.
-
-## Later horizons
-
-Keep later work separated by ownership:
-
-- ECS/storage experiments, scenario composition, differential evidence, browser presentation, and independent reference algorithms may live here;
-- reusable rotating rigid-body features such as constraints/joints, sleeping/islands, particles, fluids, and destructible-body simulation belong on the `physics-engine` roadmap;
-- reusable low-level geometry/spatial primitives belong in `rust-kernels` when they are independent of engine orchestration;
-- GPU acceleration must retain a deterministic CPU/reference boundary before it can influence authoritative results.
+WebGPU either renders already-quantized state or checks exported AABB pair evidence, accepted only after equality with the CPU result. Neither path feeds back into the simulation.

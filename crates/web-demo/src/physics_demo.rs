@@ -2,31 +2,21 @@ use std::sync::{Mutex, OnceLock};
 
 use ecs_physics::{BodyKind, PhysicsMaterial};
 use ecs_physics_3d::{
-    ANGULAR_VELOCITY_SCALE, AngularState3d, AngularSubstepPolicy3d, AngularVelocity3d,
-    BouncingRoom3dScenario, ORIENTATION_SCALE, Orientation3d, PersistentPhysicsWorld3d,
-    PhysicsBody3d, PhysicsConfig3d, RigidBox3d, RigidBoxState3d, RigidBoxWorldConfig3d,
-    RotatingContactSearchConfig3d, oriented_box_vertices, step_3d,
+    AngularState3d, BouncingRoom3dScenario, ORIENTATION_SCALE, PhysicsBody3d, RapierWorld3d,
+    RapierWorldConfig3d, RigidBox3d, RigidBoxState3d, oriented_box_vertices,
 };
-use ecs_reference::ReferenceWorld;
-use ecs_workload::{EntityId, Operation, Position, Velocity, Workload};
+use ecs_workload::{EntityId, Position, Velocity};
 
 const PHYSICS_DEMO_FPS: u32 = 60;
 const PHYSICS_DEMO_SECONDS: u32 = 10;
 const PHYSICS_DEMO_MAX_STEPS: u32 = PHYSICS_DEMO_FPS * PHYSICS_DEMO_SECONDS;
-const PHYSICS_DEMO_SOLVER_PASSES: u8 = 6;
-const PHYSICS_DEMO_ANGULAR_DAMPING_MILLI: u16 = 998;
-// Keep repeated-event remainders inside the authoritative i32 timestep domain. This remains a
-// bounded coarse sampling grid, not analytic rotational CCD.
-const PHYSICS_DEMO_CONTACT_SEARCH: RotatingContactSearchConfig3d = RotatingContactSearchConfig3d {
-    coarse_samples: 3,
-    refinement_steps: 0,
-};
 const MATERIAL_DEMO_COUNT: usize = 6;
 const MATERIAL_DEMO_RESTITUTION: [u16; MATERIAL_DEMO_COUNT] = [1_000, 850, 650, 450, 250, 0];
 const MATERIAL_DEMO_FRICTION: [u16; MATERIAL_DEMO_COUNT] = [0, 150, 350, 550, 750, 1_000];
 const MATERIAL_DEMO_SPATIAL_SCALE: i64 = 3_600;
 const MATERIAL_DEMO_EXTENT_SCALE: i32 = 3_600;
-const MATERIAL_DEMO_VELOCITY_SCALE: i32 = 60;
+/// One metre per second, in material-demo spatial units.
+const MATERIAL_DEMO_VELOCITY_SCALE: i32 = 3_600;
 
 static PHYSICS_DEMO_STATE: OnceLock<Mutex<Option<PhysicsDemoState>>> = OnceLock::new();
 static MATERIAL_DEMO_STATE: OnceLock<Mutex<Option<MaterialDemoState>>> = OnceLock::new();
@@ -46,66 +36,15 @@ struct PhysicsDemoFrame {
 struct PhysicsDemoState {
     frames: Vec<PhysicsDemoFrame>,
     spatial_scale: i64,
-    physics: PersistentPhysicsWorld3d,
+    physics: RapierWorld3d,
 }
 
 impl PhysicsDemoState {
     fn new() -> Option<Self> {
-        let scenario = BouncingRoom3dScenario::with_substeps_per_tick(PHYSICS_DEMO_FPS).ok()?;
+        let scenario = BouncingRoom3dScenario::new(PHYSICS_DEMO_FPS)?;
         let spatial_scale = scenario.spatial_scale();
-        let mut world = ReferenceWorld::new();
-        world.replay(scenario.setup()).ok()?;
-        let snapshot = world.snapshot();
-        let velocity_factor = i32::try_from(PHYSICS_DEMO_FPS).ok()?;
-        let mut boxes = Vec::with_capacity(scenario.bodies().len());
-
-        for body in scenario.bodies() {
-            let entity = snapshot
-                .entities()
-                .iter()
-                .find(|candidate| candidate.id == body.entity)?;
-            let center = entity.position?;
-            let source_velocity = entity.velocity.unwrap_or(Velocity::new3(0, 0, 0));
-            let linear_velocity = if body.kind == BodyKind::Dynamic {
-                Velocity::new3(
-                    source_velocity.x.checked_mul(velocity_factor)?,
-                    source_velocity.y.checked_mul(velocity_factor)?,
-                    source_velocity.z.checked_mul(velocity_factor)?,
-                )
-            } else {
-                Velocity::new3(0, 0, 0)
-            };
-            let angular_velocity = if body.kind == BodyKind::Dynamic {
-                initial_angular_velocity(body.entity)
-            } else {
-                AngularVelocity3d::default()
-            };
-            boxes.push(RigidBox3d::new(
-                *body,
-                RigidBoxState3d::new(
-                    center,
-                    linear_velocity,
-                    AngularState3d::new(Orientation3d::IDENTITY, angular_velocity),
-                ),
-            ));
-        }
-
-        let gravity_scale = i32::try_from(spatial_scale).ok()?;
-        let config = RigidBoxWorldConfig3d {
-            gravity: Velocity::new3(0, gravity_scale.checked_neg()?, 0),
-            timestep_numerator: 1,
-            timestep_denominator: velocity_factor,
-            angular_damping_milli: PHYSICS_DEMO_ANGULAR_DAMPING_MILLI,
-            solver_passes: PHYSICS_DEMO_SOLVER_PASSES,
-        };
-        let physics = PersistentPhysicsWorld3d::new(
-            &boxes,
-            config,
-            PHYSICS_DEMO_CONTACT_SEARCH,
-            AngularSubstepPolicy3d::default(),
-        )
-        .ok()?;
-        let initial_frame = build_demo_frame(boxes, spatial_scale)?;
+        let physics = RapierWorld3d::new(scenario.boxes(), scenario.config()).ok()?;
+        let initial_frame = build_demo_frame(physics.boxes().to_vec(), spatial_scale);
         Some(Self {
             frames: vec![initial_frame],
             spatial_scale,
@@ -121,77 +60,71 @@ impl PhysicsDemoState {
         while self.frames.len() <= target {
             let next = self.physics.advance().ok()?;
             self.frames
-                .push(build_demo_frame(next.boxes, self.spatial_scale)?);
+                .push(build_demo_frame(next.into_boxes(), self.spatial_scale));
         }
         self.frames.get(target)
     }
 }
 
+/// Six cubes with graded materials dropped on a fixed floor. Rotation is locked so the trace
+/// isolates restitution: the cubes differ only in material.
 struct MaterialDemoState {
-    world: ReferenceWorld,
-    bodies: Vec<PhysicsBody3d>,
+    physics: RapierWorld3d,
     frames: Vec<Vec<Position>>,
 }
 
 impl MaterialDemoState {
     fn new() -> Option<Self> {
-        let mut operations = Vec::new();
-        let mut bodies = Vec::new();
-
+        let mut boxes = Vec::with_capacity(MATERIAL_DEMO_COUNT + 1);
         for index in 0..MATERIAL_DEMO_COUNT {
             let entity = EntityId(u32::try_from(index).ok()?);
             let x = (-15_i64 + i64::try_from(index).ok()? * 6)
                 .checked_mul(MATERIAL_DEMO_SPATIAL_SCALE)?;
-            operations.push(Operation::Spawn(entity));
-            operations.push(Operation::SetPosition(
-                entity,
-                Position::new3(x, 12 * MATERIAL_DEMO_SPATIAL_SCALE, 0),
-            ));
-            operations.push(Operation::SetVelocity(
-                entity,
-                Velocity::new3(
-                    MATERIAL_DEMO_VELOCITY_SCALE,
-                    -2 * MATERIAL_DEMO_VELOCITY_SCALE,
-                    0,
+            boxes.push(RigidBox3d::new(
+                PhysicsBody3d::dynamic(entity, [MATERIAL_DEMO_EXTENT_SCALE; 3]).with_material(
+                    PhysicsMaterial::new(
+                        MATERIAL_DEMO_RESTITUTION[index],
+                        MATERIAL_DEMO_FRICTION[index],
+                    ),
+                ),
+                RigidBoxState3d::new(
+                    Position::new3(x, 12 * MATERIAL_DEMO_SPATIAL_SCALE, 0),
+                    Velocity::new3(
+                        MATERIAL_DEMO_VELOCITY_SCALE,
+                        -2 * MATERIAL_DEMO_VELOCITY_SCALE,
+                        0,
+                    ),
+                    AngularState3d::default(),
                 ),
             ));
-            bodies.push(
-                PhysicsBody3d::dynamic(
-                    entity,
-                    [
-                        MATERIAL_DEMO_EXTENT_SCALE,
-                        MATERIAL_DEMO_EXTENT_SCALE,
-                        MATERIAL_DEMO_EXTENT_SCALE,
-                    ],
-                )
-                .with_material(PhysicsMaterial::new(
-                    MATERIAL_DEMO_RESTITUTION[index],
-                    MATERIAL_DEMO_FRICTION[index],
-                )),
-            );
         }
-
-        let floor = EntityId(u32::try_from(MATERIAL_DEMO_COUNT).ok()?);
-        operations.push(Operation::Spawn(floor));
-        operations.push(Operation::SetPosition(
-            floor,
-            Position::new3(0, -MATERIAL_DEMO_SPATIAL_SCALE, 0),
+        boxes.push(RigidBox3d::new(
+            PhysicsBody3d::fixed(
+                EntityId(u32::try_from(MATERIAL_DEMO_COUNT).ok()?),
+                [
+                    20 * MATERIAL_DEMO_EXTENT_SCALE,
+                    MATERIAL_DEMO_EXTENT_SCALE,
+                    8 * MATERIAL_DEMO_EXTENT_SCALE,
+                ],
+            ),
+            RigidBoxState3d::new(
+                Position::new3(0, -MATERIAL_DEMO_SPATIAL_SCALE, 0),
+                Velocity::new3(0, 0, 0),
+                AngularState3d::default(),
+            ),
         ));
-        bodies.push(PhysicsBody3d::fixed(
-            floor,
-            [
-                20 * MATERIAL_DEMO_EXTENT_SCALE,
-                MATERIAL_DEMO_EXTENT_SCALE,
-                8 * MATERIAL_DEMO_EXTENT_SCALE,
-            ],
-        ));
-
-        let mut world = ReferenceWorld::new();
-        world.replay(&Workload::new(operations)).ok()?;
-        let initial = capture_material_positions(&world)?;
+        let config = RapierWorldConfig3d {
+            spatial_scale: MATERIAL_DEMO_SPATIAL_SCALE,
+            gravity: Velocity::new3(0, -MATERIAL_DEMO_VELOCITY_SCALE, 0),
+            hz: PHYSICS_DEMO_FPS,
+            angular_damping: 0.0,
+            solver_iterations: 4,
+            lock_rotations: true,
+        };
+        let physics = RapierWorld3d::new(&boxes, config).ok()?;
+        let initial = material_positions(physics.boxes());
         Some(Self {
-            world,
-            bodies,
+            physics,
             frames: vec![initial],
         })
     }
@@ -202,72 +135,39 @@ impl MaterialDemoState {
         }
         let target = usize::try_from(steps).ok()?;
         while self.frames.len() <= target {
-            let physics = step_3d(
-                &self.world.snapshot(),
-                &self.bodies,
-                PhysicsConfig3d {
-                    gravity: Velocity::new3(0, -1, 0),
-                },
-                1,
-            )
-            .ok()?;
-            for operation in physics.operations() {
-                self.world.apply(*operation).ok()?;
-            }
-            self.frames.push(capture_material_positions(&self.world)?);
+            let next = self.physics.advance().ok()?;
+            self.frames.push(material_positions(next.boxes()));
         }
         self.frames.get(target).map(Vec::as_slice)
     }
 }
 
-fn initial_angular_velocity(entity: EntityId) -> AngularVelocity3d {
-    let unit = ANGULAR_VELOCITY_SCALE / 5;
-    match entity.0 % 8 {
-        0 => AngularVelocity3d::new(unit, unit / 2, -unit),
-        1 => AngularVelocity3d::new(-unit, 2 * unit, unit / 2),
-        2 => AngularVelocity3d::new(unit / 2, -unit, 2 * unit),
-        3 => AngularVelocity3d::new(2 * unit, unit, -unit / 2),
-        4 => AngularVelocity3d::new(-2 * unit, unit / 2, unit),
-        5 => AngularVelocity3d::new(unit, -2 * unit, unit / 2),
-        6 => AngularVelocity3d::new(unit / 2, unit, -2 * unit),
-        _ => AngularVelocity3d::new(-unit, -unit / 2, 2 * unit),
-    }
-}
-
-fn capture_material_positions(world: &ReferenceWorld) -> Option<Vec<Position>> {
-    let snapshot = world.snapshot();
-    (0..MATERIAL_DEMO_COUNT)
-        .map(|index| {
-            let entity = EntityId(u32::try_from(index).ok()?);
-            snapshot
-                .entities()
-                .iter()
-                .find(|candidate| candidate.id == entity)?
-                .position
-        })
+fn material_positions(boxes: &[RigidBox3d]) -> Vec<Position> {
+    boxes[..MATERIAL_DEMO_COUNT]
+        .iter()
+        .map(|rigid_box| rigid_box.state.center)
         .collect()
 }
 
-fn build_demo_frame(boxes: Vec<RigidBox3d>, spatial_scale: i64) -> Option<PhysicsDemoFrame> {
+fn build_demo_frame(boxes: Vec<RigidBox3d>, spatial_scale: i64) -> PhysicsDemoFrame {
     let broad_bounds = boxes
         .iter()
         .map(|rigid_box| display_bounds(*rigid_box, spatial_scale))
-        .collect::<Option<Vec<_>>>()?;
+        .collect::<Vec<_>>();
     let pair_words = pair_evidence(&broad_bounds);
-    Some(PhysicsDemoFrame {
+    PhysicsDemoFrame {
         boxes,
         broad_bounds,
         pair_words,
-    })
+    }
 }
 
-fn display_bounds(rigid_box: RigidBox3d, spatial_scale: i64) -> Option<DisplayBounds3d> {
+fn display_bounds(rigid_box: RigidBox3d, spatial_scale: i64) -> DisplayBounds3d {
     let vertices = oriented_box_vertices(
         rigid_box.state.center,
         rigid_box.body.half_extents,
         rigid_box.state.angular.orientation,
-    )
-    .ok()?;
+    );
     let mut minimum = [i64::MAX; 3];
     let mut maximum = [i64::MIN; 3];
     for vertex in vertices {
@@ -276,10 +176,10 @@ fn display_bounds(rigid_box: RigidBox3d, spatial_scale: i64) -> Option<DisplayBo
             maximum[axis] = maximum[axis].max(value);
         }
     }
-    Some(DisplayBounds3d {
+    DisplayBounds3d {
         minimum: minimum.map(|value| display_coordinate(value, spatial_scale)),
         maximum: maximum.map(|value| display_coordinate(value, spatial_scale)),
-    })
+    }
 }
 
 fn pair_evidence(bounds: &[DisplayBounds3d]) -> Vec<u32> {
@@ -661,45 +561,16 @@ mod tests {
     };
 
     #[test]
-    #[ignore = "full physical consumer trace for engine-pin and persistent-lifetime comparisons"]
+    #[ignore = "full physical consumer trace of the Rapier playground"]
     fn playground_physical_trace_acceptance() {
         let mut state = PhysicsDemoState::new().expect("valid playground");
         for step in 0..=600 {
             let frame = state
                 .ensure_frame(step)
                 .expect("complete playground interval");
-            crate::physics_trace::record("playground", step, &frame.boxes, None, None);
+            crate::physics_trace::record("playground", step, &frame.boxes, None);
             assert_eq!(frame.boxes.len(), 54);
         }
-        let work = state.physics.work();
-        assert_eq!(work.world_constructions, 1);
-        assert_eq!(work.insertions, 54);
-        assert_eq!(work.input_conversions, 54);
-        assert_eq!(work.angular_scan_visits, 54 * 600);
-        assert_eq!(work.output_conversions, 54 * 600);
-        assert_eq!(work.descriptor_commands, 0);
-        assert_eq!(work.motion_commands, 0);
-        let before_rewind = work;
-        state.ensure_frame(1).expect("cached rewind view");
-        assert_eq!(state.physics.work(), before_rewind);
-        let cache_payload = state.frames.capacity()
-            * std::mem::size_of::<super::PhysicsDemoFrame>()
-            + state
-                .frames
-                .iter()
-                .map(|frame| {
-                    frame.boxes.capacity() * std::mem::size_of::<ecs_physics_3d::RigidBox3d>()
-                        + frame.broad_bounds.capacity()
-                            * std::mem::size_of::<super::DisplayBounds3d>()
-                        + frame.pair_words.capacity() * std::mem::size_of::<u32>()
-                })
-                .sum::<usize>();
-        println!("PERSISTENT_WORK playground {work:?}");
-        println!(
-            "PERSISTENT_RETAINED playground {:?}",
-            state.physics.retained()
-        );
-        println!("CACHE_PAYLOAD_BYTES playground {cache_payload}");
     }
 
     #[test]

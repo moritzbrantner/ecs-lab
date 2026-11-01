@@ -1,17 +1,9 @@
-use std::{collections::BTreeMap, fmt};
-
 use ecs_physics::{BodyKind, PhysicsMaterial};
-use ecs_reference::ReferenceWorld;
-use ecs_workload::{
-    EntityId, Operation, Position, Velocity, Workload, WorkloadError, WorldSnapshot,
-};
-use geometry_kernels::aabb_aabb;
-use spatial_kernels::Aabb;
+use ecs_workload::{EntityId, Operation, Position, Velocity, Workload};
 
 use crate::{
-    continuous_solver::axis_fits_exact_f32,
-    step_3d,
-    types::{PhysicsBody3d, PhysicsConfig3d, PhysicsError3d, PhysicsStep3d},
+    ANGULAR_VELOCITY_SCALE, AngularState3d, AngularVelocity3d, Orientation3d, PhysicsBody3d,
+    RapierWorldConfig3d, RigidBox3d, RigidBoxState3d,
 };
 
 const ROOM_DYNAMIC_COUNT: u32 = 48;
@@ -30,302 +22,134 @@ const ROOM_MATERIALS: [(u16, u16); 6] = [
     (0, 1_000),
 ];
 const ROOM_SHAPES: [[i32; 3]; 4] = [[2, 1, 1], [1, 1, 2], [2, 1, 2], [1, 1, 1]];
-const FLOOR: EntityId = EntityId(ROOM_DYNAMIC_COUNT);
-const CEILING: EntityId = EntityId(ROOM_DYNAMIC_COUNT + 1);
-const LEFT_WALL: EntityId = EntityId(ROOM_DYNAMIC_COUNT + 2);
-const RIGHT_WALL: EntityId = EntityId(ROOM_DYNAMIC_COUNT + 3);
-const BACK_WALL: EntityId = EntityId(ROOM_DYNAMIC_COUNT + 4);
-const FRONT_WALL: EntityId = EntityId(ROOM_DYNAMIC_COUNT + 5);
+const ROOM_FIXED: [(Position, [i32; 3]); 6] = [
+    (Position::new3(0, -1, 0), [20, 1, 16]),
+    (Position::new3(0, 21, 0), [20, 1, 16]),
+    (Position::new3(-21, 10, 0), [1, 12, 16]),
+    (Position::new3(21, 10, 0), [1, 12, 16]),
+    (Position::new3(0, 10, -17), [20, 12, 1]),
+    (Position::new3(0, 10, 17), [20, 12, 1]),
+];
+/// Rapier angular damping coefficient (1/s) of the room's dynamic boxes.
+const ROOM_ANGULAR_DAMPING: f32 = 0.12;
+const ROOM_SOLVER_ITERATIONS: u8 = 6;
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct BroadPhaseBody3d {
-    pub entity: EntityId,
-    pub position: Position,
-    pub half_extents: [i32; 3],
-    pub kind: BodyKind,
-    pub mass_units: u32,
-    pub material: PhysicsMaterial,
-    pub min: [f32; 3],
-    pub max: [f32; 3],
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct BroadPhaseFrame3d {
-    bodies: Vec<BroadPhaseBody3d>,
-    pair_words: Vec<u32>,
-    overlap_count: u32,
-}
-
-impl BroadPhaseFrame3d {
-    #[must_use]
-    pub fn bodies(&self) -> &[BroadPhaseBody3d] {
-        &self.bodies
-    }
-
-    #[must_use]
-    pub fn pair_words(&self) -> &[u32] {
-        &self.pair_words
-    }
-
-    #[must_use]
-    pub const fn overlap_count(&self) -> u32 {
-        self.overlap_count
-    }
-
-    /// Rebuilds pair evidence after normalizing the fixed-point room coordinates for display.
-    ///
-    /// The browser receives normalized `f32` centers and half extents. Recomputing the bitset from the
-    /// same normalized values keeps optional WebGPU verification word-for-word comparable even when a
-    /// mathematically exact contact lies on an `f32` rounding boundary after normalization.
-    #[must_use]
-    pub fn pair_words_at_spatial_scale(&self, spatial_scale: i64) -> Option<Vec<u32>> {
-        if spatial_scale <= 0 {
-            return None;
-        }
-        let scale = exact_i64_to_f32(spatial_scale);
-        let geometry = self
-            .bodies
-            .iter()
-            .map(|body| {
-                let half = body.half_extents.map(i64::from);
-                Aabb::from_center_half_extents(
-                    [
-                        exact_i64_to_f32(body.position.x) / scale,
-                        exact_i64_to_f32(body.position.y) / scale,
-                        exact_i64_to_f32(body.position.z) / scale,
-                    ],
-                    [
-                        exact_i64_to_f32(half[0]) / scale,
-                        exact_i64_to_f32(half[1]) / scale,
-                        exact_i64_to_f32(half[2]) / scale,
-                    ],
-                )
-            })
-            .collect::<Vec<_>>();
-        Some(pair_evidence(&geometry).0)
-    }
-
-    fn from_snapshot(
-        snapshot: &WorldSnapshot,
-        bodies: &[PhysicsBody3d],
-    ) -> Result<Self, ScenarioError3d> {
-        let entities = snapshot
-            .entities()
-            .iter()
-            .map(|entity| (entity.id, *entity))
-            .collect::<BTreeMap<_, _>>();
-        let mut frame_bodies = Vec::with_capacity(bodies.len());
-        let mut geometry = Vec::with_capacity(bodies.len());
-
-        for body in bodies {
-            let entity = entities
-                .get(&body.entity)
-                .ok_or(ScenarioError3d::MissingEntity(body.entity))?;
-            let position = entity
-                .position
-                .ok_or(ScenarioError3d::MissingPosition(body.entity))?;
-            let aabb = body_aabb(*body, position)?;
-            frame_bodies.push(BroadPhaseBody3d {
-                entity: body.entity,
-                position,
-                half_extents: body.half_extents,
-                kind: body.kind,
-                mass_units: body.mass_units,
-                material: body.material,
-                min: aabb.min,
-                max: aabb.max,
-            });
-            geometry.push(aabb);
-        }
-
-        let (pair_words, overlap_count) = pair_evidence(&geometry);
-        Ok(Self {
-            bodies: frame_bodies,
-            pair_words,
-            overlap_count,
-        })
-    }
-}
-
-fn pair_evidence(geometry: &[Aabb]) -> (Vec<u32>, u32) {
-    let body_count = geometry.len();
-    let possible_pairs = body_count.saturating_mul(body_count.saturating_sub(1)) / 2;
-    let mut pair_words = vec![0_u32; possible_pairs.div_ceil(32)];
-    let mut overlap_count = 0_u32;
-    for left in 0..body_count {
-        for right in (left + 1)..body_count {
-            if !aabb_aabb(geometry[left], geometry[right]).overlaps {
-                continue;
-            }
-            let pair = pair_index(left, right, body_count);
-            pair_words[pair / 32] |= 1_u32 << (pair % 32);
-            overlap_count = overlap_count.saturating_add(1);
-        }
-    }
-    (pair_words, overlap_count)
-}
-
-fn pair_index(left: usize, right: usize, count: usize) -> usize {
-    left * (2 * count - left - 1) / 2 + (right - left - 1)
-}
-
-fn body_aabb(body: PhysicsBody3d, position: Position) -> Result<Aabb, ScenarioError3d> {
-    let half = body.half_extents.map(i64::from);
-    if !axis_fits_exact_f32(position.x, half[0])
-        || !axis_fits_exact_f32(position.y, half[1])
-        || !axis_fits_exact_f32(position.z, half[2])
-    {
-        return Err(ScenarioError3d::CoordinateOutOfRange(body.entity));
-    }
-    Ok(Aabb::from_center_half_extents(
-        [
-            exact_i64_to_f32(position.x),
-            exact_i64_to_f32(position.y),
-            exact_i64_to_f32(position.z),
-        ],
-        [
-            exact_i64_to_f32(half[0]),
-            exact_i64_to_f32(half[1]),
-            exact_i64_to_f32(half[2]),
-        ],
-    ))
-}
-
-#[allow(clippy::cast_precision_loss)]
-fn exact_i64_to_f32(value: i64) -> f32 {
-    value as f32
-}
-
+/// A closed room of 48 spinning dynamic boxes with mixed materials and six fixed slabs.
+///
+/// Room coordinates are scaled by [`Self::spatial_scale`] into integer ECS units; one room unit
+/// is one Rapier metre. Velocities are room units per second, gravity is one room unit per
+/// second squared.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BouncingRoom3dScenario {
     setup: Workload,
-    bodies: Vec<PhysicsBody3d>,
+    boxes: Vec<RigidBox3d>,
     spatial_scale: i64,
-}
-
-impl Default for BouncingRoom3dScenario {
-    fn default() -> Self {
-        Self::new()
-    }
+    hz: u32,
 }
 
 impl BouncingRoom3dScenario {
+    /// Builds the room stepped at `hz` frames per second, with `hz²` integer units per room unit.
+    ///
+    /// Returns `None` when `hz` is zero or the scaled room does not fit the integer components.
     #[must_use]
-    pub fn new() -> Self {
-        let Ok(scenario) = Self::with_substeps_per_tick(1) else {
-            unreachable!("the canonical unit timestep is statically representable");
+    pub fn new(hz: u32) -> Option<Self> {
+        let rate = i32::try_from(hz).ok().filter(|rate| *rate > 0)?;
+        let spatial_scale = i64::from(rate).checked_mul(i64::from(rate))?;
+        let extent_scale = i32::try_from(spatial_scale).ok()?;
+        let velocity_scale = extent_scale;
+        let scale_position = |value: Position| {
+            Some(Position::new3(
+                value.x.checked_mul(spatial_scale)?,
+                value.y.checked_mul(spatial_scale)?,
+                value.z.checked_mul(spatial_scale)?,
+            ))
         };
-        scenario
-    }
-
-    /// Builds the canonical room at a finer integer fixed-step resolution.
-    ///
-    /// `substeps_per_tick = N` scales positions and extents by `N²` and velocities by `N` while
-    /// leaving the integer gravity impulse unchanged. One solver step then represents `1/N` of the
-    /// canonical time unit without introducing floating-point ECS state. Dividing exported positions
-    /// and extents by [`Self::spatial_scale`] restores the ordinary room coordinates.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ScenarioError3d::InvalidSubstepRate`] when the rate is zero or cannot be represented
-    /// by the integer position, velocity, or extent types used by the scenario.
-    pub fn with_substeps_per_tick(substeps_per_tick: u32) -> Result<Self, ScenarioError3d> {
-        let velocity_scale = i32::try_from(substeps_per_tick)
-            .map_err(|_| ScenarioError3d::InvalidSubstepRate(substeps_per_tick))?;
-        if velocity_scale <= 0 {
-            return Err(ScenarioError3d::InvalidSubstepRate(substeps_per_tick));
-        }
-        let spatial_scale = i64::from(velocity_scale)
-            .checked_mul(i64::from(velocity_scale))
-            .ok_or(ScenarioError3d::InvalidSubstepRate(substeps_per_tick))?;
-        let extent_scale = i32::try_from(spatial_scale)
-            .map_err(|_| ScenarioError3d::InvalidSubstepRate(substeps_per_tick))?;
-
-        let scale_position = |value: i64| {
-            value
-                .checked_mul(spatial_scale)
-                .ok_or(ScenarioError3d::InvalidSubstepRate(substeps_per_tick))
-        };
-        let scale_velocity = |value: i32| {
-            value
-                .checked_mul(velocity_scale)
-                .ok_or(ScenarioError3d::InvalidSubstepRate(substeps_per_tick))
-        };
-        let scale_extent = |value: i32| {
-            value
-                .checked_mul(extent_scale)
-                .ok_or(ScenarioError3d::InvalidSubstepRate(substeps_per_tick))
+        let scale_extents = |value: [i32; 3]| {
+            Some([
+                value[0].checked_mul(extent_scale)?,
+                value[1].checked_mul(extent_scale)?,
+                value[2].checked_mul(extent_scale)?,
+            ])
         };
 
-        let mut operations = Vec::new();
-        let mut bodies = Vec::new();
-        let mut next_entity = 0_u32;
-
+        let mut boxes = Vec::new();
         for (layer_index, z) in ROOM_LAYERS.into_iter().enumerate() {
             for (row_index, y) in ROOM_ROWS.into_iter().enumerate() {
                 for (column_index, x) in ROOM_COLUMNS.into_iter().enumerate() {
-                    let body_index = bodies.len();
-                    let entity = EntityId(next_entity);
-                    let x_velocity = ROOM_X_VELOCITIES
-                        [(column_index + row_index + layer_index) % ROOM_X_VELOCITIES.len()];
-                    let y_velocity =
-                        ROOM_Y_VELOCITIES[(row_index + layer_index) % ROOM_Y_VELOCITIES.len()];
-                    let z_velocity = ROOM_Z_VELOCITIES
-                        [(column_index + row_index * 2 + layer_index) % ROOM_Z_VELOCITIES.len()];
+                    let index = boxes.len();
+                    let entity = EntityId(u32::try_from(index).ok()?);
                     let velocity = Velocity::new3(
-                        scale_velocity(x_velocity)?,
-                        scale_velocity(y_velocity)?,
-                        scale_velocity(z_velocity)?,
+                        ROOM_X_VELOCITIES
+                            [(column_index + row_index + layer_index) % ROOM_X_VELOCITIES.len()]
+                        .checked_mul(velocity_scale)?,
+                        ROOM_Y_VELOCITIES[(row_index + layer_index) % ROOM_Y_VELOCITIES.len()]
+                            .checked_mul(velocity_scale)?,
+                        ROOM_Z_VELOCITIES[(column_index + row_index * 2 + layer_index)
+                            % ROOM_Z_VELOCITIES.len()]
+                        .checked_mul(velocity_scale)?,
                     );
-                    let (restitution, friction) = ROOM_MATERIALS[body_index % ROOM_MATERIALS.len()];
-                    let material = PhysicsMaterial::new(restitution, friction);
-                    let mass_units = 1 + next_entity % 4;
-                    let half_extents = ROOM_SHAPES[body_index % ROOM_SHAPES.len()]
-                        .map(scale_extent)
-                        .into_iter()
-                        .collect::<Result<Vec<_>, _>>()?
-                        .try_into()
-                        .map_err(|_| ScenarioError3d::InvalidSubstepRate(substeps_per_tick))?;
-
-                    operations.push(Operation::Spawn(entity));
-                    operations.push(Operation::SetPosition(
+                    let (restitution, friction) = ROOM_MATERIALS[index % ROOM_MATERIALS.len()];
+                    let body = PhysicsBody3d::dynamic(
                         entity,
-                        Position::new3(scale_position(x)?, scale_position(y)?, scale_position(z)?),
+                        scale_extents(ROOM_SHAPES[index % ROOM_SHAPES.len()])?,
+                    )
+                    .with_mass(1 + entity.0 % 4)
+                    .with_material(PhysicsMaterial::new(restitution, friction));
+                    boxes.push(RigidBox3d::new(
+                        body,
+                        RigidBoxState3d::new(
+                            scale_position(Position::new3(x, y, z))?,
+                            velocity,
+                            AngularState3d::new(Orientation3d::IDENTITY, initial_spin(entity)),
+                        ),
                     ));
-                    operations.push(Operation::SetVelocity(entity, velocity));
-                    bodies.push(
-                        PhysicsBody3d::dynamic(entity, half_extents)
-                            .with_mass(mass_units)
-                            .with_material(material),
-                    );
-                    next_entity += 1;
                 }
             }
         }
-        debug_assert_eq!(next_entity, ROOM_DYNAMIC_COUNT);
+        debug_assert_eq!(boxes.len(), ROOM_DYNAMIC_COUNT as usize);
 
-        add_room_boundaries(
-            &mut operations,
-            &mut bodies,
-            spatial_scale,
-            extent_scale,
-            substeps_per_tick,
-        )?;
-        Ok(Self {
+        for (offset, (center, half_extents)) in ROOM_FIXED.into_iter().enumerate() {
+            let entity = EntityId(ROOM_DYNAMIC_COUNT + u32::try_from(offset).ok()?);
+            boxes.push(RigidBox3d::new(
+                PhysicsBody3d::fixed(entity, scale_extents(half_extents)?),
+                RigidBoxState3d::new(
+                    scale_position(center)?,
+                    Velocity::new3(0, 0, 0),
+                    AngularState3d::default(),
+                ),
+            ));
+        }
+
+        let mut operations = Vec::with_capacity(boxes.len() * 3);
+        for rigid_box in &boxes {
+            let entity = rigid_box.body.entity;
+            operations.push(Operation::Spawn(entity));
+            operations.push(Operation::SetPosition(entity, rigid_box.state.center));
+            if rigid_box.body.kind == BodyKind::Dynamic {
+                operations.push(Operation::SetVelocity(
+                    entity,
+                    rigid_box.state.linear_velocity,
+                ));
+            }
+        }
+        Some(Self {
             setup: Workload::new(operations),
-            bodies,
+            boxes,
             spatial_scale,
+            hz,
         })
     }
 
+    /// ECS workload that spawns every room entity with its initial integer state.
     #[must_use]
     pub fn setup(&self) -> &Workload {
         &self.setup
     }
 
+    /// Initial rigid boxes: 48 dynamic boxes followed by the six fixed slabs.
     #[must_use]
-    pub fn bodies(&self) -> &[PhysicsBody3d] {
-        &self.bodies
+    pub fn boxes(&self) -> &[RigidBox3d] {
+        &self.boxes
     }
 
     #[must_use]
@@ -333,247 +157,122 @@ impl BouncingRoom3dScenario {
         self.spatial_scale
     }
 
+    /// Rapier world parameters for the room.
     #[must_use]
-    pub const fn physics_config(&self) -> PhysicsConfig3d {
-        PhysicsConfig3d {
-            gravity: Velocity::new3(0, -1, 0),
-        }
-    }
-
-    /// Produces one canonical 3D room step.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`PhysicsError3d`] when the supplied snapshot violates the 3D physics contract.
-    pub fn step(&self, snapshot: &WorldSnapshot) -> Result<PhysicsStep3d, PhysicsError3d> {
-        step_3d(snapshot, &self.bodies, self.physics_config(), 1)
-    }
-
-    /// Replays the room through the reference ECS for the requested number of steps.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ScenarioError3d`] when setup, physics, or ECS replay fails.
-    pub fn reference_after(&self, frames: u32) -> Result<WorldSnapshot, ScenarioError3d> {
-        let mut world = ReferenceWorld::new();
-        world
-            .replay(&self.setup)
-            .map_err(ScenarioError3d::Workload)?;
-        for _ in 0..frames {
-            let physics = self
-                .step(&world.snapshot())
-                .map_err(ScenarioError3d::Physics)?;
-            for operation in physics.operations() {
-                world.apply(*operation).map_err(ScenarioError3d::Workload)?;
-            }
-        }
-        Ok(world.snapshot())
-    }
-
-    /// Builds exact 3D AABB evidence from a supplied Rust-owned room snapshot.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ScenarioError3d`] when the snapshot is missing required room state or exceeds the
-    /// exact collision-coordinate range.
-    pub fn broad_phase_frame(
-        &self,
-        snapshot: &WorldSnapshot,
-    ) -> Result<BroadPhaseFrame3d, ScenarioError3d> {
-        BroadPhaseFrame3d::from_snapshot(snapshot, &self.bodies)
-    }
-
-    /// Builds exact 3D AABB evidence from the Rust-owned room state.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ScenarioError3d`] when the scenario cannot produce the requested frame.
-    pub fn broad_phase_frame_after(
-        &self,
-        frames: u32,
-    ) -> Result<BroadPhaseFrame3d, ScenarioError3d> {
-        self.broad_phase_frame(&self.reference_after(frames)?)
-    }
-}
-
-fn add_room_boundaries(
-    operations: &mut Vec<Operation>,
-    bodies: &mut Vec<PhysicsBody3d>,
-    spatial_scale: i64,
-    extent_scale: i32,
-    substeps_per_tick: u32,
-) -> Result<(), ScenarioError3d> {
-    let scale_position = |value: i64| {
-        value
-            .checked_mul(spatial_scale)
-            .ok_or(ScenarioError3d::InvalidSubstepRate(substeps_per_tick))
-    };
-    let scale_extent = |value: i32| {
-        value
-            .checked_mul(extent_scale)
-            .ok_or(ScenarioError3d::InvalidSubstepRate(substeps_per_tick))
-    };
-    let fixed = [
-        (FLOOR, Position::new3(0, -1, 0), [20, 1, 16]),
-        (CEILING, Position::new3(0, 21, 0), [20, 1, 16]),
-        (LEFT_WALL, Position::new3(-21, 10, 0), [1, 12, 16]),
-        (RIGHT_WALL, Position::new3(21, 10, 0), [1, 12, 16]),
-        (BACK_WALL, Position::new3(0, 10, -17), [20, 12, 1]),
-        (FRONT_WALL, Position::new3(0, 10, 17), [20, 12, 1]),
-    ];
-    for (entity, position, half_extents) in fixed {
-        let scaled_half_extents = half_extents
-            .map(scale_extent)
-            .into_iter()
-            .collect::<Result<Vec<_>, _>>()?
-            .try_into()
-            .map_err(|_| ScenarioError3d::InvalidSubstepRate(substeps_per_tick))?;
-        operations.push(Operation::Spawn(entity));
-        operations.push(Operation::SetPosition(
-            entity,
-            Position::new3(
-                scale_position(position.x)?,
-                scale_position(position.y)?,
-                scale_position(position.z)?,
-            ),
-        ));
-        bodies.push(PhysicsBody3d::fixed(entity, scaled_half_extents));
-    }
-    Ok(())
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ScenarioError3d {
-    Workload(WorkloadError),
-    Physics(PhysicsError3d),
-    MissingEntity(EntityId),
-    MissingPosition(EntityId),
-    CoordinateOutOfRange(EntityId),
-    InvalidSubstepRate(u32),
-}
-
-impl fmt::Display for ScenarioError3d {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Workload(error) => write!(formatter, "3D scenario workload failed: {error}"),
-            Self::Physics(error) => write!(formatter, "3D scenario physics failed: {error}"),
-            Self::MissingEntity(entity) => {
-                write!(formatter, "3D scenario entity {} is missing", entity.0)
-            }
-            Self::MissingPosition(entity) => {
-                write!(formatter, "3D scenario entity {} has no position", entity.0)
-            }
-            Self::CoordinateOutOfRange(entity) => write!(
-                formatter,
-                "3D scenario entity {} exceeds the exact f32 collision range",
-                entity.0
-            ),
-            Self::InvalidSubstepRate(rate) => {
-                write!(
-                    formatter,
-                    "3D scenario substep rate {rate} cannot be represented"
-                )
-            }
+    pub fn config(&self) -> RapierWorldConfig3d {
+        let gravity = i32::try_from(self.spatial_scale).unwrap_or(i32::MAX);
+        RapierWorldConfig3d {
+            spatial_scale: self.spatial_scale,
+            gravity: Velocity::new3(0, -gravity, 0),
+            hz: self.hz,
+            angular_damping: ROOM_ANGULAR_DAMPING,
+            solver_iterations: ROOM_SOLVER_ITERATIONS,
+            lock_rotations: false,
         }
     }
 }
 
-impl std::error::Error for ScenarioError3d {}
+fn initial_spin(entity: EntityId) -> AngularVelocity3d {
+    let unit = ANGULAR_VELOCITY_SCALE / 5;
+    match entity.0 % 8 {
+        0 => AngularVelocity3d::new(unit, unit / 2, -unit),
+        1 => AngularVelocity3d::new(-unit, 2 * unit, unit / 2),
+        2 => AngularVelocity3d::new(unit / 2, -unit, 2 * unit),
+        3 => AngularVelocity3d::new(2 * unit, unit, -unit / 2),
+        4 => AngularVelocity3d::new(-2 * unit, unit / 2, unit),
+        5 => AngularVelocity3d::new(unit, -2 * unit, unit / 2),
+        6 => AngularVelocity3d::new(unit / 2, unit, -2 * unit),
+        _ => AngularVelocity3d::new(-unit, -unit / 2, 2 * unit),
+    }
+}
 
 #[cfg(test)]
 mod tests {
+    use ecs_physics::BodyKind;
     use ecs_reference::ReferenceWorld;
     use ecs_sparse_set::SparseWorld;
 
-    use super::{BouncingRoom3dScenario, ROOM_DYNAMIC_COUNT};
+    use super::BouncingRoom3dScenario;
+    use crate::RapierWorld3d;
 
-    #[test]
-    fn room_moves_bodies_through_depth() {
-        let scenario = BouncingRoom3dScenario::new();
-        let initial = scenario
-            .reference_after(0)
-            .expect("initial frame should work");
-        let next = scenario.reference_after(1).expect("next frame should work");
-        let initial_z = initial.entities()[0]
-            .position
-            .expect("position should exist")
-            .z;
-        let next_z = next.entities()[0]
-            .position
-            .expect("position should exist")
-            .z;
-        assert_ne!(initial_z, next_z);
+    const FRAMES: u32 = 240;
+
+    fn room() -> (BouncingRoom3dScenario, RapierWorld3d) {
+        let scenario = BouncingRoom3dScenario::new(60).expect("60 Hz room fits the integer units");
+        let world = RapierWorld3d::new(scenario.boxes(), scenario.config()).expect("valid room");
+        (scenario, world)
     }
 
     #[test]
-    fn room_supports_sixty_fine_solver_steps_per_tick() {
-        let scenario = BouncingRoom3dScenario::with_substeps_per_tick(60)
-            .expect("60 Hz room scaling should be representable");
+    fn room_stays_inside_its_walls_and_keeps_moving() {
+        let (scenario, mut world) = room();
         assert_eq!(scenario.spatial_scale(), 3_600);
-
-        let initial = scenario
-            .reference_after(0)
-            .expect("initial fine frame should work");
-        let next = scenario
-            .reference_after(1)
-            .expect("next fine frame should work");
-        let initial_z = initial.entities()[0]
-            .position
-            .expect("position should exist")
-            .z;
-        let next_z = next.entities()[0]
-            .position
-            .expect("position should exist")
-            .z;
-        let fine_delta = (next_z - initial_z).abs();
-        assert!(fine_delta > 0);
-        assert!(fine_delta < scenario.spatial_scale());
-
-        let one_tick = scenario
-            .reference_after(60)
-            .expect("one nominal tick of fine frames should work");
-        let one_tick_z = one_tick.entities()[0]
-            .position
-            .expect("position should exist")
-            .z;
-        assert!((one_tick_z - initial_z).abs() > scenario.spatial_scale());
+        let scale = scenario.spatial_scale();
+        let initial_z = world.boxes()[0].state.center.z;
+        for _ in 0..FRAMES {
+            let frame = world.advance().expect("room step");
+            for rigid_box in frame
+                .boxes()
+                .iter()
+                .filter(|rigid_box| rigid_box.body.kind == BodyKind::Dynamic)
+            {
+                let center = rigid_box.state.center;
+                // Interior: |x| < 20, 0 < y < 20, |z| < 16 room units, plus 0.25 units slack.
+                let slack = scale / 4;
+                assert!(center.x.abs() < 20 * scale + slack, "{rigid_box:?}");
+                assert!(
+                    center.y > -slack && center.y < 20 * scale + slack,
+                    "{rigid_box:?}"
+                );
+                assert!(center.z.abs() < 16 * scale + slack, "{rigid_box:?}");
+            }
+            let max_penetration = world.max_penetration();
+            assert!(
+                max_penetration < 0.2,
+                "room penetration {max_penetration} exceeds 0.2 room units"
+            );
+        }
+        assert_ne!(world.boxes()[0].state.center.z, initial_z);
     }
 
     #[test]
-    fn room_keeps_reference_and_sparse_storage_in_lockstep() {
-        let scenario = BouncingRoom3dScenario::new();
+    fn room_replays_identically_on_the_same_machine() {
+        let (_, mut first) = room();
+        let (_, mut second) = room();
+        for frame in 0..FRAMES {
+            let left = first.advance().expect("first room step").boxes().to_vec();
+            let right = second.advance().expect("second room step").boxes().to_vec();
+            assert_eq!(left, right, "same-machine replay diverged at frame {frame}");
+        }
+    }
+
+    #[test]
+    fn quantized_operations_keep_reference_and_sparse_storage_in_lockstep() {
+        let (scenario, mut world) = room();
         let mut reference = ReferenceWorld::new();
         let mut sparse = SparseWorld::new();
         assert_eq!(reference.replay(scenario.setup()), Ok(()));
         assert_eq!(sparse.replay(scenario.setup()), Ok(()));
-
-        for frame in 0..24 {
-            assert_eq!(
-                sparse.snapshot(),
-                reference.snapshot(),
-                "3D storage snapshots diverged before frame {frame}"
-            );
-            let physics = scenario
-                .step(&reference.snapshot())
-                .expect("3D room step should succeed");
-            for operation in physics.operations() {
+        for frame in 0..60 {
+            let step = world.advance().expect("room step");
+            for operation in step.operations() {
                 assert_eq!(reference.apply(*operation), Ok(()));
                 assert_eq!(sparse.apply(*operation), Ok(()));
             }
+            assert_eq!(sparse.snapshot(), reference.snapshot(), "frame {frame}");
+            for rigid_box in step.boxes() {
+                let entity = reference
+                    .snapshot()
+                    .entities()
+                    .iter()
+                    .find(|entity| entity.id == rigid_box.body.entity)
+                    .copied()
+                    .expect("room entity");
+                assert_eq!(entity.position, Some(rigid_box.state.center));
+                if rigid_box.body.kind == BodyKind::Dynamic {
+                    assert_eq!(entity.velocity, Some(rigid_box.state.linear_velocity));
+                }
+            }
         }
-    }
-
-    #[test]
-    fn broad_phase_frame_is_repeatable_and_three_dimensional() {
-        let scenario = BouncingRoom3dScenario::new();
-        let first = scenario
-            .broad_phase_frame_after(6)
-            .expect("3D broad phase should succeed");
-        let second = scenario
-            .broad_phase_frame_after(6)
-            .expect("repeated 3D broad phase should succeed");
-        assert_eq!(first, second);
-        assert_eq!(first.bodies().len(), ROOM_DYNAMIC_COUNT as usize + 6);
-        assert!(first.bodies()[0].position.z != 0);
     }
 }

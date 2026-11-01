@@ -24,7 +24,7 @@ Measure how different ECS storage strategies behave under identical deterministi
 
 **Collision-kernel boundary** — Reusable collision decisions live in pinned `rust-kernels` crates. ECS Lab owns ECS-facing scheduling/integration/response experiments and does not depend on the Collision Lab application.
 
-**Rotating-engine boundary** — Playground and tower frames use the pinned `physics-engine` legacy rotating-box API. Integer ECS exports do not imply exact engine arithmetic. `PersistentPhysicsWorld3d` owns retained physics across frames. ECS metadata and converted rewind views do not replay pose/velocity into physics. Explicit lifecycle and mutation commands are documented in `docs/experiments/persistent-physics.md`.
+**Rapier boundary** — Rapier (`rapier3d`, f32, default features) is the 3D rigid-body authority. `RapierWorld3d` owns the persistent Rapier world and quantizes it each frame into integer `RigidBox3d` views and ECS operations; the integer view never feeds back into Rapier. Evidence is tolerance-based physical quality plus same-machine replay, not cross-platform bit-exactness. See `docs/experiments/physics.md`.
 
 **Compute evidence** — Optional accelerated work whose output is compared with canonical CPU evidence before timing or performance claims are accepted.
 

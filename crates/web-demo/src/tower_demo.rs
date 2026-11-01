@@ -2,9 +2,8 @@ use std::sync::{Mutex, OnceLock};
 
 use ecs_physics::PhysicsMaterial;
 use ecs_physics_3d::{
-    AngularState3d, AngularSubstepPolicy3d, AngularVelocity3d, Orientation3d,
-    PersistentPhysicsWorld3d, PhysicsBody3d, RigidBox3d, RigidBoxState3d, RigidBoxWorldConfig3d,
-    RotatingContactSearchConfig3d, oriented_box_vertices,
+    AngularState3d, AngularVelocity3d, Orientation3d, PhysicsBody3d, RapierWorld3d,
+    RapierWorldConfig3d, RigidBox3d, RigidBoxState3d, oriented_box_vertices,
 };
 use ecs_workload::{EntityId, Position, Velocity};
 
@@ -21,21 +20,21 @@ const FLOOR_INDEX: usize = 0;
 const PROJECTILE_INDEX: usize = 1;
 const FIRST_BLOCK_INDEX: usize = 2;
 const TOWER_BODY_COUNT: usize = FIRST_BLOCK_INDEX + TOWER_BLOCK_COUNT;
-const TOWER_CONTACT_SEARCH: RotatingContactSearchConfig3d = RotatingContactSearchConfig3d {
-    coarse_samples: 8,
-    refinement_steps: 4,
-};
+/// Rapier angular damping coefficient (1/s): about 0.4 % angular speed loss per 60 Hz frame.
+const TOWER_ANGULAR_DAMPING: f32 = 0.24;
+const TOWER_SOLVER_ITERATIONS: u8 = 10;
+/// A body counts as spinning above this angular speed (rad/s); smaller values are solver noise.
+const SPINNING_THRESHOLD: f64 = 0.05;
 
 static TOWER_DEMO_STATE: OnceLock<Mutex<Option<TowerDemoState>>> = OnceLock::new();
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 struct TowerFrameStats {
     spinning_bodies: usize,
-    sampled_events: usize,
-    tail_contacts: usize,
+    contact_pairs: usize,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct TowerFrame {
     #[cfg(test)]
     boxes: Vec<RigidBox3d>,
@@ -44,28 +43,23 @@ struct TowerFrame {
 }
 
 struct TowerDemoState {
-    physics: PersistentPhysicsWorld3d,
+    physics: RapierWorld3d,
     frames: Vec<TowerFrame>,
 }
 
 impl TowerDemoState {
     fn new() -> Option<Self> {
         let boxes = initial_boxes()?;
-        let config = RigidBoxWorldConfig3d {
+        let config = RapierWorldConfig3d {
+            spatial_scale: TOWER_SCALE,
             gravity: Velocity::new3(0, -10 * TOWER_EXTENT_SCALE, 0),
-            timestep_numerator: 1,
-            timestep_denominator: i32::try_from(TOWER_DEMO_FPS).ok()?,
-            angular_damping_milli: 996,
-            solver_passes: 10,
+            hz: TOWER_DEMO_FPS,
+            angular_damping: TOWER_ANGULAR_DAMPING,
+            solver_iterations: TOWER_SOLVER_ITERATIONS,
+            lock_rotations: false,
         };
-        let physics = PersistentPhysicsWorld3d::new(
-            &boxes,
-            config,
-            TOWER_CONTACT_SEARCH,
-            AngularSubstepPolicy3d::default(),
-        )
-        .ok()?;
-        let initial = capture_frame(boxes, TowerFrameStats::default())?;
+        let physics = RapierWorld3d::new(&boxes, config).ok()?;
+        let initial = capture_frame(physics.boxes().to_vec(), 0);
         Some(Self {
             physics,
             frames: vec![initial],
@@ -83,21 +77,14 @@ impl TowerDemoState {
                 .advance()
                 .inspect_err(|error| {
                     eprintln!(
-                        "tower physics failed while constructing frame {}: {error:?}",
+                        "tower physics failed while constructing frame {}: {error}",
                         self.frames.len()
                     );
                 })
                 .ok()?;
-            let stats = TowerFrameStats {
-                spinning_bodies: next
-                    .boxes
-                    .iter()
-                    .filter(|rigid_box| !rigid_box.state.angular.angular_velocity.is_zero())
-                    .count(),
-                sampled_events: next.sampled_events,
-                tail_contacts: next.tail_contacts,
-            };
-            self.frames.push(capture_frame(next.boxes, stats)?);
+            let contact_pairs = next.contact_pairs();
+            self.frames
+                .push(capture_frame(next.into_boxes(), contact_pairs));
         }
         self.frames.get(target)
     }
@@ -124,7 +111,7 @@ fn initial_boxes() -> Option<Vec<RigidBox3d>> {
                     RigidBoxState3d::new(
                         Position::new3(layer_x, row_y, column_z),
                         Velocity::new3(0, 0, 0),
-                        AngularState3d::new(Orientation3d::IDENTITY, AngularVelocity3d::default()),
+                        AngularState3d::default(),
                     ),
                 ));
                 entity = entity.checked_add(1)?;
@@ -138,17 +125,18 @@ fn floor_body() -> RigidBox3d {
     RigidBox3d::new(
         PhysicsBody3d::fixed(
             EntityId(u32::try_from(FLOOR_INDEX).unwrap_or_default()),
+            // Wide enough that no debris leaves the floor over the eight-second scene.
             [
-                30 * TOWER_EXTENT_SCALE,
+                60 * TOWER_EXTENT_SCALE,
                 TOWER_EXTENT_SCALE,
-                12 * TOWER_EXTENT_SCALE,
+                30 * TOWER_EXTENT_SCALE,
             ],
         )
         .with_material(PhysicsMaterial::new(50, 850)),
         RigidBoxState3d::new(
             Position::new3(0, -TOWER_SCALE, 0),
             Velocity::new3(0, 0, 0),
-            AngularState3d::new(Orientation3d::IDENTITY, AngularVelocity3d::default()),
+            AngularState3d::default(),
         ),
     )
 }
@@ -172,7 +160,16 @@ fn projectile_body() -> RigidBox3d {
     )
 }
 
-fn capture_frame(boxes: Vec<RigidBox3d>, stats: TowerFrameStats) -> Option<TowerFrame> {
+fn is_spinning(rigid_box: &RigidBox3d) -> bool {
+    rigid_box
+        .state
+        .angular
+        .angular_velocity
+        .radians_per_second()
+        > SPINNING_THRESHOLD
+}
+
+fn capture_frame(boxes: Vec<RigidBox3d>, contact_pairs: usize) -> TowerFrame {
     let vertices = boxes
         .iter()
         .map(|rigid_box| {
@@ -181,15 +178,21 @@ fn capture_frame(boxes: Vec<RigidBox3d>, stats: TowerFrameStats) -> Option<Tower
                 rigid_box.body.half_extents,
                 rigid_box.state.angular.orientation,
             )
-            .ok()
         })
-        .collect::<Option<Vec<_>>>()?;
-    Some(TowerFrame {
+        .collect();
+    let stats = TowerFrameStats {
+        spinning_bodies: boxes
+            .iter()
+            .filter(|rigid_box| is_spinning(rigid_box))
+            .count(),
+        contact_pairs,
+    };
+    TowerFrame {
         #[cfg(test)]
         boxes,
         vertices,
         stats,
-    })
+    }
 }
 
 fn tower_demo_state() -> &'static Mutex<Option<TowerDemoState>> {
@@ -220,7 +223,7 @@ fn display_coordinate(value: i64) -> f32 {
     value as f32 / TOWER_SCALE as f32
 }
 
-/// Recreates the engine and its observable rewind cache from the scenario's initial state.
+/// Recreates the Rapier world and its rewind cache from the scenario's initial state.
 #[unsafe(no_mangle)]
 pub extern "C" fn physics_tower_demo_reset() -> u32 {
     let Some(replacement) = TowerDemoState::new() else {
@@ -233,7 +236,7 @@ pub extern "C" fn physics_tower_demo_reset() -> u32 {
     1
 }
 
-/// Drops the engine and cached views. The next frame read creates a fresh scenario.
+/// Drops the Rapier world and cached views. The next frame read creates a fresh scenario.
 #[unsafe(no_mangle)]
 pub extern "C" fn physics_tower_demo_dispose() -> u32 {
     let Ok(mut state) = tower_demo_state().lock() else {
@@ -297,92 +300,104 @@ pub extern "C" fn physics_tower_demo_spinning_bodies(steps: u32) -> u32 {
     .unwrap_or_default()
 }
 
+/// Collider pairs in active contact after the frame's Rapier step.
 #[unsafe(no_mangle)]
-pub extern "C" fn physics_tower_demo_sampled_events(steps: u32) -> u32 {
-    with_frame(steps, |frame| {
-        u32::try_from(frame.stats.sampled_events).ok()
-    })
-    .unwrap_or_default()
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn physics_tower_demo_tail_contacts(steps: u32) -> u32 {
-    with_frame(steps, |frame| u32::try_from(frame.stats.tail_contacts).ok()).unwrap_or_default()
+pub extern "C" fn physics_tower_demo_contact_pairs(steps: u32) -> u32 {
+    with_frame(steps, |frame| u32::try_from(frame.stats.contact_pairs).ok()).unwrap_or_default()
 }
 
 #[cfg(test)]
 mod tests {
-    use ecs_physics_3d::physics_engine_boxes_penetrate;
-
     use super::*;
 
-    fn assert_no_floor_penetration(frame: &TowerFrame, step: u32) {
-        let floor = frame.boxes[FLOOR_INDEX];
-        for (body_index, rigid_box) in frame.boxes.iter().enumerate().skip(PROJECTILE_INDEX) {
-            let penetrates = physics_engine_boxes_penetrate(floor, *rigid_box)
-                .expect("physics-engine floor/body geometry should remain valid");
+    /// Allowed overlap between two colliders in any frame, in metres. Rapier's soft contacts let
+    /// the 24 m/s projectile impact overlap transiently (about 0.42 m) and push it out over a few
+    /// frames; this stays below the smallest block half extent (0.75 m), so nothing tunnels.
+    const IMPACT_PENETRATION_TOLERANCE: f32 = 0.5;
+    /// Allowed sinking of any corner below the floor plane in any frame, in metres: falling debris
+    /// landing on a corner overlaps the floor transiently (about 0.13 m), well under a block's
+    /// 0.75 m half height.
+    const FLOOR_TOLERANCE: f32 = 0.2;
+    /// Allowed overlap once the debris has come to rest, in metres.
+    const RESTING_PENETRATION_TOLERANCE: f32 = 0.01;
+    /// Allowed tilt of a resting block before the projectile arrives, in radians.
+    const PREIMPACT_TILT_TOLERANCE: f64 = 0.01;
+
+    fn max_penetration(state: &TowerDemoState) -> f32 {
+        (PROJECTILE_INDEX..TOWER_BODY_COUNT)
+            .map(|index| state.physics.penetration_of(index))
+            .fold(0.0, f32::max)
+    }
+
+    fn assert_physical_quality(state: &TowerDemoState, frame: &TowerFrame, step: u32) {
+        let penetration = max_penetration(state);
+        assert!(
+            penetration < IMPACT_PENETRATION_TOLERANCE,
+            "colliders overlap by {penetration} m at frame {step}"
+        );
+        for (index, rigid_box) in frame.boxes.iter().enumerate().skip(PROJECTILE_INDEX) {
+            let lowest = frame.vertices[index]
+                .iter()
+                .map(|corner| display_coordinate(corner.y))
+                .fold(f32::INFINITY, f32::min);
             assert!(
-                !penetrates,
-                "body {body_index} / entity {} penetrated the finite floor collider at frame {step}",
+                lowest > -FLOOR_TOLERANCE,
+                "body {index} / entity {} sank below the floor ({lowest} m) at frame {step}",
                 rigid_box.body.entity.0
             );
         }
     }
 
-    #[test]
-    fn tower_fast_slice_preserves_preimpact_floor_and_impact_behavior() {
+    /// Builds frames `0..=steps`, checking each one right after its Rapier step.
+    fn run(steps: u32, mut each: impl FnMut(&TowerDemoState, &TowerFrame, u32)) -> TowerDemoState {
         let mut state = TowerDemoState::new().expect("valid tower fixture");
+        for step in 0..=steps {
+            state.ensure_frame(step).expect("valid tower frame");
+            let frame = &state.frames[usize::try_from(step).expect("step index")];
+            each(&state, frame, step);
+        }
+        state
+    }
+
+    fn spinning_blocks(frame: &TowerFrame) -> usize {
+        frame.boxes[FIRST_BLOCK_INDEX..]
+            .iter()
+            .filter(|rigid_box| is_spinning(rigid_box))
+            .count()
+    }
+
+    #[test]
+    fn tower_fast_slice_stands_until_impact_then_breaks() {
         let mut maximum_spinning_blocks = 0_usize;
         let mut projectile_passed_front_face = false;
-
-        for step in 0..=60 {
-            let frame = state.ensure_frame(step).expect("valid tower frame");
+        run(90, |state, frame, step| {
             if step <= 30 {
                 for rigid_box in &frame.boxes[FIRST_BLOCK_INDEX..] {
-                    assert_eq!(
-                        rigid_box.state.angular.angular_velocity,
-                        AngularVelocity3d::default(),
-                        "tower block {} started spinning before impact at frame {step}",
-                        rigid_box.body.entity.0
-                    );
-                    assert_eq!(
-                        rigid_box.state.angular.orientation,
-                        Orientation3d::IDENTITY,
-                        "tower block {} rotated before impact at frame {step}",
+                    let tilt = rigid_box.state.angular.orientation.angle();
+                    assert!(
+                        tilt < PREIMPACT_TILT_TOLERANCE && !is_spinning(rigid_box),
+                        "tower block {} moved before impact at frame {step}: tilt {tilt}",
                         rigid_box.body.entity.0
                     );
                 }
             }
-
-            let spinning_blocks = frame.boxes[FIRST_BLOCK_INDEX..]
-                .iter()
-                .filter(|rigid_box| !rigid_box.state.angular.angular_velocity.is_zero())
-                .count();
-            maximum_spinning_blocks = maximum_spinning_blocks.max(spinning_blocks);
+            maximum_spinning_blocks = maximum_spinning_blocks.max(spinning_blocks(frame));
             projectile_passed_front_face |=
                 frame.boxes[PROJECTILE_INDEX].state.center.x > TOWER_SCALE;
-            assert_no_floor_penetration(frame, step);
-        }
-
+            assert_physical_quality(state, frame, step);
+        });
         assert!(projectile_passed_front_face);
-        assert!(maximum_spinning_blocks >= 4);
+        assert!(maximum_spinning_blocks >= 4, "{maximum_spinning_blocks}");
     }
 
     #[test]
-    #[ignore = "long deterministic tower acceptance runs in Runtime evidence and Moonlight"]
+    #[ignore = "long tower acceptance runs in Runtime evidence and Moonlight"]
     fn tower_long_horizon_regression() {
-        let mut state = TowerDemoState::new().expect("valid tower fixture");
         let mut maximum_spinning_blocks = 0_usize;
         let mut projectile_passed_front_face = false;
-
-        for step in 0..=TOWER_DEMO_MAX_STEPS {
-            let frame = state.ensure_frame(step).expect("valid tower frame");
+        let first = run(TOWER_DEMO_MAX_STEPS, |state, frame, step| {
             if step <= 180 {
-                let spinning_blocks = frame.boxes[FIRST_BLOCK_INDEX..]
-                    .iter()
-                    .filter(|rigid_box| !rigid_box.state.angular.angular_velocity.is_zero())
-                    .count();
-                maximum_spinning_blocks = maximum_spinning_blocks.max(spinning_blocks);
+                maximum_spinning_blocks = maximum_spinning_blocks.max(spinning_blocks(frame));
                 projectile_passed_front_face |=
                     frame.boxes[PROJECTILE_INDEX].state.center.x > TOWER_SCALE;
             }
@@ -391,39 +406,26 @@ mod tests {
                 "tower",
                 step,
                 &frame.boxes,
-                Some(frame.stats.sampled_events),
-                Some(frame.stats.tail_contacts),
+                Some(frame.stats.contact_pairs),
             );
             crate::physics_trace::record_vertices(step, &frame.vertices);
-            assert_no_floor_penetration(frame, step);
-        }
-
+            assert_physical_quality(state, frame, step);
+        });
         assert!(projectile_passed_front_face);
-        assert!(maximum_spinning_blocks >= 4);
-        let work = state.physics.work();
-        assert_eq!(work.world_constructions, 1);
-        assert_eq!(work.insertions, 32);
-        assert_eq!(work.input_conversions, 32);
-        assert_eq!(work.angular_scan_visits, 32 * 480);
-        assert_eq!(work.output_conversions, 32 * 480);
-        assert_eq!(work.descriptor_commands, 0);
-        assert_eq!(work.motion_commands, 0);
-        let before_rewind = work;
-        state.ensure_frame(1).expect("cached rewind view");
-        assert_eq!(state.physics.work(), before_rewind);
-        let cache_payload = state.frames.capacity() * std::mem::size_of::<super::TowerFrame>()
-            + state
-                .frames
-                .iter()
-                .map(|frame| {
-                    frame.boxes.capacity() * std::mem::size_of::<ecs_physics_3d::RigidBox3d>()
-                        + frame.vertices.capacity()
-                            * std::mem::size_of::<[ecs_workload::Position; 8]>()
-                })
-                .sum::<usize>();
-        println!("PERSISTENT_WORK tower {work:?}");
-        println!("PERSISTENT_RETAINED tower {:?}", state.physics.retained());
-        println!("CACHE_PAYLOAD_BYTES tower {cache_payload}");
+        assert!(maximum_spinning_blocks >= 4, "{maximum_spinning_blocks}");
+
+        // The debris comes to rest by the end of the scene.
+        let last = first.frames.last().expect("final tower frame");
+        assert_eq!(last.stats.spinning_bodies, 0);
+        let resting = max_penetration(&first);
+        assert!(
+            resting < RESTING_PENETRATION_TOLERANCE,
+            "resting overlap {resting} m"
+        );
+
+        // Same-machine replay: a fresh world reproduces every quantized frame exactly.
+        let second = run(TOWER_DEMO_MAX_STEPS, |_, _, _| {});
+        assert!(first.frames == second.frames, "tower replay diverged");
     }
 
     #[test]
