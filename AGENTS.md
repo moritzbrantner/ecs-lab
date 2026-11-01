@@ -9,6 +9,7 @@
 - Do not turn this repository into a general-purpose ECS framework.
 - Do not add rendering, windowing, game-engine, or UI dependencies unless a later task explicitly establishes that boundary.
 - Cross-repository dependencies require an explicit reusable-kernel boundary and an immutable revision pin. Prefer the owning low-level crate; do not depend on application/lab repositories merely to reuse their transitive implementation.
+- Rapier (`rapier3d`, exact `=` version pin, default features, matching ARPG) is the approved 3D rigid-body authority; `ecs-physics-3d` quantizes its state into integer ECS components (#144).
 - The approved physics boundary reuses `geometry-kernels` / `spatial-kernels` from `rust-kernels`; `collision-lab` remains an independent consumer and visualization/teaching repository.
 - Shared workloads and observable snapshots are the primary comparison seam. Do not force implementations through a common trait when doing so would distort the implementation being measured.
 - A candidate optimization must prove parity with the reference model before benchmark results are treated as meaningful.

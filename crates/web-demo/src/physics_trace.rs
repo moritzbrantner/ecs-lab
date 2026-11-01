@@ -4,13 +4,7 @@ use ecs_physics_3d::RigidBox3d;
 
 /// Rows: entity, fixed flag, half extents XYZ, mass, restitution, friction, center XYZ,
 /// linear velocity XYZ, quaternion XYZW, angular velocity XYZ.
-pub(crate) fn record(
-    scene: &str,
-    step: u32,
-    boxes: &[RigidBox3d],
-    sampled_events: Option<usize>,
-    tail_contacts: Option<usize>,
-) {
+pub(crate) fn record(scene: &str, step: u32, boxes: &[RigidBox3d], contact_pairs: Option<usize>) {
     let rows = boxes
         .iter()
         .map(|rigid_box| {
@@ -43,12 +37,10 @@ pub(crate) fn record(
             ]
         })
         .collect::<Vec<_>>();
-    // Playground frames do not retain step reports; unobserved work is distinct from zero.
-    let sampled_events =
-        sampled_events.map_or_else(|| "null".to_owned(), |count| count.to_string());
-    let tail_contacts = tail_contacts.map_or_else(|| "null".to_owned(), |count| count.to_string());
+    // Unobserved contact counts are distinct from zero.
+    let contact_pairs = contact_pairs.map_or_else(|| "null".to_owned(), |count| count.to_string());
     println!(
-        "PHYSICAL_TRACE {{\"scene\":\"{scene}\",\"step\":{step},\"sampled_events\":{sampled_events},\"tail_contacts\":{tail_contacts},\"boxes\":{rows:?}}}"
+        "PHYSICAL_TRACE {{\"scene\":\"{scene}\",\"step\":{step},\"contact_pairs\":{contact_pairs},\"boxes\":{rows:?}}}"
     );
 }
 

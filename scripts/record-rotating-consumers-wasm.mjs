@@ -52,8 +52,7 @@ for (let step = 0; step <= 480; step++) {
   rows.push({
     scene: "tower", step, vertices,
     spinning: physics.physics_tower_demo_spinning_bodies(step),
-    sampled_events: physics.physics_tower_demo_sampled_events(step),
-    tail_contacts: physics.physics_tower_demo_tail_contacts(step),
+    contact_pairs: physics.physics_tower_demo_contact_pairs(step),
   });
 }
 // Lifetime commands drop both physics and rewind views. Each scene remains independent.

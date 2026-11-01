@@ -114,8 +114,7 @@ function readFrame(step) {
     step,
     bodies,
     spinningBodies: wasm.physics_tower_demo_spinning_bodies(step),
-    sampledEvents: wasm.physics_tower_demo_sampled_events(step),
-    tailContacts: wasm.physics_tower_demo_tail_contacts(step),
+    contactPairs: wasm.physics_tower_demo_contact_pairs(step),
   };
 }
 
@@ -488,10 +487,8 @@ function projectileCenter(frame) {
 
 function updateStatus(frame) {
   const projectile = projectileCenter(frame);
-  const evidence = frame.sampledEvents > 0
-    ? `${frame.sampledEvents} sampled physics-engine ${frame.sampledEvents === 1 ? "event frontier" : "event frontiers"}`
-    : `${frame.tailContacts} persistent tail contacts`;
-  status.textContent = `Rust frame ${frame.step}/60 s · ball x ${projectile[0].toFixed(1)}, y ${projectile[1].toFixed(1)} · ${frame.spinningBodies} dynamic bodies spinning · ${evidence}. physics-engine owns rotating-world collision search and response; ECS Lab exports the resulting state and renders the projectile as a sphere from its proxy-box center and radius.`;
+  const evidence = `${frame.contactPairs} contact ${frame.contactPairs === 1 ? "pair" : "pairs"}`;
+  status.textContent = `Rust frame ${frame.step}/60 s · ball x ${projectile[0].toFixed(1)}, y ${projectile[1].toFixed(1)} · ${frame.spinningBodies} dynamic bodies spinning · ${evidence}. Rapier owns collision detection and response; ECS Lab quantizes the resulting state into integer components and renders the projectile as a sphere from its proxy-box center and radius.`;
 }
 
 function setFrame(step) {
@@ -556,8 +553,7 @@ async function loadPhysicsWasm() {
     "physics_tower_demo_vertex_y",
     "physics_tower_demo_vertex_z",
     "physics_tower_demo_spinning_bodies",
-    "physics_tower_demo_sampled_events",
-    "physics_tower_demo_tail_contacts",
+    "physics_tower_demo_contact_pairs",
   ];
   for (const name of required) {
     if (typeof instance.exports[name] !== "function") {

@@ -14,11 +14,7 @@ The tower-destruction scene now has an explicit renderer experiment rather than 
 
 The trebuchet projectile is presented as a shaded sphere. Its center and radius are derived from the Rust-owned projectile frame vertices, so browser code does not invent a trajectory or scale.
 
-The current tower world solver is still `RigidBox3d`-only. The sphere is therefore a presentation shape over the existing equal-extents OBB collision proxy. Do not describe the tower as using sphere <-> OBB collision response yet.
-
-`ecs-physics-3d` now has a reusable deterministic fixed-point `sphere_obb_contact` geometry query. It provides the closest oriented-box surface point, a stable world-space contact direction, squared-distance evidence, and deterministic nearest-face selection for an interior sphere center. That is deliberately only the first mixed-shape slice: it does not apply impulses, stabilize penetration, integrate a rigid sphere, or provide continuous sphere <-> OBB collision handling.
-
-The next tower physics slice is therefore mixed-shape normal response/stabilization, followed by replacing the equal-extents projectile proxy with a solver-owned rigid sphere. See `tower-physics-roadmap.md` for the bounded sequence.
+The tower's Rapier world still uses box colliders only. The sphere is therefore a presentation shape over an equal-extents box collision proxy; do not describe the tower as using sphere collision response.
 
 ## Camera
 

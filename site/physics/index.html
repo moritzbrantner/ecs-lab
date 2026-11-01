@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="Run ECS Lab's deterministic three-dimensional Rust physics at a true 60 Hz solver rate with swept AABB collision detection, oriented rigid-box angular motion, a trebuchet tower-destruction scene, WebGPU rendering, and exact browser inspection."
+      content="Run ECS Lab's three-dimensional Rapier rigid-body physics at a true 60 Hz step rate, quantized every frame into integer ECS components, with a trebuchet tower-destruction scene, WebGPU rendering, and exact browser inspection."
     />
     <title>ECS Lab — 3D physics demo</title>
     <link rel="stylesheet" href="../styles.css" />
@@ -20,13 +20,11 @@
         <h1>3D physics demo</h1>
         <p class="lede">
           Forty-eight dynamic bodies move on all three axes inside a fixed floor, ceiling, side, front,
-          and back room. Rust advances the authoritative simulation at 60 fixed solver steps per second,
-          sweeps fixed and moving AABB pairs through X/Y/Z/time inside every 1/60-second frame, collects
-          every pair and tied axis at the earliest exact impact time, and resolves that contact set
-          deterministically before the next frame. Separate oriented-box fixtures now demonstrate
-          Rust-owned angular motion: first a single tumbling die, then a heavy trebuchet projectile
-          crashing through a stacked masonry tower whose ordinary blocks acquire spin from box-to-box
-          impacts and secondary collisions.
+          and back room. Rapier, the rigid-body authority, advances the simulation at 60 fixed steps per
+          second, and every frame is quantized into the lab's integer ECS position, velocity, orientation,
+          and spin components. Separate oriented-box fixtures show a single tumbling die and a heavy
+          trebuchet projectile crashing through a stacked masonry tower whose blocks acquire spin from
+          box-to-box impacts and secondary collisions.
         </p>
         <nav class="actions" aria-label="Project links">
           <a class="button primary" href="#physics-playground">Open the 3D room</a>
@@ -43,12 +41,11 @@
           <p class="eyebrow">Dense canonical 3D material scenario</p>
           <h2 id="physics-title">Forty-eight bodies collide through a Rust-owned 60 Hz world</h2>
           <p>
-            The scene is a deterministic stress fixture rather than three showcase cubes. Bodies start
-            across twelve spatial cells with varied sizes, masses, restitution, friction, and X/Y/Z
-            velocity. Six fixed slabs close the room. The fixed-point room uses enough integer spatial
-            precision for every visible frame to be a real Rust physics step at 60 Hz; there is no browser
-            interpolation standing in for missing solver states. Relative-motion swept AABB tests put
-            body-body and body-wall impacts on the same continuous timeline within each frame.
+            The scene is a stress fixture rather than three showcase cubes. Bodies start across twelve
+            spatial cells with varied sizes, masses, restitution, friction, spin, and X/Y/Z velocity. Six
+            fixed slabs close the room. Every visible frame is a real Rapier step at 60 Hz, quantized to
+            integer components; there is no browser interpolation standing in for missing solver states.
+            The same build replays identically on the same machine.
           </p>
         </div>
 
@@ -101,7 +98,7 @@
           </div>
 
           <p class="scenario-legend">
-            60 Hz Rust solver · 48 dynamic bodies · gravity −Y · unified swept AABB CCD · simultaneous contact sets · true X/Y/Z velocity · six fixed room slabs · varied mass,
+            60 Hz Rapier steps · 48 dynamic bodies · gravity −Y · CCD · oriented box contacts · true X/Y/Z velocity · six fixed room slabs · varied mass,
             restitution, friction, and box footprint
           </p>
 
@@ -120,7 +117,7 @@
 
         <div class="evidence physics-evidence" aria-live="polite">
           <p class="runtime-status" id="runtime-status">Loading Rust WebAssembly module…</p>
-          <p class="runtime-status" id="collision-status">Waiting for the deterministic 3D physics frame…</p>
+          <p class="runtime-status" id="collision-status">Waiting for the 3D physics frame…</p>
           <p class="runtime-status" id="webgpu-status">Checking browser WebGPU support…</p>
         </div>
       </section>
@@ -162,7 +159,7 @@
             Loading the Rust-owned tower, projectile, and oriented collision vertices…
           </p>
           <p class="scenario-legend">
-            30 initially non-spinning blocks · two-layer tower · ballistic projectile · OBB SAT narrow phase · contact-point angular impulses · fixed-boundary-last stabilization · exact Rust vertices
+            30 initially resting blocks · two-layer tower · ballistic projectile · Rapier contacts and CCD · quantized integer vertices
           </p>
         </div>
       </section>
@@ -219,7 +216,7 @@
           </p>
         </div>
         <p class="material-lab-status" id="material-lab-status" aria-live="polite">
-          Loading deterministic material-response traces…
+          Loading material-response traces…
         </p>
         <div class="material-traces" id="material-traces"></div>
       </section>
@@ -229,11 +226,10 @@
           <p class="eyebrow">Ownership boundary</p>
           <h2 id="boundary-title">Every displayed frame is a Rust physics state</h2>
           <p>
-            Rust owns the 60 Hz fixed-step progression, relative-motion swept pair tests, exact fractional
-            TOI comparison inside the dense room, global earliest contact-set collection, bounded coupled
-            response, deterministic fixed-point quantization, quaternion orientation integration, OBB SAT
-            narrow phase, contact-point angular impulses, and the tower/dice oriented collision geometry.
-            The Wasm adapter normalizes coordinates only for display. Mouse input changes the room camera;
+            Rapier owns the 60 Hz fixed-step progression, collision detection, CCD, contact response, and
+            orientation integration. ECS Lab owns the scenarios, the per-frame quantization into integer
+            components, and the tower/dice vertices derived from them. The Wasm adapter normalizes
+            coordinates only for display. Mouse input changes the room camera;
             playback and manual frame selection never integrate velocity, resolve contacts, rotate collision
             geometry, or invent intermediate physics states.
           </p>
