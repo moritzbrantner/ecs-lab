@@ -9,7 +9,7 @@ use geometry_kernels::aabb_aabb;
 use spatial_kernels::Aabb;
 
 use crate::{
-    solver::{axis_fits_exact_f32, exact_i64_to_f32},
+    continuous_solver::axis_fits_exact_f32,
     step_3d,
     types::{PhysicsBody3d, PhysicsConfig3d, PhysicsError3d, PhysicsStep3d},
 };
@@ -189,6 +189,11 @@ fn body_aabb(body: PhysicsBody3d, position: Position) -> Result<Aabb, ScenarioEr
             exact_i64_to_f32(half[2]),
         ],
     ))
+}
+
+#[allow(clippy::cast_precision_loss)]
+fn exact_i64_to_f32(value: i64) -> f32 {
+    value as f32
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
