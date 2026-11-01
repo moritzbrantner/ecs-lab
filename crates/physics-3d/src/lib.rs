@@ -14,8 +14,6 @@ mod persistent_physics_tests;
 mod physics_engine_adapter;
 mod rigid_box;
 mod scenario;
-#[allow(dead_code)]
-mod solver;
 mod sphere_obb;
 mod sphere_obb_response;
 mod swept_broad_phase;

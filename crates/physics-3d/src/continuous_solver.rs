@@ -4,7 +4,6 @@ use ecs_physics::{BodyKind, MATERIAL_SCALE, PhysicsMaterial};
 use ecs_workload::{EntityId, Operation, Position, Velocity, WorldSnapshot};
 
 use crate::{
-    solver::axis_fits_exact_f32,
     swept_broad_phase::{SweptBroadPhaseBody, swept_candidate_pairs},
     types::{
         ContactNormal3d, PhysicsBody3d, PhysicsConfig3d, PhysicsContact3d, PhysicsError3d,
@@ -12,6 +11,7 @@ use crate::{
     },
 };
 
+const MAX_EXACT_F32_INTEGER: i64 = 16_777_216;
 const SUBTICK_SCALE: i128 = 1_i128 << 32;
 const CCD_EVENTS_PER_BODY: usize = 64;
 const MAX_CONTACT_SET_PASSES: usize = 16;
@@ -1205,6 +1205,14 @@ fn changed_operations(states: &[BodyState]) -> Result<Vec<Operation>, PhysicsErr
         }
     }
     Ok(operations)
+}
+
+/// Whether a box centred at `position` with `half_extent` keeps every edge
+/// inside the range of integers `f32` represents exactly.
+pub(crate) fn axis_fits_exact_f32(position: i64, half_extent: i64) -> bool {
+    (0..=MAX_EXACT_F32_INTEGER).contains(&half_extent)
+        && ((-MAX_EXACT_F32_INTEGER + half_extent)..=(MAX_EXACT_F32_INTEGER - half_extent))
+            .contains(&position)
 }
 
 fn arithmetic_error(states: &[BodyState]) -> PhysicsError3d {
