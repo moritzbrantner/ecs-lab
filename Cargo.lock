@@ -234,7 +234,7 @@ checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 [[package]]
 name = "geometry-kernels"
 version = "0.1.0"
-source = "git+https://github.com/moritzbrantner/rust-kernels?rev=9ca4484ccd406e5ae5c02acd783b3eb9b3ba6903#9ca4484ccd406e5ae5c02acd783b3eb9b3ba6903"
+source = "git+https://github.com/moritzbrantner/rust-kernels?rev=91055975ba1a1c9f793f611a0541da83ccbfff32#91055975ba1a1c9f793f611a0541da83ccbfff32"
 dependencies = [
  "spatial-kernels",
 ]
@@ -629,7 +629,7 @@ dependencies = [
 [[package]]
 name = "spatial-kernels"
 version = "0.1.0"
-source = "git+https://github.com/moritzbrantner/rust-kernels?rev=9ca4484ccd406e5ae5c02acd783b3eb9b3ba6903#9ca4484ccd406e5ae5c02acd783b3eb9b3ba6903"
+source = "git+https://github.com/moritzbrantner/rust-kernels?rev=91055975ba1a1c9f793f611a0541da83ccbfff32#91055975ba1a1c9f793f611a0541da83ccbfff32"
 
 [[package]]
 name = "stable_deref_trait"
