@@ -11,8 +11,8 @@ description = "Deterministic physics scenarios and broad-phase evidence for ECS 
 ecs-physics = { path = "../physics" }
 ecs-reference = { path = "../reference" }
 ecs-workload = { path = "../workload" }
-geometry-kernels = { git = "https://github.com/moritzbrantner/rust-kernels", rev = "eb73174e157eef58801ee6fe9f7d60e206229adb" }
-spatial-kernels = { git = "https://github.com/moritzbrantner/rust-kernels", rev = "eb73174e157eef58801ee6fe9f7d60e206229adb" }
+geometry-kernels = { git = "https://github.com/moritzbrantner/rust-kernels", rev = "7658927780d8bfb3fe4e1ecbb9a3625f95e82bab" }
+spatial-kernels = { git = "https://github.com/moritzbrantner/rust-kernels", rev = "7658927780d8bfb3fe4e1ecbb9a3625f95e82bab" }
 
 [dev-dependencies]
 ecs-sparse-set = { path = "../sparse-set" }
