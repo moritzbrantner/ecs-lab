@@ -5,7 +5,7 @@ The tower-destruction scene now has an explicit renderer experiment rather than 
 ## Boundary
 
 - `ecs-web-demo` remains the authoritative source of tower frame state and exact oriented-box collision vertices.
-- `experiments/tower-wgpu-renderer` is a standalone WebAssembly adapter pinned to `wgpu 30.0.1` and `wasm-bindgen 0.2.127`.
+- `experiments/tower-wgpu-renderer` is a standalone WebAssembly adapter pinned to `wgpu 30.0.1` and `wasm-bindgen 0.2.130`.
 - JavaScript owns browser input, playback, fallback selection, and transfer of one immutable frame into the renderer.
 - Rust/Wasm owns the WebGPU surface, camera/view-projection matrix, GPU buffers, shaders, depth target, command encoding, and draw submission.
 - The 48-box room already used raw JavaScript WebGPU, so this experiment compares the tower's old Canvas2D projection with a Rust/Wasm `wgpu` path; it is not a Three.js-to-`wgpu` comparison inside this repository.
