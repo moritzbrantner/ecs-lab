@@ -107,8 +107,8 @@ jobs:
       - name: Prepare renderer build tooling
         run: |
           rustup target add wasm32-unknown-unknown
-          if ! command -v wasm-bindgen >/dev/null 2>&1 || ! wasm-bindgen --version | grep -q '0.2.127'; then
-            cargo install wasm-bindgen-cli --version 0.2.127 --locked
+          if ! command -v wasm-bindgen >/dev/null 2>&1 || ! wasm-bindgen --version | grep -q '0.2.130'; then
+            cargo install wasm-bindgen-cli --version 0.2.130 --locked
           fi
 
       - name: Run Moonlight correctness evaluation

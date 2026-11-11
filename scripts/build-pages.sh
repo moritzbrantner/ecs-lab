@@ -8,8 +8,8 @@ node scripts/record-rotating-consumers-wasm.mjs \
   target/wasm32-unknown-unknown/release/ecs_web_demo.wasm \
   target/rotating-consumer-wasm-trace.json
 
-if ! command -v wasm-bindgen >/dev/null 2>&1 || ! wasm-bindgen --version | grep -q '0.2.127'; then
-  cargo install wasm-bindgen-cli --version 0.2.127 --locked
+if ! command -v wasm-bindgen >/dev/null 2>&1 || ! wasm-bindgen --version | grep -q '0.2.130'; then
+  cargo install wasm-bindgen-cli --version 0.2.130 --locked
 fi
 rm -rf target/tower-wgpu-renderer target/tower-wgpu-bindgen
 CARGO_TARGET_DIR=target/tower-wgpu-renderer \
