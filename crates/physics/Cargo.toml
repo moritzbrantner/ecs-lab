@@ -7,8 +7,8 @@ rust-version.workspace = true
 
 [dependencies]
 ecs-workload = { path = "../workload" }
-geometry-kernels = { git = "https://github.com/moritzbrantner/rust-kernels", rev = "b536e4d11e26fc69d43441f94e2817b71a3d860b" }
-spatial-kernels = { git = "https://github.com/moritzbrantner/rust-kernels", rev = "b536e4d11e26fc69d43441f94e2817b71a3d860b" }
+geometry-kernels = { git = "https://github.com/moritzbrantner/rust-kernels", rev = "38dd3f942f3684e183fd5f82d288b127d6dfc624" }
+spatial-kernels = { git = "https://github.com/moritzbrantner/rust-kernels", rev = "38dd3f942f3684e183fd5f82d288b127d6dfc624" }
 
 [dev-dependencies]
 ecs-reference = { path = "../reference" }
